@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Movimientos</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Movimientos">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #1C1E1F;
+    --panel: #26292B;
+    --panel-2: #2F3234;
+    --line: #3A3D3F;
+    --text: #EDECE7;
+    --text-dim: #9A9D9E;
+    --amber: #E8871E;
+    --amber-dim: #7A4A17;
+    --steel: #4C8DAE;
+    --danger: #C24B3F;
+    --ok: #5FA36A;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{ max-width: 520px; margin: 0 auto; padding: 0 0 40px; min-height:100vh; }
+  header{
+    padding: 22px 20px 16px;
+    border-bottom: 1px dashed var(--line);
+    position: sticky; top:0; background: var(--bg); z-index: 10;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.14em; color: var(--amber);
+    text-transform: uppercase; margin-bottom: 6px;
+  }
+  h1{
+    font-family:'Oswald', sans-serif; font-weight: 700; font-size: 24px;
+    margin: 0; text-transform: uppercase;
+  }
+  h2{
+    font-family:'Oswald', sans-serif; font-weight: 600; font-size: 15px;
+    margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text);
+  }
+  main{ padding: 20px; }
+  section{ margin-bottom: 34px; }
+  section:last-child{ margin-bottom: 0; }
+
+  .huerta-badge{
+    display:inline-block; font-family:'IBM Plex Mono', monospace; font-size: 11px;
+    color: var(--steel); background: rgba(76,141,174,0.12); border: 1px solid rgba(76,141,174,0.3);
+    padding: 4px 9px; border-radius: 4px; letter-spacing: 0.03em; margin-top: 4px;
+  }
+
+  .req{ color: var(--amber); }
+  .login-overlay{
+    position:fixed; inset:0; z-index:100;
+    background: var(--bg);
+    display:flex; align-items:center; justify-content:center;
+    padding: 24px;
+  }
+  .login-overlay[hidden]{ display:none; }
+  .login-card{
+    width:100%; max-width: 360px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 26px 22px;
+  }
+  .login-card h2{
+    font-family:'Oswald', sans-serif;
+    font-size: 20px;
+    margin: 0 0 20px;
+    color: var(--text);
+    text-transform: none;
+  }
+  .login-card .field label{
+    display:block; font-family:'IBM Plex Mono', monospace; font-size: 11px;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px;
+  }
+  .login-card .field select, .login-card .field input{
+    width:100%; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    padding: 13px 12px; border-radius: 4px; font-size: 15px; outline:none;
+  }
+  .login-card .field select:focus, .login-card .field input:focus{ border-color: var(--amber); }
+  .login-status{
+    margin-top: 12px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    display:none;
+  }
+  .login-status.show{ display:block; background: rgba(194,75,63,0.12); color: var(--danger); border:1px solid rgba(194,75,63,0.3); }
+  .change-user-link{
+    display:inline-block;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--steel);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .field{ margin-bottom: 14px; }
+  .field label{
+    display:block; font-family:'IBM Plex Mono', monospace; font-size: 10.5px;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px;
+  }
+  .field input, .field select, .field textarea{
+    width:100%; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+    padding: 12px; border-radius: 4px; font-size: 14px; outline:none;
+    font-family:'Inter',sans-serif;
+  }
+  .field textarea{ min-height: 64px; resize: vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus{ border-color: var(--amber); }
+  select option{ background: var(--panel); color: var(--text); }
+
+  .unit-select{ position: relative; }
+  .unit-select.selected input{ border-color: var(--amber); color: var(--amber); font-weight: 600; }
+  .unit-dropdown{
+    display:none;
+    position:absolute;
+    top: calc(100% + 4px);
+    left:0; right:0;
+    max-height: 260px;
+    overflow-y:auto;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    z-index: 20;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .unit-dropdown.open{ display:block; }
+  .unit-option{
+    padding: 11px 12px;
+    font-size: 14px;
+    cursor:pointer;
+    border-bottom: 1px solid var(--line);
+  }
+  .unit-option:last-child{ border-bottom:none; }
+  .unit-option:active, .unit-option.hover{ background: var(--panel); }
+  .unit-empty{ padding: 14px 12px; color: var(--text-dim); font-size: 13px; }
+
+  .save-btn{
+    width:100%; padding: 13px 0; background: var(--amber); color: #1C1E1F; border:none;
+    border-radius: 4px; font-family:'Oswald', sans-serif; font-weight: 700; font-size: 14px;
+    text-transform: uppercase; letter-spacing:0.03em; cursor:pointer;
+  }
+  .save-btn:disabled{ opacity:0.5; }
+  .save-status{
+    font-size: 12.5px; margin-top: 10px; display:none; font-family:'IBM Plex Mono', monospace;
+  }
+  .save-status.show{ display:block; }
+  .save-status.ok{ color: var(--ok); }
+  .save-status.err{ color: var(--danger); }
+
+  .mov-card{
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .mov-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px; }
+  .folio{ font-family:'IBM Plex Mono', monospace; font-size: 13px; color: var(--text); font-weight:600; }
+  .mov-meta{ font-size: 12.5px; color: var(--text-dim); line-height:1.5; margin-bottom: 4px; }
+  .mov-unit{ font-size: 14.5px; font-weight:600; margin-bottom: 6px; }
+  .status-pill{
+    font-family:'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing:0.04em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 3px; font-weight:600;
+    background: var(--panel-2); color: var(--text-dim); white-space:nowrap;
+  }
+  .status-pill.confirmado{ background: rgba(95,163,106,0.15); color: var(--ok); }
+  .status-pill.pendiente{ background: rgba(232,135,30,0.15); color: var(--amber); }
+  .mov-comentario{ font-size: 13px; color: var(--text-dim); margin-bottom: 10px; line-height:1.4; }
+  .confirm-btn{
+    width:100%; padding: 10px 0; background: var(--steel); color: #14181A; border:none;
+    border-radius: 4px; font-family:'Oswald', sans-serif; font-weight: 700; font-size: 13px;
+    text-transform: uppercase; letter-spacing:0.03em; cursor:pointer; margin-top: 4px;
+  }
+  .confirm-btn:disabled{ opacity:0.5; }
+
+  .media-actions{ display:flex; gap: 10px; }
+  .media-btn{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;
+    padding: 14px 8px; border: 1.5px dashed var(--line); border-radius: 6px;
+    background: var(--panel); cursor:pointer; color: var(--text-dim); font-size: 12px;
+    text-align:center; transition: border-color .15s ease, color .15s ease;
+  }
+  .media-btn:active{ border-color: var(--amber); color: var(--amber); }
+  .media-btn .icon{ font-size: 22px; }
+  .photo-box{
+    border: 1.5px dashed var(--line); border-radius: 6px; padding: 16px;
+    text-align:center; cursor:pointer; background: var(--panel); position:relative; overflow:hidden;
+  }
+  .photo-box.has-photo{ padding: 0; border-style: solid; }
+  .photo-box img{ width:100%; display:block; max-height:240px; object-fit:cover; }
+  .photo-remove{
+    position:absolute; top:8px; right:8px; background: rgba(28,30,31,0.85); color: var(--text);
+    border:1px solid var(--line); border-radius: 4px; padding: 6px 10px; font-size: 12px;
+    font-family:'IBM Plex Mono',monospace; cursor:pointer;
+  }
+
+  .empty{ text-align:center; padding: 30px 20px; color: var(--text-dim); font-size: 13.5px; }
+  .loading{
+    text-align:center; padding: 30px; color: var(--text-dim);
+    font-family:'IBM Plex Mono', monospace; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="login-overlay" id="login-overlay" hidden>
+  <div class="login-card">
+    <div class="eyebrow">Flota &amp; Mantenimiento</div>
+    <h2>Iniciar sesión</h2>
+    <div class="field">
+      <label>Usuario <span class="req">*</span></label>
+      <select id="login-nombre">
+        <option value="" disabled selected>Selecciona tu nombre</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Contraseña <span class="req">*</span></label>
+      <input type="password" id="login-pass" placeholder="Tu contraseña" autocomplete="off">
+    </div>
+    <button class="save-btn" id="login-btn" style="width:100%;">Entrar</button>
+    <div class="login-status" id="login-status"></div>
+  </div>
+</div>
+
+<div class="app">
+  <div id="view-main" style="display:none;">
+    <header style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div>
+        <div class="eyebrow">Flota &amp; Mantenimiento</div>
+        <h1>Movimientos</h1>
+        <div class="huerta-badge" id="huerta-badge"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+        <button id="btn-refresh" style="background:transparent;border:1px solid var(--line);color:var(--text-dim);padding:8px 12px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;cursor:pointer;white-space:nowrap;">Actualizar</button>
+        <span class="change-user-link" id="btn-change-user">Cambiar usuario</span>
+      </div>
+    </header>
+    <main>
+      <section>
+        <h2>Llegadas pendientes en tu huerta</h2>
+        <div id="pendientes-list"><div class="loading">Cargando...</div></div>
+      </section>
+
+      <section>
+        <h2>Registrar salida de un equipo</h2>
+        <div class="field">
+          <label>Número de unidad <span class="req">*</span></label>
+          <div class="unit-select" id="unit-select">
+            <input type="text" id="f-unidad-search" placeholder="Escribe para buscar la unidad..." autocomplete="off">
+            <div class="unit-dropdown" id="unit-dropdown"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Huerta destino <span class="req">*</span></label>
+          <select id="f-huerta-destino">
+            <option value="" disabled selected>Selecciona la huerta destino</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Foto del equipo (opcional)</label>
+          <div class="media-actions" id="media-actions-salida">
+            <div class="media-btn" id="btn-take-photo-salida">
+              <span class="icon">📷</span>
+              <span>Tomar foto</span>
+            </div>
+            <div class="media-btn" id="btn-gallery-salida">
+              <span class="icon">🖼️</span>
+              <span>Galería</span>
+            </div>
+          </div>
+          <div class="photo-box" id="photo-box-salida" style="display:none;"></div>
+          <input type="file" id="f-photo-camera-salida" accept="image/*" capture="environment" style="display:none;">
+          <input type="file" id="f-gallery-salida" accept="image/*" style="display:none;">
+        </div>
+        <div class="field">
+          <label>Comentario (opcional)</label>
+          <textarea id="f-comentario" placeholder="Motivo del traslado, observaciones..."></textarea>
+        </div>
+        <button class="save-btn" id="btn-submit-salida">Registrar salida</button>
+        <div class="save-status" id="salida-status"></div>
+      </section>
+
+      <section>
+        <h2>Mis salidas recientes</h2>
+        <div id="salidas-list"><div class="loading">Cargando...</div></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Shim de compatibilidad: reemplaza google.script.run por llamadas
+// fetch() al servidor local (Node.js), igual que en Index.html / Taller.html.
+(function () {
+  const API_BASE = '/api';
+
+  function crearRunner(successCb, failCb) {
+    return new Proxy(
+      {},
+      {
+        get(target, prop) {
+          if (prop === 'withSuccessHandler') {
+            return (cb) => crearRunner(cb, failCb);
+          }
+          if (prop === 'withFailureHandler') {
+            return (cb) => crearRunner(successCb, cb);
+          }
+          return function (...args) {
+            fetch(`${API_BASE}/${prop}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ args }),
+            })
+              .then(async (res) => {
+                const data = await res.json().catch(() => null);
+                if (!res.ok) {
+                  const err = new Error((data && data.error) || ('Error HTTP ' + res.status));
+                  throw err;
+                }
+                return data;
+              })
+              .then((data) => {
+                if (successCb) successCb(data);
+              })
+              .catch((err) => {
+                if (failCb) failCb(err);
+                else console.error(err);
+              });
+          };
+        },
+      }
+    );
+  }
+
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+  window.google.script.run = crearRunner(null, null);
+})();
+// ============================================================
+
+// TALLER se agrega al final (no es una huerta de cultivo, pero sí un destino
+// válido de movimiento: equipo que se manda al taller para servicio/reparación).
+const HUERTAS = ['ALMA LUCIA','AURORA','BRILLANTE','GUADALUPE','LA CRUZ','MATA CAZUELA','MATA DE GALLO','NIDO DE AGUILA','ORGANITO','PASO LIMON','RANCHO NUEVO','SAN CENOVIO','SAN JOACHIN','SANTA EULALIA','TALLER'];
+
+const UNIDADES_TODAS = [{"v": "9315", "l": "AF-001-5065E JD"}, {"v": "9605", "l": "AF-002-HILUX CHASIS"}, {"v": "9606", "l": "AF-003-HILUX CHASIS"}, {"v": "9568", "l": "AF-008-HILUX CHASIS"}, {"v": "9569", "l": "AF-009-HILUX CHASIS"}, {"v": "9607", "l": "AF-009-HINO CHASIS"}, {"v": "9184", "l": "AF-015-HILUX DC"}, {"v": "9222", "l": "AF-017-9540 KUBOTA"}, {"v": "9207", "l": "AF-018-FRONTIER DC"}, {"v": "9608", "l": "AF-018-HINO CHASIS"}, {"v": "9609", "l": "AF-020-HILUX CHASIS"}, {"v": "21", "l": "AF-021-HILUX DC"}, {"v": "22", "l": "AF-022-HILUX CHASIS"}, {"v": "9610", "l": "AF-022-HILUX DC"}, {"v": "9611", "l": "AF-023-HILUX DC"}, {"v": "9231", "l": "AF-028-L3800 KUBOTA"}, {"v": "9317", "l": "AF-031-L3800 KUBOTA"}, {"v": "9228", "l": "AF-033-HILUX CHASIS"}, {"v": "9612", "l": "AF-034-HILUX CHASIS"}, {"v": "9314", "l": "AF-034-L3800 KUBOTA"}, {"v": "632", "l": "AF-035-PLANA LIMONES"}, {"v": "9613", "l": "AF-037-HILUX CHASIS"}, {"v": "9383", "l": "AF-037-HINO 500"}, {"v": "9614", "l": "AF-038-HILUX CHASIS"}, {"v": "9382", "l": "AF-038-HINO 500"}, {"v": "9615", "l": "AF-040-RAM 700 CS"}, {"v": "9616", "l": "AF-041-HILUX CHASIS"}, {"v": "9617", "l": "AF-042-HILUX CHASIS"}, {"v": "9404", "l": "AF-043-MOTO HONDA"}, {"v": "9405", "l": "AF-045-RAM700 CS"}, {"v": "9406", "l": "AF-046-RAM700 CS"}, {"v": "9654", "l": "AF-047 FREIGHTLINER"}, {"v": "9618", "l": "AF-048-INTERNACIONAL"}, {"v": "9674", "l": "AF-12 L3800 KUBOTA"}, {"v": "9675", "l": "AF-13 L3800 KUBOTA"}, {"v": "9689", "l": "AF-16 HILUX CHASIS"}, {"v": "307", "l": "AF-307-3320 JD"}, {"v": "441", "l": "AF-441-6600 FORD"}, {"v": "591", "l": "AF-489-HILUX DC"}, {"v": "494", "l": "AF-494- FORD 350"}, {"v": "509", "l": "AF-509- RAM DC"}, {"v": "9310", "l": "AF-512-4120 JD"}, {"v": "522", "l": "AF-522-TACOMA DC"}, {"v": "9623", "l": "AF-533 HONDA"}, {"v": "9125", "l": "AF-541-PLANA"}, {"v": "542", "l": "AF-542-3320 JD"}, {"v": "554", "l": "AF-554-5725 JD"}, {"v": "560", "l": "AF-560-TACOMA DC"}, {"v": "564", "l": "AF-564-HILUX DC"}, {"v": "566", "l": "AF-566-HILUX CHASIS"}, {"v": "567", "l": "AF-567-HILUX CHASIS"}, {"v": "580", "l": "AF-580-HILUX CHASIS"}, {"v": "581", "l": "AF-581-HILUX DC"}, {"v": "582", "l": "AF-582-HILUX DC"}, {"v": "587", "l": "AF-587-3036 JD"}, {"v": "590", "l": "AF-590-3036 JD"}, {"v": "600", "l": "AF-594-HILUX DC"}, {"v": "602", "l": "AF-595-HILUX CHASIS"}, {"v": "603", "l": "AF-596-HINO 500"}, {"v": "9169", "l": "AF-598-AMAROK DC"}, {"v": "9387", "l": "AF-599-7040 KUBOTA"}, {"v": "9386", "l": "AF-600-7040 KUBOTA"}, {"v": "9119", "l": "AF-616-HILUX CHASIS"}, {"v": "617", "l": "AF-617-HILUX CHASIS"}, {"v": "9121", "l": "AF-618-HILUX CHASIS"}, {"v": "9122", "l": "AF-619-HILUX CHASIS"}, {"v": "9123", "l": "AF-620-HILUX CHASIS"}, {"v": "9124", "l": "AF-621-HILUX CHASIS"}, {"v": "9179", "l": "AF-626-HILUX CHASIS"}, {"v": "9180", "l": "AF-628- HILUX DC"}, {"v": "9181", "l": "AF-629-HILUX DC"}, {"v": "9183", "l": "AF-631-L3800 KUBOTA"}, {"v": "9192", "l": "AF-637-HINO 300"}, {"v": "9189", "l": "AF-638-L3800 KUBOTA"}, {"v": "9193", "l": "AF-643-HILUX CHASIS"}, {"v": "9194", "l": "AF-644-HILUX CHASIS"}, {"v": "9211", "l": "AF-645-HILUX CHASIS"}, {"v": "9212", "l": "AF-646-HILUX DC"}, {"v": "9275", "l": "AF-647-FORD 350 DC"}, {"v": "9199", "l": "AF-650-RAM 700 DC"}, {"v": "9624", "l": "AF-652 AVANZA"}, {"v": "9265", "l": "AF-653-HILUX CHASIS"}, {"v": "9311", "l": "AF-654-HILUX CHASIS"}, {"v": "9309", "l": "AF-658-MOTO HONDA"}, {"v": "9394", "l": "AF-659-HILUX DC"}, {"v": "9395", "l": "AF-660-RAM700 CS"}, {"v": "9401", "l": "AF-661-RAM700 CS"}, {"v": "9402", "l": "AF-662-RAM700 CS"}, {"v": "9400", "l": "AF-686-MOTO HONDA"}, {"v": "9625", "l": "AF-687 MAZDA"}, {"v": "9409", "l": "AF-688 FREIGHTLINER"}, {"v": "9411", "l": "AF-716 FREIGHTLINER"}, {"v": "9410", "l": "AF-718-RAM700 CS"}, {"v": "9412", "l": "AF-719 L3800 KUBOTA"}, {"v": "9413", "l": "AF-720 L3800 KUBOTA"}, {"v": "9414", "l": "AF-721-L3800 KUBOTA"}, {"v": "9420", "l": "AF-722 L3800 KUBOTA"}, {"v": "9626", "l": "AF-723 JEEP"}, {"v": "9416", "l": "AF-723 L3800 KUBOTA"}, {"v": "9418", "l": "AF-724 L3800 KUBOTA"}, {"v": "9417", "l": "AF-725-L3800 KUBOTA"}, {"v": "9419", "l": "AF-726 L3800 KUBOTA"}, {"v": "9421", "l": "AF-727 L3800 KUBOTA"}, {"v": "9422", "l": "AF-728 L3800 KUBOTA"}, {"v": "9423", "l": "AF-729 L3800 KUBOTA"}, {"v": "9424", "l": "AF-730 L3800 KUBOTA"}, {"v": "9482", "l": "AF-732 MOTO HONDA"}, {"v": "9627", "l": "AF-733 TACOMA"}, {"v": "9587", "l": "AF-737 RAM 700"}, {"v": "9585", "l": "AF-738 RAM 700"}, {"v": "9586", "l": "AF-739 RAM 700"}, {"v": "9588", "l": "AF-740 FORD-350"}, {"v": "9601", "l": "AF-752-HILUX CHASIS"}, {"v": "9628", "l": "AF-753 HILUX CHASIS"}, {"v": "9603", "l": "AF-754-HILUX CHASIS"}, {"v": "9590", "l": "AF-755-HILUX CHASIS"}, {"v": "9602", "l": "AF-756-HILUX CHASIS"}, {"v": "9629", "l": "AF-757 HILUX CHASIS"}, {"v": "9683", "l": "AF-769-HILUX ADV"}, {"v": "9684", "l": "AF-770-HILUX ADV"}, {"v": "9316", "l": "AF003-L3800 KUBOTA"}, {"v": "9221", "l": "AF004-L3800 KUBOTA"}, {"v": "11", "l": "AF011-7040 KUBOTA"}, {"v": "9312", "l": "AF016-L3800 KUBOTA"}, {"v": "9313", "l": "AF023-5100 KUBOTA"}, {"v": "9230", "l": "AF026-7040 KUBOTA"}, {"v": "9227", "l": "AF027-7040 KUBOTA"}, {"v": "9229", "l": "AF029-7040 KUBOTA"}, {"v": "9223", "l": "AF030-L3800 KUBOTA"}, {"v": "9318", "l": "AF032-L3800 KUBOTA"}, {"v": "306", "l": "AF306-3320 JD"}, {"v": "311", "l": "AF311-3320 JD"}, {"v": "431", "l": "AF431-7610 NW"}, {"v": "442", "l": "AF442-6600 FORD"}, {"v": "477", "l": "AF477-5615 JD"}, {"v": "478", "l": "AF478-5615 JD"}, {"v": "481", "l": "AF481-6115 JD"}, {"v": "499", "l": "AF499-5715 JD"}, {"v": "511", "l": "AF511-6115 JD"}, {"v": "513", "l": "AF513-3320 JD"}, {"v": "517", "l": "AF517-416D CAT"}, {"v": "622", "l": "AF523-5075 JD"}, {"v": "524", "l": "AF524-6115 JD"}, {"v": "525", "l": "AF525-3320 JD"}, {"v": "624", "l": "AF526-3320 JD"}, {"v": "543", "l": "AF543-3320 JD"}, {"v": "555", "l": "AF555-5303 JD"}, {"v": "571", "l": "AF571-5415 JD"}, {"v": "572", "l": "AF572-5415 JD"}, {"v": "573", "l": "AF573-5415 JD"}, {"v": "574", "l": "AF574-5415 JD"}, {"v": "575", "l": "AF575-5415 JD"}, {"v": "586", "l": "AF586-3036 JD"}, {"v": "588", "l": "AF588-3036 JD"}, {"v": "9205", "l": "AF597-L3800 KUBOTA"}, {"v": "625", "l": "AF598-L3800 KUBOTA"}, {"v": "9397", "l": "AF602-M7040 KUBOTA"}, {"v": "9160", "l": "AF624-7040 KUBOTA"}, {"v": "9161", "l": "AF625-L3800 KUBOTA"}, {"v": "9182", "l": "AF630-L3800 KUBOTA"}, {"v": "9188", "l": "AF632-L3800 KUBOTA"}, {"v": "633", "l": "AF633-L3800 KUBOTA"}, {"v": "9190", "l": "AF639-L3800 KUBOTA"}, {"v": "9191", "l": "AF640-L3800 KUBOTA"}, {"v": "9196", "l": "AF641-L3800 KUBOTA"}, {"v": "9197", "l": "AF642-L3800 KUBOTA"}, {"v": "9198", "l": "AF648-6603 JD"}, {"v": "9415", "l": "AF731-6603 JD"}, {"v": "9330", "l": "AI027-TURBINA JC-04"}, {"v": "641", "l": "AI049- GENERADOR"}, {"v": "9396", "l": "AI096-GC ROJO"}, {"v": "645", "l": "AI116-PIPA.3"}, {"v": "9667", "l": "ALMA LUCIA "}, {"v": "1003", "l": "APOYO MOTO VALES"}, {"v": "601", "l": "APOYO-VALES"}, {"v": "9389", "l": "BODEGA LIMONES"}, {"v": "607", "l": "BODEGA VRZ2"}, {"v": "9407", "l": "BODEGA-DGP"}, {"v": "596", "l": "BODEGA-DIESEL SUC29"}, {"v": "9680", "l": "BRILLANTE"}, {"v": "652", "l": "DESBROZADORAS"}, {"v": "9486", "l": "ECO:IA251 REM CORTE"}, {"v": "9487", "l": "ECO:IA252 REM CORTE"}, {"v": "9489", "l": "ECO:IA259 REM CORTE"}, {"v": "9484", "l": "ECO:IA278 BAÑO MOVIL"}, {"v": "9257", "l": "ECO:IA279BAÑO MOVIL "}, {"v": "9514", "l": "ECO:IA280 BAÑO MOVIL"}, {"v": "9515", "l": "ECO:IA281 BAÑO MOVIL"}, {"v": "9516", "l": "ECO:IA282 BAÑO MOVIL"}, {"v": "9517", "l": "ECO:IA283 BAÑO MOVIL"}, {"v": "9518", "l": "ECO:IA284 BAÑO MOVIL"}, {"v": "9519", "l": "ECO:IA285 BAÑO MOVIL"}, {"v": "9520", "l": "ECO:IA286 BAÑO MOVIL"}, {"v": "9521", "l": "ECO:IA287 BAÑO MOVIL"}, {"v": "9522", "l": "ECO:IA288 BAÑO MOVIL"}, {"v": "9523", "l": "ECO:IA289 BAÑO MOVIL"}, {"v": "9524", "l": "ECO:IA290 BAÑO MOVIL"}, {"v": "9525", "l": "ECO:IA291 BAÑO MOVIL"}, {"v": "9526", "l": "ECO:IA292 BAÑO MOVIL"}, {"v": "9527", "l": "ECO:IA293 BAÑO MOVIL"}, {"v": "9528", "l": "ECO:IA294 BAÑO MOVIL"}, {"v": "9529", "l": "ECO:IA295 BAÑO MOVIL"}, {"v": "9530", "l": "ECO:IA296 BAÑO MOVIL"}, {"v": "9531", "l": "ECO:IA297 BAÑO MOVIL"}, {"v": "9532", "l": "ECO:IA298 BAÑO MOVIL"}, {"v": "9533", "l": "ECO:IA299 BAÑO MOVIL"}, {"v": "9534", "l": "ECO:IA300 BAÑO MOVIL"}, {"v": "9535", "l": "ECO:IA301 BAÑO MOVIL"}, {"v": "9536", "l": "ECO:IA302 BAÑO MOVIL"}, {"v": "9537", "l": "ECO:IA303 BAÑO MOVIL"}, {"v": "9170", "l": "FMG-01-L3800 KUBOTA"}, {"v": "9171", "l": "FMG-02-L3800 KUBOTA"}, {"v": "9172", "l": "FMG-04-L3800 KUBOTA"}, {"v": "9173", "l": "FMG-05-L3800 KUBOTA"}, {"v": "9403", "l": "IA 309 GENERADOR "}, {"v": "9574", "l": "IA 347- BRZ MEC LG"}, {"v": "9656", "l": "IA 380-MOTOSIERRA"}, {"v": "9657", "l": "IA 381-MOTOSIERRA"}, {"v": "9658", "l": "IA 382- WIRO"}, {"v": "9659", "l": "IA 383-WIRO"}, {"v": "9660", "l": "IA 384-WIRO"}, {"v": "9661", "l": "IA 385-WIRO"}, {"v": "9662", "l": "IA 386-WIRO"}, {"v": "9663", "l": "IA 387- KARCHER"}, {"v": "9665", "l": "IA 388 GENERADOR "}, {"v": "9666", "l": "IA 389 REMOLQUE- GEN"}, {"v": "9671", "l": "IA 390 EXTENDIDOR"}, {"v": "9672", "l": "IA 391 FMG CAÑON"}, {"v": "9673", "l": "IA 392 FMG CAÑON"}, {"v": "9685", "l": "IA 395 EXTENDIDOR"}, {"v": "9688", "l": "IA 396 TRITURADORA "}, {"v": "9575", "l": "IA-348 BRZ MEC LG"}, {"v": "9308", "l": "IA001-ARADO MARIPOSA"}, {"v": "9225", "l": "IA002-ASPERSORA F-1"}, {"v": "9260", "l": "IA003-ASPERSORA F-3"}, {"v": "7", "l": "IA004-ASPERSORA F-7"}, {"v": "8", "l": "IA005-ASPERSORA F-8"}, {"v": "9263", "l": "IA006-ASPERSORA F-10"}, {"v": "9277", "l": "IA007-ASPERSORA H-2"}, {"v": "9249", "l": "IA008-ASPERSORA F-4"}, {"v": "9274", "l": "IA009-ASPERSORA F-9"}, {"v": "9278", "l": "IA010-ASPERSORA F-5"}, {"v": "9279", "l": "IA011-ASPERSORA F-6"}, {"v": "9252", "l": "IA012-ASPERSORA H-2"}, {"v": "9324", "l": "IA013-ASPERSORA  H-1"}, {"v": "9325", "l": "IA014-ASPERSORA F-3H"}, {"v": "9280", "l": "IA015-ASPERSORA H-7"}, {"v": "9319", "l": "IA016-ASPERSORA H-8"}, {"v": "9326", "l": "IA017-ASPERSORA H-4"}, {"v": "9321", "l": "IA018-ASPERSORA H-10"}, {"v": "9322", "l": "IA019-ASPERSORA H-11"}, {"v": "9323", "l": "IA020-ASPERSORA H-12"}, {"v": "9328", "l": "IA021-ASPERSORA  H-6"}, {"v": "9320", "l": "IA022-ASPERSORA H-9"}, {"v": "9327", "l": "IA023-ASPERSORA H-5"}, {"v": "9130", "l": "IA024-TURBINA JC-01"}, {"v": "9131", "l": "IA025-TURBINA JC-02"}, {"v": "9329", "l": "IA026-TURBINA JC-03"}, {"v": "9334", "l": "IA028-TURBINA PB.08"}, {"v": "9335", "l": "IA029-TURBINA PB.09"}, {"v": "9336", "l": "IA030-TURBINA PB.10"}, {"v": "9132", "l": "IA031-TURBINA PB.01"}, {"v": "9133", "l": "IA032-TURBINA PB.02"}, {"v": "9134", "l": "IA033-TURBINA PB.03"}, {"v": "9135", "l": "IA034-TURBINA PB.04"}, {"v": "9136", "l": "IA035-TURBINA PB.05"}, {"v": "9137", "l": "IA036-TURBINA PB.06"}, {"v": "9138", "l": "IA037-TURBINA PB.07"}, {"v": "9479", "l": "IA038 BOMBA AGRICOLA"}, {"v": "9331", "l": "IA039-CANALERA 3"}, {"v": "653", "l": "IA040-CANALERA 1"}, {"v": "9237", "l": "IA041-CANALERA 2"}, {"v": "9332", "l": "IA042-CANALERA 4"}, {"v": "9337", "l": "IA043-CARGADOR BISON"}, {"v": "9146", "l": "IA044-CHAPEADORA.01"}, {"v": "9147", "l": "IA045-CHAPEADORA.02"}, {"v": "9148", "l": "IA046-CHAPEADORA.03"}, {"v": "9149", "l": "IA047-CHAPEADORA.04"}, {"v": "9150", "l": "IA048-CHAPEADORA.05"}, {"v": "9151", "l": "IA049-CHAPEADORA.06"}, {"v": "9116", "l": "IA050- GENERADOR LAB"}, {"v": "9152", "l": "IA050-CHAPEADORA.07"}, {"v": "9153", "l": "IA051-CHAPEADORA.08"}, {"v": "9589", "l": "IA052 CHAPEADORA.09"}, {"v": "9155", "l": "IA053-CHAPEADORA.10"}, {"v": "9338", "l": "IA054-CHAPEADORA.11"}, {"v": "9339", "l": "IA055-CHAPEADORA.12"}, {"v": "9340", "l": "IA056-CHAPEADORA.13"}, {"v": "9341", "l": "IA057-CHAPEADORA.14"}, {"v": "9342", "l": "IA058-CHAPEADORA.15"}, {"v": "9187", "l": "IA059-COMPACTADORA"}, {"v": "9343", "l": "IA060-COMPRESOR 1"}, {"v": "9344", "l": "IA061-COMPRESOR 2"}, {"v": "9345", "l": "IA062-COMPRESOR 3"}, {"v": "9281", "l": "IA063-COMPRESOR 4"}, {"v": "9283", "l": "IA064-COMPRESOR 5"}, {"v": "9284", "l": "IA065-COMPRESOR 6"}, {"v": "9285", "l": "IA066-COMPRESOR 07"}, {"v": "9282", "l": "IA067-COMPRESOR 8"}, {"v": "9286", "l": "IA068-COMPRESOR 09"}, {"v": "9287", "l": "IA069-COMPRESOR 10"}, {"v": "621", "l": "IA070-CULTIVADOR.1"}, {"v": "9242", "l": "IA071-CULTIVADOR.2"}, {"v": "9243", "l": "IA072-CULTIVADOR.3"}, {"v": "9244", "l": "IA073-CULTIVADOR.4"}, {"v": "9245", "l": "IA074-CULTIVADOR.5"}, {"v": "9346", "l": "IA075-WIRO 1"}, {"v": "9347", "l": "IA076-WIRO 2"}, {"v": "9240", "l": "IA077-PIPA.10"}, {"v": "9348", "l": "IA077-WIRO 3"}, {"v": "9352", "l": "IA081-WIRO 7"}, {"v": "9353", "l": "IA082-WIRO 8"}, {"v": "9354", "l": "IA083-WIRO 9"}, {"v": "9356", "l": "IA085-WIRO 11"}, {"v": "9357", "l": "IA086-WIRO 12"}, {"v": "9272", "l": "IA090-ENCALADORA"}, {"v": "9333", "l": "IA091-ENCALADORA"}, {"v": "9156", "l": "IA092-FERTILIZADORA"}, {"v": "9266", "l": "IA093-GENERADOR "}, {"v": "9476", "l": "IA094 GENERADOR"}, {"v": "9477", "l": "IA095-GENERADOR"}, {"v": "9203", "l": "IA097-KARCHER.1"}, {"v": "9288", "l": "IA098-KARCHER.2"}, {"v": "9289", "l": "IA099-KARCHER.3"}, {"v": "9290", "l": "IA100-KARCHER.4"}, {"v": "598", "l": "IA101-MOTOBOMBA.1"}, {"v": "9291", "l": "IA102-MOTOBOMBA.2"}, {"v": "9292", "l": "IA103-MOTOBOMBA.3"}, {"v": "9293", "l": "IA104-MOTOBOMBA.4"}, {"v": "9294", "l": "IA105-MOTOBOMBA.5"}, {"v": "9295", "l": "IA106-MOTOBOMBA.6"}, {"v": "9296", "l": "IA107-MOTOBOMBA.7"}, {"v": "9297", "l": "IA108-MOTOSIERRA.1"}, {"v": "999", "l": "IA109-BOMBA RIO"}, {"v": "9298", "l": "IA109-MOTOSIERRA.2"}, {"v": "9299", "l": "IA110-NIVELADORA.1"}, {"v": "9361", "l": "IA111-NIVELADORA 2"}, {"v": "9301", "l": "IA112-NIVELADORA.3"}, {"v": "9362", "l": "IA113-NIVELADORA 4"}, {"v": "9235", "l": "IA114-PIPA.1"}, {"v": "9236", "l": "IA115-PIPA.2"}, {"v": "4", "l": "IA117-PIPA.4"}, {"v": "9224", "l": "IA118-PIPA.5"}, {"v": "6", "l": "IA119-PIPA.6"}, {"v": "9219", "l": "IA120-PIPA.7"}, {"v": "9256", "l": "IA121-PIPA.8"}, {"v": "9250", "l": "IA122-PIPA.9"}, {"v": "9363", "l": "IA123-PIPA 10"}, {"v": "9364", "l": "IA124-PIPA 11"}, {"v": "9365", "l": "IA125-PIPA 12"}, {"v": "9366", "l": "IA126-PIPA 13"}, {"v": "9367", "l": "IA127-PIPA 14"}, {"v": "9368", "l": "IA128-RASTRA.6"}, {"v": "9216", "l": "IA129-RASTRA.1"}, {"v": "9234", "l": "IA130-RASTRA.5"}, {"v": "631", "l": "IA131-RASTRA.2"}, {"v": "9233", "l": "IA132-RASTRA.4"}, {"v": "9232", "l": "IA133-RASTRA.3"}, {"v": "9369", "l": "IA134-REMCAJON 14"}, {"v": "9370", "l": "IA135-REMCAJON 15"}, {"v": "9371", "l": "IA136-REMCAJON 16"}, {"v": "9483", "l": "IA137 REMCAJON.17"}, {"v": "637", "l": "IA138-REMCAJON.1"}, {"v": "647", "l": "IA139-REMCAJON.2"}, {"v": "606", "l": "IA140-REMCAJON.3"}, {"v": "9113", "l": "IA141-REMCAJON.4"}, {"v": "9215", "l": "IA142-REMCAJON.5"}, {"v": "634", "l": "IA143 REM CORTE"}, {"v": "651", "l": "IA144-REMCAJON.7"}, {"v": "614", "l": "IA145 REMCAJON.8"}, {"v": "620", "l": "IA146-REMCAJON.9"}, {"v": "9246", "l": "IA147-REMCAJON-10"}, {"v": "639", "l": "IA148-REMCAJON.11"}, {"v": "9238", "l": "IA149-REMCAJON-12"}, {"v": "9372", "l": "IA150-REMCAJON 18"}, {"v": "9373", "l": "IA151 REM CAJON"}, {"v": "9374", "l": "IA153 REM CORTE"}, {"v": "9375", "l": "IA154 REM CORTE"}, {"v": "9376", "l": "IA155 REM CORTE"}, {"v": "9377", "l": "IA156 REM CORTE"}, {"v": "9378", "l": "IA157-REMCORTE 15"}, {"v": "9270", "l": "IA158-REMCORTE.1"}, {"v": "9271", "l": "IA159-REMCORTE.2"}, {"v": "9273", "l": "IA160-REMCORTE.3"}, {"v": "9302", "l": "IA161-REMCORTE.4"}, {"v": "9303", "l": "IA162-REMCORTE.5"}, {"v": "9304", "l": "IA163-REMCORTE.6"}, {"v": "9305", "l": "IA164-REMCORTE.7"}, {"v": "9306", "l": "IA165-REMCORTE.8"}, {"v": "9307", "l": "IA166-REMCORTE.9"}, {"v": "9379", "l": "IA167-REMCORTE 18"}, {"v": "12", "l": "IA168-REMEJELOCO-20"}, {"v": "9239", "l": "IA169-REMVOLTEO.21"}, {"v": "9276", "l": "IA170-REMENMIENDA.22"}, {"v": "599", "l": "IA171-REVOLVEDORA"}, {"v": "9380", "l": "IA172-SEGADORA OSMAQ"}, {"v": "9381", "l": "IA173-SEGADORA CAPTA"}, {"v": "654", "l": "IA174-SUBSUELO.1"}, {"v": "9218", "l": "IA175-SUBSUELO.2"}, {"v": "9248", "l": "IA176-SUBSUELO CH"}, {"v": "9300", "l": "IA177-SUBSUELO.3"}, {"v": "9253", "l": "IA179-CULTIVADOR.6"}, {"v": "9247", "l": "IA180-CULTIVADOR.7"}, {"v": "9251", "l": "IA181-RASTRA.7"}, {"v": "9254", "l": "IA182-PIPA.15"}, {"v": "9255", "l": "IA183- BRZ MEC CRT1"}, {"v": "9259", "l": "IA184-BRZ MEC CRT2"}, {"v": "9261", "l": "IA185-BRZ MEC CRT3"}, {"v": "9264", "l": "IA186-CULTIVADOR.8"}, {"v": "9269", "l": "IA187-ARADO 3DISCOS"}, {"v": "9390", "l": "IA188-RASTRA.8"}, {"v": "9388", "l": "IA189 REM CORTE"}, {"v": "9393", "l": "IA190 REM CORTE"}, {"v": "9268", "l": "IA191-GENERADOR"}, {"v": "643", "l": "IA192-PLUMA LEVANTE"}, {"v": "618", "l": "IA193-PLUMA LEVANTE"}, {"v": "646", "l": "IA194-KARCHER.5"}, {"v": "9126", "l": "IA195-MOTOSIERRA.3"}, {"v": "9115", "l": "IA196-MOTOSIERRA.4"}, {"v": "9114", "l": "IA197-REMCAJON 13"}, {"v": "9398", "l": "IA198-MOTOSIERRA.5"}, {"v": "9475", "l": "IA199-CHAPEADORA.16"}, {"v": "9490", "l": "IA200 REM CORTE"}, {"v": "9408", "l": "IA200-GENERADOR ORGN"}, {"v": "9425", "l": "IA201-REM CORT"}, {"v": "9426", "l": "IA202 REM CORTE"}, {"v": "9427", "l": "IA203 REM CORTE"}, {"v": "9428", "l": "IA204 REM CORTE"}, {"v": "9429", "l": "IA205 REM CORTE"}, {"v": "9430", "l": "IA206 REM CORTE"}, {"v": "9431", "l": "IA207 REM CORTE"}, {"v": "9432", "l": "IA208 REM CORTE"}, {"v": "9433", "l": "IA209 REM CORTE"}, {"v": "9434", "l": "IA210 REM CORTE"}, {"v": "9435", "l": "IA211 REM CORTE"}, {"v": "9436", "l": "IA212 REM CORTE"}, {"v": "9437", "l": "IA213 REM CORTE"}, {"v": "9438", "l": "IA214 REM CORTE"}, {"v": "9439", "l": "IA215 REM CORTE"}, {"v": "9440", "l": "IA216 REM CORTE"}, {"v": "9441", "l": "IA217 REM CORTE"}, {"v": "9442", "l": "IA218 REM CORTE"}, {"v": "9443", "l": "IA219 REM CORTE"}, {"v": "9444", "l": "IA220 REM CORTE"}, {"v": "9445", "l": "IA221 REM CORTE"}, {"v": "9446", "l": "IA222 REM CORTE"}, {"v": "9447", "l": "IA223 REM CORTE"}, {"v": "9448", "l": "IA224 REM CORTE"}, {"v": "9449", "l": "IA225 REM CORTE"}, {"v": "9450", "l": "IA226 REM CORTE"}, {"v": "9451", "l": "IA227 REM CORTE"}, {"v": "9452", "l": "IA228 REM CORTE"}, {"v": "9453", "l": "IA229 REM CORTE"}, {"v": "9454", "l": "IA230 REM CORTE"}, {"v": "9455", "l": "IA231 REM CORTE"}, {"v": "9456", "l": "IA232 REM CORTE"}, {"v": "9457", "l": "IA233 REM CORTE"}, {"v": "9458", "l": "IA234 REM CORTE"}, {"v": "9459", "l": "IA235 REM CORTE"}, {"v": "9460", "l": "IA236 REM CORTE"}, {"v": "9461", "l": "IA237 REM CORTE"}, {"v": "9462", "l": "IA238 REM CORTE"}, {"v": "9463", "l": "IA239 REM CORTE"}, {"v": "9464", "l": "IA240 REM CORTE"}, {"v": "9465", "l": "IA241 REM CORTE"}, {"v": "9466", "l": "IA242 REM CORTE"}, {"v": "9467", "l": "IA243 REM CORTE"}, {"v": "9468", "l": "IA244 REM CORTE"}, {"v": "9469", "l": "IA245 REM CORTE"}, {"v": "9470", "l": "IA246 REM CORTE"}, {"v": "9471", "l": "IA247 REM CORTE"}, {"v": "9472", "l": "IA248 REM CORTE"}, {"v": "9473", "l": "IA249 REM CORTE"}, {"v": "9474", "l": "IA250 REM CORTE"}, {"v": "9241", "l": "IA253 REM CORTE"}, {"v": "9226", "l": "IA254 REM CORTE"}, {"v": "9262", "l": "IA255 REM CORTE"}, {"v": "9493", "l": "IA256 REM CORTE"}, {"v": "9510", "l": "IA257 REM CORTE"}, {"v": "9511", "l": "IA258 REM CORTE"}, {"v": "9513", "l": "IA260 REM CORTE"}, {"v": "9485", "l": "IA261 REM CORTE"}, {"v": "9491", "l": "IA262 REM CORTE"}, {"v": "9495", "l": "IA263 REM CORTE"}, {"v": "9496", "l": "IA264 REM CORTE"}, {"v": "9497", "l": "IA265 REM CORTE"}, {"v": "9498", "l": "IA266 REM CORTE"}, {"v": "9499", "l": "IA267 REM CORTE"}, {"v": "9500", "l": "IA268 REM CORTE"}, {"v": "9501", "l": "IA269 REM CORTE"}, {"v": "9502", "l": "IA270 REM CORTE"}, {"v": "9503", "l": "IA271REM CORTE"}, {"v": "9504", "l": "IA272 REM CORTE"}, {"v": "9505", "l": "IA273 REM CORTE"}, {"v": "9506", "l": "IA274 REM CORTE"}, {"v": "9507", "l": "IA275 REM CORTE"}, {"v": "9508", "l": "IA276 REM CORTE"}, {"v": "9509", "l": "IA277 REM CORTE"}, {"v": "9480", "l": "IA302 PATIN"}, {"v": "9488", "l": "IA308 DOLLY REMO"}, {"v": "9492", "l": "IA309- WIRO 16"}, {"v": "9399", "l": "IA310-KARCHER.6"}, {"v": "9538", "l": "IA311 BICICLETA"}, {"v": "9539", "l": "IA312 BICICLETA"}, {"v": "9540", "l": "IA313 BICICLETA"}, {"v": "9541", "l": "IA314 BICICLETA"}, {"v": "9542", "l": "IA315 BICICLETA"}, {"v": "9543", "l": "IA316 MONTACARGAS"}, {"v": "9544", "l": "IA320 REM CORTE"}, {"v": "9545", "l": "IA321 REM CORTE"}, {"v": "9546", "l": "IA322 REM CORTE"}, {"v": "9547", "l": "IA323 REM CORTE"}, {"v": "9548", "l": "IA324 REM CORTE"}, {"v": "9549", "l": "IA325 REM CORTE"}, {"v": "9550", "l": "IA326 REM CORTE"}, {"v": "9551", "l": "IA327 REM CORTE"}, {"v": "9552", "l": "IA328 REM CORTE"}, {"v": "9553", "l": "IA329 REM CORTE"}, {"v": "9554", "l": "IA330 REM CORTE"}, {"v": "9555", "l": "IA331 REM CORTE"}, {"v": "9556", "l": "IA332 REM CORTE"}, {"v": "9557", "l": "IA333 REM CORTE"}, {"v": "9558", "l": "IA334 REM CORTE"}, {"v": "9559", "l": "IA335 REM CORTE"}, {"v": "9560", "l": "IA336 REM CORTE"}, {"v": "9561", "l": "IA337 REM CORTE"}, {"v": "9562", "l": "IA338 REM CORTE"}, {"v": "9563", "l": "IA339 REM CORTE"}, {"v": "9564", "l": "IA340 REM CORTE"}, {"v": "9567", "l": "IA341 REM CORTE"}, {"v": "9566", "l": "IA342 REM CORTE"}, {"v": "9565", "l": "IA343 REM CORTE"}, {"v": "9571", "l": "IA344 ENCALADORA"}, {"v": "9572", "l": "IA345 SUBSUELO CH"}, {"v": "9573", "l": "IA346-BRZ MEC CTR 4"}, {"v": "9576", "l": "IA349 CHAPEADORA.17"}, {"v": "9591", "l": "IA35 REM CORTE"}, {"v": "9577", "l": "IA350 CHAPEADORA.18"}, {"v": "1351", "l": "IA351 CHAPEADORA.19"}, {"v": "9579", "l": "IA352-MOTOBOMBA HYUN"}, {"v": "9581", "l": "IA353 CHAPEADORA.20"}, {"v": "9582", "l": "IA354 CHAPEADORA.21"}, {"v": "9583", "l": "IA355 CHAPEADORA.22"}, {"v": "9584", "l": "IA356 DISPONIBLE"}, {"v": "9580", "l": "IA357-MOTOBOMBA HYUN"}, {"v": "9604", "l": "IA358 REM CORTE"}, {"v": "9592", "l": "IA359 REM CORTE"}, {"v": "9593", "l": "IA360 REM CORTE"}, {"v": "9594", "l": "IA361 REM CORTE"}, {"v": "9595", "l": "IA362 REM CORTE"}, {"v": "9596", "l": "IA363 REM CORTE "}, {"v": "9597", "l": "IA364 REM CORTE"}, {"v": "9598", "l": "IA365 REM CORTE"}, {"v": "9599", "l": "IA366 REM CORTE"}, {"v": "9600", "l": "IA367 REM CORTE"}, {"v": "9578", "l": "IA368- MOTOBOMBA HYU"}, {"v": "9630", "l": "IA375 REMVOLTEO"}, {"v": "9631", "l": "IA376 REMVOLTEO"}, {"v": "9632", "l": "IA377 REVOLVEDORA"}, {"v": "9633", "l": "IA378 REVOLVEDORA"}, {"v": "9655", "l": "IA379-MOTOSIERRA"}, {"v": "9677", "l": "IA393-TURBINA JC-5"}, {"v": "9678", "l": "IA394-TURBINA JC-6"}, {"v": "9619", "l": "IE 001 PATIN 01"}, {"v": "9620", "l": "IE 002 PATIN 02"}, {"v": "9621", "l": "IE 003 PATIN 03"}, {"v": "9622", "l": "IE 004 PATIN 04"}, {"v": "9478", "l": "INFRAESTRUCTURA"}, {"v": "9653", "l": "INVERNADERO"}, {"v": "9670", "l": "LA AURORA"}, {"v": "9681", "l": "LA CRUZ "}, {"v": "9649", "l": "LA GUADALUPE"}, {"v": "9650", "l": "LAS PINTAS"}, {"v": "9651", "l": "MATA DE GALLO"}, {"v": "9570", "l": "MTTO. ELECTRICO"}, {"v": "608", "l": "MTTO. GENERAL"}, {"v": "9669", "l": "NIDO DE AGUILA"}, {"v": "9668", "l": "PASO LIMON "}, {"v": "9638", "l": "POZO 01 ALMA LUCIA"}, {"v": "9640", "l": "POZO 01 BRILLANTE"}, {"v": "9664", "l": "POZO 01 INVERNADERO"}, {"v": "9642", "l": "POZO 01 LA AURORA"}, {"v": "9643", "l": "POZO 01 LA CRUZ"}, {"v": "9641", "l": "POZO 01 LA GUADALUPE"}, {"v": "9637", "l": "POZO 01 MATA CAZUELA"}, {"v": "9636", "l": "POZO 01 MATA DE GALL"}, {"v": "9646", "l": "POZO 01 NIDO DE AGUI"}, {"v": "9687", "l": "POZO 01 ORGANITO"}, {"v": "9639", "l": "POZO 01 PASO LIMON"}, {"v": "9634", "l": "POZO 01 RANCHO NUEVO"}, {"v": "9686", "l": "POZO 01 SAN CENOBIO"}, {"v": "9644", "l": "POZO 01 SAN JOACHIN"}, {"v": "9645", "l": "POZO 01 SANTA EULALI"}, {"v": "9647", "l": "POZO 02 NIDO DE AGUI"}, {"v": "9635", "l": "POZO 02 RANCHO NUEVO"}, {"v": "9648", "l": "RANCHO NUEVO"}, {"v": "9682", "l": "RANCHO NUEVO 2 "}, {"v": "9217", "l": "RENTA MAQUINARIA D"}, {"v": "9209", "l": "RENTA MAQUINARIA G"}, {"v": "9679", "l": "SAN CENOBIO "}, {"v": "9652", "l": "SAN JOACHIN"}, {"v": "9676", "l": "SANTA EULALIA "}, {"v": "592", "l": "TALLER-LAVADO REFACC"}];
+
+let UNIDADES = UNIDADES_TODAS;
+let nombreUsuario = '';
+let huertaUsuario = '';
+let ubicacionesUnidades = {};
+let unidadSeleccionada = null; // { v, l }
+
+function recomputarUnidadesFiltradas(){
+  const h = (huertaUsuario || '').trim().toUpperCase();
+  if(!h){
+    UNIDADES = UNIDADES_TODAS;
+  } else {
+    UNIDADES = UNIDADES_TODAS.filter(function(u){
+      const asignada = ubicacionesUnidades[u.v];
+      return !asignada || asignada.trim().toUpperCase() === h;
+    });
+  }
+}
+
+function cargarUbicacionesUnidades(){
+  google.script.run
+    .withSuccessHandler(function(filas){
+      ubicacionesUnidades = {};
+      (filas || []).forEach(function(r){ ubicacionesUnidades[r.CodigoUnidad] = r.Huerta; });
+      recomputarUnidadesFiltradas();
+    })
+    .withFailureHandler(function(){ /* si falla, no se filtra: se muestran todas las unidades */ })
+    .getUbicacionesUnidades();
+}
+
+function poblarHuertaDestino(){
+  var sel = document.getElementById('f-huerta-destino');
+  var propia = (huertaUsuario || '').trim().toUpperCase();
+  sel.innerHTML = '<option value="" disabled selected>Selecciona la huerta destino</option>';
+  HUERTAS.forEach(function(h){
+    if(h.trim().toUpperCase() === propia) return;
+    var opt = document.createElement('option');
+    opt.value = h; opt.textContent = h;
+    sel.appendChild(opt);
+  });
+}
+
+function formatFecha(iso){
+  if(!iso) return '';
+  var d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  return d.toLocaleString('es-MX', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+function escapeHtml(s){
+  var d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+// --- Foto opcional (tanto al registrar la salida como al confirmar la
+// llegada). Mismo mecanismo de compresión (redimensiona a 900px de ancho y
+// comprime a JPEG) que usa la foto del formulario de Reportar en Index.html. ---
+function comprimirFotoMov(file, cb){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 900;
+      const scale = Math.min(1, maxW / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      cb(canvas.toDataURL('image/jpeg', 0.6));
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderFotoMovThumb(url, label){
+  if(!url || url.indexOf('VID:') === 0) return '';
+  return '<div style="margin-top:8px;"><a href="' + url + '" target="_blank" rel="noopener">' +
+    '<img src="' + url + '" alt="' + escapeHtml(label) + '" style="max-width:140px;max-height:140px;border-radius:4px;display:block;border:1px solid var(--line);"></a></div>';
+}
+
+// Foto de "Registrar salida" (una sola)
+let fotoSalidaDataUrl = null;
+const photoBoxSalida = document.getElementById('photo-box-salida');
+const mediaActionsSalida = document.getElementById('media-actions-salida');
+const cameraPhotoInputSalida = document.getElementById('f-photo-camera-salida');
+const galleryInputSalida = document.getElementById('f-gallery-salida');
+
+document.getElementById('btn-take-photo-salida').onclick = () => cameraPhotoInputSalida.click();
+document.getElementById('btn-gallery-salida').onclick = () => galleryInputSalida.click();
+
+function renderPhotoPreviewSalida(){
+  mediaActionsSalida.style.display = 'none';
+  photoBoxSalida.style.display = 'block';
+  photoBoxSalida.classList.add('has-photo');
+  photoBoxSalida.innerHTML = `<img src="${fotoSalidaDataUrl}" alt="Foto del equipo">` + `<div class="photo-remove" id="photo-remove-salida">Quitar</div>`;
+  document.getElementById('photo-remove-salida').onclick = (e) => {
+    e.stopPropagation();
+    fotoSalidaDataUrl = null;
+    photoBoxSalida.classList.remove('has-photo');
+    photoBoxSalida.style.display = 'none';
+    photoBoxSalida.innerHTML = '';
+    mediaActionsSalida.style.display = 'flex';
+    cameraPhotoInputSalida.value = '';
+    galleryInputSalida.value = '';
+  };
+}
+cameraPhotoInputSalida.onchange = (e) => {
+  comprimirFotoMov(e.target.files[0], (url) => { fotoSalidaDataUrl = url; renderPhotoPreviewSalida(); });
+};
+galleryInputSalida.onchange = (e) => {
+  comprimirFotoMov(e.target.files[0], (url) => { fotoSalidaDataUrl = url; renderPhotoPreviewSalida(); });
+};
+
+// Fotos de "Confirmar llegada" — una por folio, capturada en la tarjeta
+// de cada llegada pendiente (ver renderPendientes).
+let fotosLlegadaMov = {}; // { folio: dataUrl }
+
+// --- Identidad del usuario: login con nombre (desplegable) + contraseña ---
+function mostrarLogin(){
+  document.getElementById('view-main').style.display = 'none';
+  document.getElementById('login-overlay').hidden = false;
+  document.getElementById('login-pass').value = '';
+  var loginStatus = document.getElementById('login-status');
+  loginStatus.classList.remove('show');
+  google.script.run
+    .withSuccessHandler(function(nombres){
+      var sel = document.getElementById('login-nombre');
+      sel.innerHTML = '<option value="" disabled selected>Selecciona tu nombre</option>';
+      (nombres || []).forEach(function(n){
+        var opt = document.createElement('option');
+        opt.value = n; opt.textContent = n;
+        sel.appendChild(opt);
+      });
+    })
+    .withFailureHandler(function(){})
+    .getNombresUsuarios('Movimientos');
+}
+
+function iniciarApp(nombre, huerta){
+  localStorage.setItem('mov_nombre', nombre);
+  nombreUsuario = nombre;
+  huertaUsuario = huerta || '';
+  document.getElementById('login-overlay').hidden = true;
+  document.getElementById('view-main').style.display = 'block';
+  document.getElementById('huerta-badge').textContent = huertaUsuario ? ('Tu huerta: ' + huertaUsuario) : 'Sin huerta asignada';
+  poblarHuertaDestino();
+  recomputarUnidadesFiltradas();
+  cargarUbicacionesUnidades();
+  cargarMovimientos();
+}
+
+function intentarLogin(){
+  var nombre = document.getElementById('login-nombre').value;
+  var pass = document.getElementById('login-pass').value;
+  var loginStatus = document.getElementById('login-status');
+  var btn = document.getElementById('login-btn');
+  if(!nombre || !pass){
+    loginStatus.textContent = 'Selecciona tu nombre y escribe tu contraseña.';
+    loginStatus.classList.add('show');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Entrando...';
+  google.script.run
+    .withSuccessHandler(function(res){
+      btn.disabled = false;
+      btn.textContent = 'Entrar';
+      if(res && res.success){
+        iniciarApp(nombre, res.huerta);
+      } else {
+        loginStatus.textContent = (res && res.error) || 'No se pudo iniciar sesión.';
+        loginStatus.classList.add('show');
+      }
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      btn.textContent = 'Entrar';
+      loginStatus.textContent = 'Error de conexión. Intenta de nuevo.';
+      loginStatus.classList.add('show');
+    })
+    .validarUsuario(nombre, pass, 'Movimientos');
+}
+
+function asegurarUsuario(){
+  var nombre = localStorage.getItem('mov_nombre');
+  if(!nombre){
+    mostrarLogin();
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(huerta){ iniciarApp(nombre, huerta); })
+    .withFailureHandler(function(){ mostrarLogin(); })
+    .getHuertaPorUsuario(nombre);
+}
+
+document.getElementById('login-btn').addEventListener('click', intentarLogin);
+document.getElementById('login-pass').addEventListener('keydown', function(e){
+  if(e.key === 'Enter'){ intentarLogin(); }
+});
+document.getElementById('btn-change-user').addEventListener('click', function(){
+  localStorage.removeItem('mov_nombre');
+  mostrarLogin();
+});
+document.getElementById('btn-refresh').addEventListener('click', function(){
+  cargarUbicacionesUnidades();
+  cargarMovimientos();
+});
+
+window.addEventListener('load', asegurarUsuario);
+
+// --- Selector de unidad (buscador con desplegable) ---
+const unitSelectWrap = document.getElementById('unit-select');
+const unitSearchInput = document.getElementById('f-unidad-search');
+const unitDropdown = document.getElementById('unit-dropdown');
+
+function renderUnitOptions(filterText){
+  const q = (filterText || '').trim().toUpperCase();
+  const matches = q === '' ? UNIDADES.slice(0, 40) : UNIDADES.filter(u => u.l.toUpperCase().includes(q)).slice(0, 40);
+  if(matches.length === 0){
+    unitDropdown.innerHTML = '<div class="unit-empty">Sin resultados</div>';
+    return;
+  }
+  unitDropdown.innerHTML = matches.map(u =>
+    `<div class="unit-option" data-v="${u.v}" data-l="${escapeHtml(u.l)}">${escapeHtml(u.l)}</div>`
+  ).join('');
+  unitDropdown.querySelectorAll('.unit-option').forEach(opt => {
+    opt.onclick = () => {
+      unidadSeleccionada = { v: opt.dataset.v, l: opt.dataset.l };
+      unitSearchInput.value = opt.dataset.l;
+      unitSelectWrap.classList.add('selected');
+      unitDropdown.classList.remove('open');
+    };
+  });
+}
+unitSearchInput.addEventListener('focus', () => {
+  unitDropdown.classList.add('open');
+  renderUnitOptions(unitSearchInput.value);
+});
+unitSearchInput.addEventListener('input', () => {
+  unidadSeleccionada = null;
+  unitSelectWrap.classList.remove('selected');
+  unitDropdown.classList.add('open');
+  renderUnitOptions(unitSearchInput.value);
+});
+document.addEventListener('click', (e) => {
+  if(!unitSelectWrap.contains(e.target)){
+    unitDropdown.classList.remove('open');
+  }
+});
+
+// --- Registrar salida ---
+document.getElementById('btn-submit-salida').addEventListener('click', function(){
+  var status = document.getElementById('salida-status');
+  var btn = document.getElementById('btn-submit-salida');
+  var huertaDestino = document.getElementById('f-huerta-destino').value;
+  var comentario = document.getElementById('f-comentario').value.trim();
+  status.classList.remove('show', 'ok', 'err');
+
+  if(!unidadSeleccionada){
+    status.textContent = 'Selecciona una unidad de la lista.';
+    status.classList.add('show', 'err');
+    return;
+  }
+  if(!huertaDestino){
+    status.textContent = 'Selecciona la huerta destino.';
+    status.classList.add('show', 'err');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Registrando...';
+  google.script.run
+    .withSuccessHandler(function(res){
+      btn.disabled = false;
+      btn.textContent = 'Registrar salida';
+      if(res && res.success){
+        status.textContent = 'Salida registrada: ' + res.folio + '. Cuando llegue a su destino, el encargado de esa huerta debe confirmar la llegada.';
+        status.classList.add('show', 'ok');
+        unidadSeleccionada = null;
+        unitSearchInput.value = '';
+        unitSelectWrap.classList.remove('selected');
+        document.getElementById('f-huerta-destino').value = '';
+        document.getElementById('f-comentario').value = '';
+        fotoSalidaDataUrl = null;
+        photoBoxSalida.classList.remove('has-photo');
+        photoBoxSalida.style.display = 'none';
+        photoBoxSalida.innerHTML = '';
+        mediaActionsSalida.style.display = 'flex';
+        cameraPhotoInputSalida.value = '';
+        galleryInputSalida.value = '';
+        cargarMovimientos();
+      } else {
+        status.textContent = (res && res.error) || 'No se pudo registrar la salida.';
+        status.classList.add('show', 'err');
+      }
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      btn.textContent = 'Registrar salida';
+      status.textContent = 'Error de conexión. Intenta de nuevo.';
+      status.classList.add('show', 'err');
+    })
+    .submitMovimientoSalida({
+      nombre: nombreUsuario,
+      unidad: unidadSeleccionada.v,
+      unidadLabel: unidadSeleccionada.l,
+      huertaDestino: huertaDestino,
+      comentario: comentario || null,
+      foto: fotoSalidaDataUrl,
+    });
+});
+
+// --- Llegadas pendientes y mis salidas recientes ---
+function cargarMovimientos(){
+  google.script.run
+    .withSuccessHandler(function(res){
+      res = res || {};
+      if(res.huerta && res.huerta !== huertaUsuario){
+        huertaUsuario = res.huerta;
+        document.getElementById('huerta-badge').textContent = huertaUsuario ? ('Tu huerta: ' + huertaUsuario) : 'Sin huerta asignada';
+        poblarHuertaDestino();
+        recomputarUnidadesFiltradas();
+      }
+      renderPendientes(res.pendientesLlegada || []);
+      renderSalidas(res.misSalidas || []);
+    })
+    .withFailureHandler(function(){
+      document.getElementById('pendientes-list').innerHTML = '<div class="empty">No se pudieron cargar los movimientos.</div>';
+      document.getElementById('salidas-list').innerHTML = '<div class="empty">No se pudieron cargar los movimientos.</div>';
+    })
+    .getMovimientosDeUsuario(nombreUsuario);
+}
+
+function renderPendientes(lista){
+  var cont = document.getElementById('pendientes-list');
+  if(!lista.length){
+    cont.innerHTML = '<div class="empty">No hay llegadas pendientes de confirmar en tu huerta.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(function(m){
+    return '<div class="mov-card" data-folio="' + escapeHtml(m.Folio) + '">' +
+      '<div class="mov-top"><span class="folio">' + escapeHtml(m.Folio) + '</span><span class="status-pill pendiente">Pendiente</span></div>' +
+      '<div class="mov-unit">' + escapeHtml(m.Unidad) + '</div>' +
+      '<div class="mov-meta">Desde: ' + escapeHtml(m.HuertaOrigen) + ' &middot; Reportó: ' + escapeHtml(m.UsuarioSalida) + '<br>Salió: ' + escapeHtml(formatFecha(m.FechaSalida)) + '</div>' +
+      (m.ComentarioSalida ? '<div class="mov-comentario">"' + escapeHtml(m.ComentarioSalida) + '"</div>' : '') +
+      renderFotoMovThumb(m.FotoSalidaURL, 'Foto de salida') +
+      '<textarea class="comentario-llegada" placeholder="Comentario de llegada (opcional)"></textarea>' +
+      '<div class="mov-foto-llegada-wrap" style="margin-bottom:8px;">' +
+        '<div class="media-btn mov-foto-btn" style="display:inline-flex;width:auto;padding:8px 12px;">' +
+          '<span class="icon" style="font-size:16px;">📷</span><span style="font-size:12px;">Agregar foto de llegada (opcional)</span>' +
+        '</div>' +
+        '<input type="file" accept="image/*" capture="environment" class="mov-foto-llegada-input" style="display:none;">' +
+        '<div class="mov-foto-llegada-preview"></div>' +
+      '</div>' +
+      '<button class="confirm-btn">Confirmar llegada</button>' +
+      '</div>';
+  }).join('');
+  cont.querySelectorAll('.mov-card').forEach(function(card){
+    var folio = card.dataset.folio;
+    var fotoBtn = card.querySelector('.mov-foto-btn');
+    var fotoInput = card.querySelector('.mov-foto-llegada-input');
+    var fotoPreview = card.querySelector('.mov-foto-llegada-preview');
+    fotoBtn.addEventListener('click', function(){ fotoInput.click(); });
+    fotoInput.addEventListener('change', function(e){
+      comprimirFotoMov(e.target.files[0], function(url){
+        fotosLlegadaMov[folio] = url;
+        fotoPreview.innerHTML = '<img src="' + url + '" alt="Foto de llegada" style="max-width:100px;max-height:100px;border-radius:4px;margin-top:6px;display:block;border:1px solid var(--line);">';
+      });
+    });
+
+    var btn = card.querySelector('.confirm-btn');
+    btn.addEventListener('click', function(){
+      var comentario = card.querySelector('.comentario-llegada').value.trim();
+      btn.disabled = true;
+      btn.textContent = 'Confirmando...';
+      google.script.run
+        .withSuccessHandler(function(res){
+          if(res && res.success){
+            delete fotosLlegadaMov[folio];
+            cargarMovimientos();
+            cargarUbicacionesUnidades();
+          } else {
+            btn.disabled = false;
+            btn.textContent = 'Confirmar llegada';
+            alert((res && res.error) || 'No se pudo confirmar la llegada.');
+          }
+        })
+        .withFailureHandler(function(){
+          btn.disabled = false;
+          btn.textContent = 'Confirmar llegada';
+          alert('Error de conexión. Intenta de nuevo.');
+        })
+        .confirmarLlegadaMovimiento(folio, nombreUsuario, comentario || null, fotosLlegadaMov[folio] || null);
+    });
+  });
+}
+
+function renderSalidas(lista){
+  var cont = document.getElementById('salidas-list');
+  if(!lista.length){
+    cont.innerHTML = '<div class="empty">Todavía no has registrado salidas.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(function(m){
+    var esConfirmado = (m.Estado || '').toLowerCase() === 'confirmado';
+    return '<div class="mov-card">' +
+      '<div class="mov-top"><span class="folio">' + escapeHtml(m.Folio) + '</span><span class="status-pill ' + (esConfirmado ? 'confirmado' : 'pendiente') + '">' + (esConfirmado ? 'Confirmado' : 'Pendiente') + '</span></div>' +
+      '<div class="mov-unit">' + escapeHtml(m.Unidad) + '</div>' +
+      '<div class="mov-meta">Hacia: ' + escapeHtml(m.HuertaDestino) + ' &middot; Salió: ' + escapeHtml(formatFecha(m.FechaSalida)) +
+      (esConfirmado ? ('<br>Recibió: ' + escapeHtml(m.UsuarioLlegada) + ' &middot; Llegó: ' + escapeHtml(formatFecha(m.FechaLlegada))) : '') +
+      '</div>' +
+      renderFotoMovThumb(m.FotoSalidaURL, 'Foto de salida') +
+      renderFotoMovThumb(m.FotoLlegadaURL, 'Foto de llegada') +
+      '</div>';
+  }).join('');
+}
+</script>
+</body>
+</html>

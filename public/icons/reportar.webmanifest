@@ -1,0 +1,17 @@
+{
+  "name": "Reporte de Fallas",
+  "short_name": "Reportar",
+  "description": "Reporta fallas de maquinaria y equipo, incluso sin señal — se envía solo en cuanto haya conexión.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1C1E1F",
+  "theme_color": "#1C1E1F",
+  "icons": [
+    { "src": "/icons/reportar-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/reportar-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/reportar-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/reportar-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

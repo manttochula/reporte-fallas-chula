@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Historial de Fallas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #1C1E1F;
+    --panel: #26292B;
+    --panel-2: #2F3234;
+    --line: #3A3D3F;
+    --text: #EDECE7;
+    --text-dim: #9A9D9E;
+    --amber: #E8871E;
+    --amber-dim: #7A4A17;
+    --danger: #C24B3F;
+    --ok: #5FA36A;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 0 0 40px;
+    min-height:100vh;
+  }
+  header{
+    padding: 22px 20px 16px;
+    border-bottom: 1px dashed var(--line);
+    position: sticky;
+    top:0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  h1{
+    font-family:'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 24px;
+    margin: 0;
+    text-transform: uppercase;
+  }
+  main{ padding: 20px; }
+
+  /* --- Gate (password screen) --- */
+  .gate{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    min-height: 70vh;
+    text-align:center;
+    padding: 20px;
+  }
+  .gate p{ color: var(--text-dim); font-size:14px; margin: 8px 0 24px; }
+  .gate input{
+    width:100%; max-width:280px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--text);
+    padding: 14px 12px;
+    border-radius: 4px;
+    font-size: 16px;
+    text-align:center;
+    letter-spacing: 0.08em;
+    outline:none;
+    margin-bottom: 14px;
+  }
+  .gate input:focus{ border-color: var(--amber); }
+  .gate button{
+    width:100%; max-width:280px;
+    padding: 14px 0;
+    background: var(--amber);
+    color: #1C1E1F;
+    border:none;
+    border-radius: 4px;
+    font-family:'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing:0.03em;
+    cursor:pointer;
+  }
+  .gate .err{
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 12px;
+    display:none;
+  }
+  .gate .err.show{ display:block; }
+
+  /* --- Filters --- */
+  .filters{
+    display:flex;
+    flex-direction:column;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .filters input, .filters select{
+    width:100%;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--text);
+    padding: 11px 12px;
+    border-radius: 4px;
+    font-family:'Inter',sans-serif;
+    font-size: 14px;
+    outline:none;
+  }
+  .filters input:focus, .filters select:focus{ border-color: var(--amber); }
+  .filter-row{ display:flex; gap:10px; }
+  .filter-row > *{ flex:1; }
+  .filter-summary{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+  .clear-btn{
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family:'IBM Plex Mono', monospace;
+  }
+
+  .export-btn{
+    width:100%;
+    padding: 13px 0;
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 4px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    letter-spacing:0.05em;
+    text-transform: uppercase;
+    cursor:pointer;
+    margin-bottom: 18px;
+  }
+
+  .ticket{
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    margin-bottom: 14px;
+    overflow:hidden;
+  }
+  .ticket-top{
+    padding: 12px 14px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    border-bottom: 1px dashed var(--line);
+  }
+  .folio{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .tag{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing:0.05em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-weight:600;
+    background: var(--amber-dim); color: var(--amber);
+  }
+  .ticket img{ width:100%; max-height:260px; object-fit:cover; display:block; }
+  .video-link{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap: 10px;
+    height: 160px;
+    background: var(--panel-2);
+    text-decoration:none;
+    border-bottom: 1px dashed var(--line);
+  }
+  .video-play{
+    width:52px; height:52px;
+    border-radius:50%;
+    background: var(--amber);
+    color:#1C1E1F;
+    display:flex; align-items:center; justify-content:center;
+    font-size:20px;
+    padding-left:3px;
+  }
+  .video-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .ticket-body{ padding: 14px; }
+  .ticket-row{ display:flex; justify-content:space-between; font-size:13.5px; margin-bottom:6px; }
+  .ticket-row .k{ color: var(--text-dim); }
+  .ticket-desc{ margin-top: 8px; font-size: 14px; line-height:1.45; }
+  .trabajo-block{
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+  }
+  .trabajo-label{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing:0.05em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .empty{
+    text-align:center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  .empty .icon{ font-size: 32px; display:block; margin-bottom:12px; }
+  .loading{
+    text-align:center;
+    padding: 40px;
+    color: var(--text-dim);
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div id="view-gate" class="gate">
+    <div class="eyebrow">Flota &amp; Mantenimiento</div>
+    <h1>Historial de Fallas</h1>
+    <p>Acceso restringido &mdash; ingresa la clave para continuar</p>
+    <input type="password" id="gate-code" placeholder="Clave de acceso" autocomplete="off">
+    <button id="gate-submit">Entrar</button>
+    <div class="err" id="gate-err">Clave incorrecta. Intenta de nuevo.</div>
+  </div>
+
+  <div id="view-main" style="display:none;">
+    <header>
+      <div class="eyebrow">Flota &amp; Mantenimiento</div>
+      <h1>Historial de Fallas</h1>
+    </header>
+    <main>
+      <div class="filters">
+        <input type="text" id="f-search" placeholder="Buscar por unidad, nombre o descripción...">
+        <select id="f-huerta">
+          <option value="">Todas las huertas</option>
+          <option value="ALMA LUCIA">ALMA LUCIA</option>
+          <option value="AURORA">AURORA</option>
+          <option value="BRILLANTE">BRILLANTE</option>
+          <option value="GUADALUPE">GUADALUPE</option>
+          <option value="LA CRUZ">LA CRUZ</option>
+          <option value="MATA CAZUELA">MATA CAZUELA</option>
+          <option value="MATA DE GALLO">MATA DE GALLO</option>
+          <option value="NIDO DE AGUILA">NIDO DE AGUILA</option>
+          <option value="ORGANITO">ORGANITO</option>
+          <option value="PASO LIMON">PASO LIMON</option>
+          <option value="RANCHO NUEVO">RANCHO NUEVO</option>
+          <option value="SAN CENOVIO">SAN CENOVIO</option>
+          <option value="SAN JOACHIN">SAN JOACHIN</option>
+          <option value="SANTA EULALIA">SANTA EULALIA</option>
+        </select>
+        <div class="filter-row">
+          <input type="date" id="f-desde" title="Desde">
+          <input type="date" id="f-hasta" title="Hasta">
+        </div>
+        <button class="clear-btn" id="btn-clear">Limpiar filtros</button>
+      </div>
+      <div class="filter-summary" id="filter-summary"></div>
+      <button class="export-btn" id="btn-export">Exportar a CSV</button>
+      <div id="history-list"><div class="loading">Cargando reportes...</div></div>
+    </main>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// Shim de compatibilidad: reemplaza google.script.run por llamadas
+// fetch() al servidor local (Node.js), SIN tocar el resto del código
+// de este archivo. El resto del archivo sigue usando exactamente el
+// mismo patrón:
+//   google.script.run.withSuccessHandler(cb).withFailureHandler(cb).nombreFuncion(args)
+// y aquí simplemente lo traducimos a: POST /api/nombreFuncion  { args: [...] }
+(function () {
+  const API_BASE = '/api';
+
+  function crearRunner(successCb, failCb) {
+    return new Proxy(
+      {},
+      {
+        get(target, prop) {
+          if (prop === 'withSuccessHandler') {
+            return (cb) => crearRunner(cb, failCb);
+          }
+          if (prop === 'withFailureHandler') {
+            return (cb) => crearRunner(successCb, cb);
+          }
+          // Cualquier otro nombre de propiedad se trata como el nombre de la
+          // función a invocar en el servidor (igual que google.script.run).
+          return function (...args) {
+            fetch(`${API_BASE}/${prop}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ args }),
+            })
+              .then(async (res) => {
+                const data = await res.json().catch(() => null);
+                if (!res.ok) {
+                  const err = new Error((data && data.error) || ('Error HTTP ' + res.status));
+                  throw err;
+                }
+                return data;
+              })
+              .then((data) => {
+                if (successCb) successCb(data);
+              })
+              .catch((err) => {
+                if (failCb) failCb(err);
+                else console.error(err);
+              });
+          };
+        },
+      }
+    );
+  }
+
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+  window.google.script.run = crearRunner(null, null);
+})();
+// ============================================================
+
+
+let ALL_RECORDS = [];
+
+document.getElementById('gate-submit').onclick = submitGate;
+document.getElementById('gate-code').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ submitGate(); }
+});
+
+function submitGate(){
+  const code = document.getElementById('gate-code').value;
+  const btn = document.getElementById('gate-submit');
+  const err = document.getElementById('gate-err');
+  err.classList.remove('show');
+  btn.disabled = true;
+  btn.textContent = 'Verificando...';
+
+  google.script.run
+    .withSuccessHandler((records) => {
+      ALL_RECORDS = records || [];
+      document.getElementById('view-gate').style.display = 'none';
+      document.getElementById('view-main').style.display = 'block';
+      renderList();
+    })
+    .withFailureHandler(() => {
+      btn.disabled = false;
+      btn.textContent = 'Entrar';
+      err.classList.add('show');
+    })
+    .getReportes(code);
+}
+
+function getFiltered(){
+  const q = document.getElementById('f-search').value.trim().toUpperCase();
+  const huerta = document.getElementById('f-huerta').value;
+  const desde = document.getElementById('f-desde').value;
+  const hasta = document.getElementById('f-hasta').value;
+
+  return ALL_RECORDS.filter(r => {
+    if(q){
+      const haystack = [r.Unidad, r.CodigoUnidad, r.Huerta, r.Nombre, r.Descripcion, r.Orden].join(' ').toUpperCase();
+      if(!haystack.includes(q)) return false;
+    }
+    if(huerta && (r.Huerta || '').toUpperCase() !== huerta.toUpperCase()) return false;
+    if(desde){
+      const d = new Date(r.Fecha);
+      if(d < new Date(desde + 'T00:00:00')) return false;
+    }
+    if(hasta){
+      const d = new Date(r.Fecha);
+      if(d > new Date(hasta + 'T23:59:59')) return false;
+    }
+    return true;
+  });
+}
+
+function renderList(){
+  const listEl = document.getElementById('history-list');
+  const records = getFiltered().sort((a,b) => new Date(b.Fecha) - new Date(a.Fecha));
+  window.__filtered = records;
+
+  document.getElementById('filter-summary').textContent =
+    records.length + ' de ' + ALL_RECORDS.length + ' reportes';
+
+  if(records.length === 0){
+    listEl.innerHTML = '<div class="empty"><span class="icon">🗂️</span>No hay reportes que coincidan con el filtro.</div>';
+    return;
+  }
+
+  listEl.innerHTML = records.map(r => {
+    const isVideo = (r.FotoURL || '').startsWith('VID:');
+    const mediaUrl = isVideo ? r.FotoURL.slice(4) : r.FotoURL;
+    const media = !mediaUrl ? '' : (isVideo
+      ? `<a href="${mediaUrl.replace('/preview','/view')}" target="_blank" rel="noopener" class="video-link">
+           <span class="video-play">▶</span>
+           <span class="video-label">Toca para ver el video</span>
+         </a>`
+      : `<img src="${mediaUrl}" alt="Foto falla unidad ${escapeHtml(r.Unidad)}" loading="lazy">`);
+    const trabajoBlock = r.TrabajoRealizado
+      ? `<div class="trabajo-block">
+           <div class="trabajo-label">Descripción de lo realizado</div>
+           <div class="ticket-desc">${escapeHtml(r.TrabajoRealizado)}</div>
+         </div>`
+      : '';
+    return `
+    <div class="ticket">
+      <div class="ticket-top">
+        <span class="folio">${escapeHtml(r.Orden)}</span>
+        <span class="tag">${escapeHtml(r.Tipo || 'Correctivo')}</span>
+      </div>
+      ${media}
+      <div class="ticket-body">
+        <div class="ticket-row"><span class="k">Unidad</span><span>${escapeHtml(r.Unidad || r.CodigoUnidad)}</span></div>
+        <div class="ticket-row"><span class="k">Huerta</span><span>${escapeHtml(r.Huerta)}</span></div>
+        <div class="ticket-row"><span class="k">Reportó</span><span>${escapeHtml(r.Nombre)}</span></div>
+        <div class="ticket-row"><span class="k">Fecha</span><span>${new Date(r.Fecha).toLocaleString('es-MX')}</span></div>
+        <div class="ticket-desc">${escapeHtml(r.Descripcion)}</div>
+        ${trabajoBlock}
+      </div>
+    </div>
+  `;
+  }).join('');
+}
+
+document.getElementById('f-search').addEventListener('input', renderList);
+document.getElementById('f-huerta').addEventListener('change', renderList);
+document.getElementById('f-desde').addEventListener('change', renderList);
+document.getElementById('f-hasta').addEventListener('change', renderList);
+document.getElementById('btn-clear').addEventListener('click', () => {
+  document.getElementById('f-search').value = '';
+  document.getElementById('f-huerta').value = '';
+  document.getElementById('f-desde').value = '';
+  document.getElementById('f-hasta').value = '';
+  renderList();
+});
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+document.getElementById('btn-export').onclick = () => {
+  const records = window.__filtered || [];
+  if(records.length === 0){ return; }
+  const headers = ['Orden','CodigoUnidad','Unidad','Huerta','Descripcion','Nombre','Fecha','FotoURL','TrabajoRealizado'];
+  const rows = records.map(r => [
+    r.Orden, r.CodigoUnidad, r.Unidad, r.Huerta, r.Descripcion, r.Nombre, r.Fecha, r.FotoURL, r.TrabajoRealizado || ''
+  ]);
+  const csv = [headers, ...rows].map(row =>
+    row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')
+  ).join('\n');
+  const blob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'historial_fallas.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+</script>
+</body>
+</html>

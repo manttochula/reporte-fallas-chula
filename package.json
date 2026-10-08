@@ -1,0 +1,25 @@
+{
+  "name": "reporte-fallas-local",
+  "version": "1.0.0",
+  "description": "Sistema de Reporte de Fallas - version local (Node.js + MySQL), migrado desde Google Apps Script",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "import:usuarios": "node server/scripts/importUsuarios.js",
+    "import:reportes": "node server/scripts/importReportes.js",
+    "import:diesel": "node server/scripts/importDiesel.js",
+    "import:camionetas": "node server/scripts/importDatosCamionetas.js",
+    "import:entregas-huertas": "node server/scripts/importDieselEntregasHuertas.js",
+    "costo:entregas-huertas": "node server/scripts/aplicarCostoDieselEntregas.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1147.0",
+    "bcryptjs": "^2.4.3",
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "mysql2": "^3.11.0",
+    "pdfkit": "^0.20.2"
+  }
+}

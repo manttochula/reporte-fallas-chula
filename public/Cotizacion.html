@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solicitud de cotización</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #1C1E1F;
+    --panel: #26292B;
+    --panel-2: #2F3234;
+    --line: #3A3D3F;
+    --text: #EDECE7;
+    --text-dim: #9A9D9E;
+    --amber: #E8871E;
+    --amber-dim: #7A4A17;
+    --steel: #4C8DAE;
+    --danger: #C24B3F;
+    --ok: #5FA36A;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background: var(--bg); color: var(--text); font-family:'Inter',sans-serif;
+    min-height:100vh; -webkit-font-smoothing:antialiased;
+  }
+  .app{ max-width: 900px; margin:0 auto; padding: 24px; }
+  header{ margin-bottom: 22px; }
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.14em;
+    color: var(--amber); text-transform:uppercase; margin-bottom:6px;
+  }
+  h1{ font-family:'Oswald',sans-serif; font-weight:700; font-size:26px; margin:0 0 4px; text-transform:uppercase; }
+  .subtitulo{ color: var(--text-dim); font-size:13.5px; }
+  .card{ background: var(--panel); border:1px solid var(--line); border-radius:10px; padding:22px; margin-bottom:20px; }
+  .resumen-linea{ font-size:13.5px; margin-bottom:6px; }
+  .resumen-linea b{ color: var(--text); }
+  .mensaje-proveedor{
+    background: var(--panel-2); border-radius:8px; padding:12px 14px; font-size:13px;
+    color: var(--text-dim); margin-top:10px; white-space:pre-wrap;
+  }
+  table{ width:100%; border-collapse:collapse; margin-top:6px; }
+  th{
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.04em;
+    color: var(--text-dim); padding:8px 8px; border-bottom:1px solid var(--line);
+  }
+  td{ padding:10px 8px; border-bottom:1px solid var(--line); font-size:13.5px; vertical-align:top; }
+  td.desc{ min-width:180px; }
+  td.desc .no-parte{ display:block; font-size:11px; color: var(--text-dim); margin-top:2px; }
+  input[type=text], input[type=number], input[type=date], textarea{
+    width:100%; background: var(--panel-2); border:1px solid var(--line); color: var(--text);
+    border-radius:6px; padding:8px 10px; font-size:13.5px; font-family:inherit;
+  }
+  textarea{ min-height:60px; resize:vertical; }
+  .aviso-info{
+    background: rgba(76,141,174,0.12); color: var(--steel); border-radius:8px; padding:10px 14px;
+    font-size:13px; margin-bottom:16px;
+  }
+  input[type=file]{
+    width:100%; background: var(--panel-2); border:1px solid var(--line); color: var(--text-dim);
+    border-radius:6px; padding:8px 10px; font-size:12.5px; font-family:inherit;
+  }
+  .campo-nota{ font-size:11.5px; color: var(--text-dim); margin-top:4px; }
+  .campo{ margin-bottom:14px; }
+  .campo label{ display:block; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:#9A9D9E; margin-bottom:5px; }
+  .btn{
+    background: var(--amber); color:#1C1E1F; border:none; border-radius:6px; padding:12px 22px;
+    font-size:14px; font-weight:600; cursor:pointer; text-transform:uppercase; letter-spacing:0.03em;
+  }
+  .btn:disabled{ opacity:0.6; cursor:default; }
+  .status{ margin-top:14px; font-size:13.5px; display:none; }
+  .status.show{ display:block; }
+  .status.ok{ color: var(--ok); }
+  .status.err{ color: var(--danger); }
+  .aviso-respondida{
+    background: rgba(95,163,106,0.12); color: var(--ok); border-radius:8px; padding:10px 14px;
+    font-size:13px; margin-bottom:16px;
+  }
+  .aviso-cancelada{
+    background: rgba(194,75,63,0.12); color: var(--danger); border-radius:8px; padding:10px 14px;
+    font-size:13.5px;
+  }
+  .empty{ text-align:center; padding:40px 0; color: var(--text-dim); }
+  .loading{ text-align:center; padding:40px 0; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="eyebrow">Solicitud de cotización</div>
+    <h1 id="titulo-folio">Cargando...</h1>
+    <div class="subtitulo" id="subtitulo"></div>
+  </header>
+
+  <div id="contenido"><div class="loading">Cargando la solicitud...</div></div>
+</div>
+
+<script>
+// ============================================================
+// Shim de compatibilidad: mismo patrón que Panel.html/Taller.html —
+// google.script.run.withSuccessHandler(cb).withFailureHandler(cb).fn(args)
+// se traduce a POST /api/fn { args: [...] }. Esta página NO usa clave de
+// acceso: los endpoints que llama (getSolicitudCotizacionPublica,
+// responderCotizacion) están pensados para abrirse solo con el token que
+// trae el enlace.
+(function () {
+  const API_BASE = '/api';
+  function crearRunner(successCb, failCb) {
+    return new Proxy(
+      {},
+      {
+        get(target, prop) {
+          if (prop === 'withSuccessHandler') return (cb) => crearRunner(cb, failCb);
+          if (prop === 'withFailureHandler') return (cb) => crearRunner(successCb, cb);
+          return function (...args) {
+            fetch(`${API_BASE}/${prop}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ args }),
+            })
+              .then(async (res) => {
+                const data = await res.json().catch(() => null);
+                if (!res.ok) throw new Error((data && data.error) || ('Error HTTP ' + res.status));
+                return data;
+              })
+              .then((data) => { if (successCb) successCb(data); })
+              .catch((err) => { if (failCb) failCb(err); else console.error(err); });
+          };
+        },
+      }
+    );
+  }
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+  window.google.script.run = crearRunner(null, null);
+})();
+// ============================================================
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : s;
+  return d.innerHTML;
+}
+
+const TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+let SOLICITUD = null;
+
+function cargarSolicitud(){
+  if(!TOKEN){
+    document.getElementById('titulo-folio').textContent = 'Enlace incompleto';
+    document.getElementById('contenido').innerHTML = '<div class="card"><div class="empty">Este enlace no trae la información necesaria. Pide que te compartan de nuevo el enlace completo.</div></div>';
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(data){
+      SOLICITUD = data;
+      renderSolicitud();
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('titulo-folio').textContent = 'No se pudo abrir la solicitud';
+      document.getElementById('contenido').innerHTML =
+        '<div class="card"><div class="empty">' + escapeHtml((err && err.message) || 'Este enlace de cotización no es válido o ya no existe.') + '</div></div>';
+    })
+    .getSolicitudCotizacionPublica(TOKEN);
+}
+
+function renderSolicitud(){
+  document.getElementById('titulo-folio').textContent = 'Cotización ' + SOLICITUD.Folio;
+  document.getElementById('subtitulo').textContent = 'Para: ' + SOLICITUD.ProveedorNombre + (SOLICITUD.ProveedorContacto ? ' (' + SOLICITUD.ProveedorContacto + ')' : '');
+
+  // Si la cancelaron desde el Panel, ya no se acepta ninguna cotización más
+  // por este enlace (aunque siga siendo válido) — se avisa y no se muestra
+  // el formulario.
+  if(SOLICITUD.Estado === 'cancelada'){
+    document.getElementById('contenido').innerHTML = `
+      <div class="card">
+        <div class="aviso-cancelada">Esta solicitud de cotización fue cancelada. Ya no se aceptan cotizaciones para ella — si crees que esto es un error, contacta a quien te la envió.</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Cada quien que abre este enlace manda su PROPIA cotización — no se pisa
+  // con la de nadie más. Si ya hay respuestas registradas, solo se avisa
+  // cuántas (sin mostrar precios de nadie, para no influir).
+  const numRespuestas = SOLICITUD.RespuestasCount || 0;
+  const filas = SOLICITUD.Items.map(function(it, idx){
+    return `
+    <tr>
+      <td class="desc">${escapeHtml(it.Descripcion)}${(it.Codigo || it.NoParte) ? '<span class="no-parte">' + [it.Codigo ? ('Código: ' + it.Codigo) : '', it.NoParte ? ('No. de parte: ' + it.NoParte) : ''].filter(Boolean).map(escapeHtml).join(' · ') + '</span>' : ''}</td>
+      <td>${it.Cantidad}</td>
+      <td><input type="number" min="0" step="0.01" class="cot-precio" data-item-id="${it.ItemId}" placeholder="$"></td>
+      <td><input type="number" min="0" max="100" step="0.01" class="cot-iva" data-item-id="${it.ItemId}" placeholder="%"></td>
+      <td><input type="date" class="cot-entrega" data-item-id="${it.ItemId}"></td>
+      <td><input type="text" class="cot-comentario" data-item-id="${it.ItemId}" placeholder="Opcional"></td>
+    </tr>
+    `;
+  }).join('');
+
+  document.getElementById('contenido').innerHTML = `
+    <div class="card">
+      ${numRespuestas > 0 ? '<div class="aviso-info">Ya se registró' + (numRespuestas === 1 ? ' 1 cotización' : 'n ' + numRespuestas + ' cotizaciones') + ' para esta solicitud. Puedes agregar la tuya sin problema — no se afecta lo que ya cargó nadie más.</div>' : ''}
+      ${SOLICITUD.Mensaje ? '<div class="mensaje-proveedor">' + escapeHtml(SOLICITUD.Mensaje) + '</div>' : ''}
+      <table>
+        <thead>
+          <tr>
+            <th>Refacción</th>
+            <th>Cantidad</th>
+            <th>Precio unitario</th>
+            <th>IVA (%)</th>
+            <th>Fecha de entrega</th>
+            <th>Comentario</th>
+          </tr>
+        </thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="campo"><label>Tu nombre *</label><input type="text" id="cot-f-nombre" placeholder="Quién captura esta cotización"></div>
+      <div class="campo">
+        <label>Descuento que ofreces (%, opcional)</label>
+        <input type="number" min="0" max="100" step="0.01" id="cot-f-descuento" placeholder="0">
+        <div class="campo-nota">Un solo descuento que aplica a toda tu cotización (a todas las piezas de esta tabla).</div>
+      </div>
+      <div class="campo"><label>Comentario general (opcional)</label><textarea id="cot-f-comentario" placeholder="Tiempo de entrega, condiciones, vigencia de la cotización, etc."></textarea></div>
+      <div class="campo">
+        <label>Adjuntar cotización en PDF (opcional)</label>
+        <input type="file" id="cot-f-pdf" accept="application/pdf">
+        <div class="campo-nota">Si tienes tu cotización formal en PDF, la puedes adjuntar aquí (máximo 8 MB).</div>
+      </div>
+      <button class="btn" id="cot-btn-enviar">Enviar cotización</button>
+      <div class="status" id="cot-status"></div>
+    </div>
+  `;
+
+  document.getElementById('cot-btn-enviar').addEventListener('click', enviarCotizacion);
+}
+
+function leerArchivoComoDataUrl_(file){
+  return new Promise(function(resolve, reject){
+    const reader = new FileReader();
+    reader.onload = function(){ resolve(reader.result); };
+    reader.onerror = function(){ reject(new Error('No se pudo leer el archivo.')); };
+    reader.readAsDataURL(file);
+  });
+}
+
+function enviarCotizacion(){
+  const nombreResponde = document.getElementById('cot-f-nombre').value.trim();
+  const comentario = document.getElementById('cot-f-comentario').value.trim();
+  const descuentoInput = document.getElementById('cot-f-descuento');
+  const statusEl = document.getElementById('cot-status');
+  const btn = document.getElementById('cot-btn-enviar');
+  const pdfInput = document.getElementById('cot-f-pdf');
+  const pdfFile = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0] : null;
+
+  if(!nombreResponde){
+    statusEl.textContent = 'Escribe tu nombre antes de enviar la cotización.';
+    statusEl.className = 'status show err';
+    return;
+  }
+  const descuentoVal = descuentoInput.value.trim();
+  if(descuentoVal !== '' && (isNaN(Number(descuentoVal)) || Number(descuentoVal) < 0 || Number(descuentoVal) > 100)){
+    statusEl.textContent = 'El descuento debe ser un porcentaje entre 0 y 100.';
+    statusEl.className = 'status show err';
+    return;
+  }
+  if(pdfFile && pdfFile.type !== 'application/pdf'){
+    statusEl.textContent = 'El archivo adjunto debe ser un PDF.';
+    statusEl.className = 'status show err';
+    return;
+  }
+  if(pdfFile && pdfFile.size > 8 * 1024 * 1024){
+    statusEl.textContent = 'El PDF pesa demasiado (máximo 8 MB). Intenta con un archivo más ligero.';
+    statusEl.className = 'status show err';
+    return;
+  }
+
+  const items = Array.from(document.querySelectorAll('.cot-precio')).map(function(input){
+    const itemId = Number(input.dataset.itemId);
+    const ivaInput = document.querySelector('.cot-iva[data-item-id="' + itemId + '"]');
+    const entregaInput = document.querySelector('.cot-entrega[data-item-id="' + itemId + '"]');
+    const comentarioInput = document.querySelector('.cot-comentario[data-item-id="' + itemId + '"]');
+    return {
+      itemId: itemId,
+      precio: input.value,
+      ivaPct: ivaInput ? ivaInput.value : '',
+      fechaEntrega: entregaInput ? entregaInput.value : '',
+      comentario: comentarioInput ? comentarioInput.value.trim() : ''
+    };
+  });
+
+  btn.disabled = true;
+  btn.textContent = 'Enviando...';
+  statusEl.textContent = '';
+  statusEl.className = 'status';
+
+  const enviar = function(pdfBase64, pdfNombre){
+    google.script.run
+      .withSuccessHandler(function(result){
+        btn.disabled = false;
+        btn.textContent = 'Enviar cotización';
+        if(!result || !result.success){
+          statusEl.textContent = 'No se pudo enviar. ' + ((result && result.error) || '');
+          statusEl.className = 'status show err';
+          return;
+        }
+        statusEl.textContent = 'Cotización enviada. ¡Gracias!';
+        statusEl.className = 'status show ok';
+      })
+      .withFailureHandler(function(){
+        btn.disabled = false;
+        btn.textContent = 'Enviar cotización';
+        statusEl.textContent = 'No se pudo enviar. Intenta de nuevo.';
+        statusEl.className = 'status show err';
+      })
+      .responderCotizacion(TOKEN, {
+        nombreResponde: nombreResponde,
+        comentario: comentario,
+        descuentoPct: descuentoVal,
+        items: items,
+        pdfBase64: pdfBase64 || null,
+        pdfNombre: pdfNombre || null
+      });
+  };
+
+  if(pdfFile){
+    leerArchivoComoDataUrl_(pdfFile)
+      .then(function(dataUrl){ enviar(dataUrl, pdfFile.name); })
+      .catch(function(){
+        btn.disabled = false;
+        btn.textContent = 'Enviar cotización';
+        statusEl.textContent = 'No se pudo leer el PDF adjunto. Intenta de nuevo.';
+        statusEl.className = 'status show err';
+      });
+  } else {
+    enviar(null, null);
+  }
+}
+
+cargarSolicitud();
+</script>
+</body>
+</html>

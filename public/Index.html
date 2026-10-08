@@ -899,11 +899,13 @@ const OFFLINE_ENDPOINT_POR_TIPO = {
   reporte: '/api/submitReporte',
   diesel: '/api/submitDiesel',
   movimiento: '/api/submitMovimientoSalida',
+  llegada: '/api/confirmarLlegadaMovimiento',
 };
 const OFFLINE_ETIQUETA_POR_TIPO = {
   reporte: 'reporte',
   diesel: 'carga de diesel',
   movimiento: 'movimiento de equipo',
+  llegada: 'confirmación de llegada',
 };
 
 function offlineEncolar_(tipo, record){
@@ -919,6 +921,11 @@ function offlineEncolar_(tipo, record){
 function offlineEncolarReporte_(record){ return offlineEncolar_('reporte', record); }
 function offlineEncolarDiesel_(record){ return offlineEncolar_('diesel', record); }
 function offlineEncolarMovimiento_(record){ return offlineEncolar_('movimiento', record); }
+// confirmarLlegadaMovimiento (a diferencia de los otros 3) recibe sus datos
+// como varios argumentos sueltos (folio, nombre, comentario, foto), no un
+// solo objeto -- aquí "record" es ese arreglo de argumentos tal cual. Ver
+// el "Array.isArray(...)" en offlineIntentarEnviarPendientes_ más abajo.
+function offlineEncolarLlegada_(argumentos){ return offlineEncolar_('llegada', argumentos); }
 
 // Deja un registro guardado sin señal marcado con el motivo por el que el
 // servidor lo rechazó (ver offlineIntentarEnviarPendientes_ más abajo) --
@@ -1035,10 +1042,14 @@ function offlineIntentarEnviarPendientes_(){
           if(!sigueOk) return false;
           const tipo = item.tipo || 'reporte'; // compatibilidad con filas guardadas antes de que existiera este campo
           const endpoint = OFFLINE_ENDPOINT_POR_TIPO[tipo] || OFFLINE_ENDPOINT_POR_TIPO.reporte;
+          // Casi todos guardan un solo objeto (record) y se manda como
+          // [record]; "llegada" guarda ya el arreglo completo de argumentos
+          // (ver offlineEncolarLlegada_) y se manda tal cual.
+          const argumentos = Array.isArray(item.record) ? item.record : [item.record];
           return fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ args: [item.record] }),
+            body: JSON.stringify({ args: argumentos }),
           })
             .then(function(res){
               if(!res.ok) throw new Error('HTTP ' + res.status);
@@ -2050,6 +2061,7 @@ function renderPendientesMov(lista){
     btn.addEventListener('click', function(){
       var comentario = card.querySelector('.comentario-llegada-mov').value.trim();
       var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
+      var foto = fotosLlegadaMov[folio] || null;
       btn.disabled = true;
       btn.textContent = 'Confirmando...';
       google.script.run
@@ -2064,12 +2076,29 @@ function renderPendientesMov(lista){
           cargarMovimientosTab();
           cargarUbicacionesUnidades();
         })
-        .withFailureHandler(function(){
-          btn.disabled = false;
-          btn.textContent = 'Confirmar llegada';
-          alert('No se pudo confirmar la llegada. Intenta de nuevo.');
+        .withFailureHandler(function(err){
+          console.error(err);
+          // Igual que en las demás pestañas: esto solo se dispara cuando ni
+          // siquiera hubo forma de contactar al servidor (sin señal) -- se
+          // guarda la confirmación en este celular para mandarla sola en
+          // cuanto vuelva a haber señal. Nota: si esta misma tarjeta se
+          // vuelve a mostrar como "Pendiente" (por ejemplo si se recarga la
+          // página antes de que haya señal) y se confirma otra vez por
+          // error, la segunda queda marcada como fallida al sincronizar
+          // (ver offlineMarcarFallido_) en vez de duplicarse en silencio.
+          offlineEncolarLlegada_([folio, nombre, comentario || null, foto])
+            .then(function(){
+              delete fotosLlegadaMov[folio];
+              btn.textContent = 'Guardado sin señal ✓';
+              offlineActualizarAviso_();
+            })
+            .catch(function(){
+              btn.disabled = false;
+              btn.textContent = 'Confirmar llegada';
+              alert('No se pudo confirmar la llegada ni guardarla en este celular. Intenta de nuevo.');
+            });
         })
-        .confirmarLlegadaMovimiento(folio, nombre, comentario || null, fotosLlegadaMov[folio] || null);
+        .confirmarLlegadaMovimiento(folio, nombre, comentario || null, foto);
     });
   });
 }

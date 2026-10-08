@@ -388,6 +388,41 @@
   }
   .offline-banner button:disabled{ opacity:0.5; cursor:default; }
 
+  /* Igual que .offline-banner pero para registros que SÍ se lograron mandar
+     al servidor y el servidor los rechazó de verdad (no por falta de señal
+     -- ver offlineMarcarFallido_ más abajo). Se muestran aparte, en rojo,
+     para no confundirlos con los que nada más están esperando señal. */
+  .offline-fallidos{ display:none; flex-direction:column; gap:8px; margin-bottom:16px; }
+  .offline-fallidos.show{ display:flex; }
+  .offline-fallido-fila{
+    padding: 10px 12px;
+    border-radius: 4px;
+    background: rgba(194,75,63,0.12);
+    color: var(--danger);
+    border: 1px solid rgba(194,75,63,0.3);
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .offline-fallido-fila button{
+    background: var(--danger);
+    color:#1C1E1F;
+    border:none;
+    border-radius:4px;
+    padding:7px 10px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    font-weight:600;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
   .install-banner{
     margin-bottom: 16px;
     padding: 10px 12px;
@@ -605,9 +640,10 @@
 
   <main>
     <div class="offline-banner" id="offline-banner">
-      <span id="offline-banner-texto">0 reportes sin enviar</span>
+      <span id="offline-banner-texto">0 registros sin enviar</span>
       <button type="button" id="offline-banner-reintentar">Reintentar ahora</button>
     </div>
+    <div class="offline-fallidos" id="offline-fallidos"></div>
     <div class="install-banner" id="install-banner">
       <span id="install-banner-texto">Instala esta app en tu celular para abrirla directo, aunque no haya señal.</span>
       <div class="install-banner-botones">
@@ -824,14 +860,16 @@
 // ============================================================
 
 // ============================================================
-// Cola de reportes sin enviar (sin señal/internet) — IndexedDB
+// Cola de registros sin enviar (sin señal/internet) — IndexedDB
 // ============================================================
-// Si enviar un reporte falla porque no hay red (no porque el servidor lo
-// haya rechazado), se guarda aquí mismo en el celular y se reintenta solo,
-// automáticamente, en cuanto vuelva a haber señal — así se puede seguir
-// capturando fallas en huertas sin cobertura sin perder nada. Usa
-// IndexedDB (no localStorage) porque la foto va adentro del reporte como
-// base64 y puede pesar varios cientos de KB, o unos cuantos MB si es video.
+// Comparten esta misma cola las 3 pestañas que capturan algo en campo:
+// Reportar, Cargar Diesel y Movimientos (salida de equipo). Si enviar uno
+// falla porque no hay red (no porque el servidor lo haya rechazado), se
+// guarda aquí mismo en el celular y se reintenta solo, automáticamente, en
+// cuanto vuelva a haber señal — así se puede seguir capturando en huertas
+// sin cobertura sin perder nada. Usa IndexedDB (no localStorage) porque la
+// foto va adentro del registro como base64 y puede pesar varios cientos de
+// KB, o unos cuantos MB si es video.
 const OFFLINE_DB_NOMBRE = 'reporte_fallas_offline';
 const OFFLINE_DB_VERSION = 1;
 const OFFLINE_STORE = 'pendientes';
@@ -851,11 +889,56 @@ function offlineAbrirDb_(){
   });
 }
 
-function offlineEncolarReporte_(record){
+// A qué URL del servidor mandar cada tipo de registro guardado sin señal,
+// y cómo nombrarlo en los mensajes para el usuario. "reporte" se queda
+// como estaba (compatibilidad con lo que ya hay guardado en el celular de
+// quien actualice la app a mitad de una fila sin enviar); "diesel" y
+// "movimiento" son las pestañas de Cargar Diesel y Movimientos, que
+// reutilizan exactamente esta misma cola.
+const OFFLINE_ENDPOINT_POR_TIPO = {
+  reporte: '/api/submitReporte',
+  diesel: '/api/submitDiesel',
+  movimiento: '/api/submitMovimientoSalida',
+};
+const OFFLINE_ETIQUETA_POR_TIPO = {
+  reporte: 'reporte',
+  diesel: 'carga de diesel',
+  movimiento: 'movimiento de equipo',
+};
+
+function offlineEncolar_(tipo, record){
   return offlineAbrirDb_().then(function(db){
     return new Promise(function(resolve, reject){
       const tx = db.transaction(OFFLINE_STORE, 'readwrite');
-      tx.objectStore(OFFLINE_STORE).add({ record: record, creadoEn: Date.now() });
+      tx.objectStore(OFFLINE_STORE).add({ tipo: tipo, record: record, creadoEn: Date.now() });
+      tx.oncomplete = function(){ resolve(); };
+      tx.onerror = function(){ reject(tx.error); };
+    });
+  });
+}
+function offlineEncolarReporte_(record){ return offlineEncolar_('reporte', record); }
+function offlineEncolarDiesel_(record){ return offlineEncolar_('diesel', record); }
+function offlineEncolarMovimiento_(record){ return offlineEncolar_('movimiento', record); }
+
+// Deja un registro guardado sin señal marcado con el motivo por el que el
+// servidor lo rechazó (ver offlineIntentarEnviarPendientes_ más abajo) --
+// a diferencia de offlineEliminarPendiente_, NO lo borra: se queda a la
+// vista en la pantalla (en rojo, aparte de los que solo están esperando
+// señal) para que quien lo capturó sepa que hace falta corregirlo a mano,
+// en vez de desaparecer sin que nadie se entere.
+function offlineMarcarFallido_(id, mensajeError){
+  return offlineAbrirDb_().then(function(db){
+    return new Promise(function(resolve, reject){
+      const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+      const store = tx.objectStore(OFFLINE_STORE);
+      const req = store.get(id);
+      req.onsuccess = function(){
+        const item = req.result;
+        if(item){
+          item.error = mensajeError;
+          store.put(item);
+        }
+      };
       tx.oncomplete = function(){ resolve(); };
       tx.onerror = function(){ reject(tx.error); };
     });
@@ -888,15 +971,46 @@ function offlineActualizarAviso_(){
   offlineListarPendientes_().then(function(items){
     const banner = document.getElementById('offline-banner');
     const texto = document.getElementById('offline-banner-texto');
-    if(!banner || !texto) return;
-    if(items.length === 0){
-      banner.classList.remove('show');
-      return;
+    if(banner && texto){
+      // Los que ya se intentaron y el servidor rechazó de verdad (item.error)
+      // se muestran aparte, abajo -- aquí solo los que siguen esperando señal.
+      const sinEnviar = items.filter(function(it){ return !it.error; });
+      if(sinEnviar.length === 0){
+        banner.classList.remove('show');
+      } else {
+        texto.textContent = sinEnviar.length === 1
+          ? '1 registro sin enviar — se enviará solo en cuanto haya señal.'
+          : (sinEnviar.length + ' registros sin enviar — se enviarán solos en cuanto haya señal.');
+        banner.classList.add('show');
+      }
     }
-    texto.textContent = items.length === 1
-      ? '1 reporte sin enviar — se enviará solo en cuanto haya señal.'
-      : (items.length + ' reportes sin enviar — se enviarán solos en cuanto haya señal.');
-    banner.classList.add('show');
+
+    const fallidosBox = document.getElementById('offline-fallidos');
+    if(fallidosBox){
+      const fallidos = items.filter(function(it){ return !!it.error; });
+      fallidosBox.innerHTML = '';
+      if(fallidos.length === 0){
+        fallidosBox.classList.remove('show');
+      } else {
+        fallidosBox.classList.add('show');
+        fallidos.forEach(function(it){
+          const etiqueta = OFFLINE_ETIQUETA_POR_TIPO[it.tipo] || 'registro';
+          const fila = document.createElement('div');
+          fila.className = 'offline-fallido-fila';
+          const span = document.createElement('span');
+          span.textContent = 'No se pudo enviar un(a) ' + etiqueta + ' guardado(a) sin señal: ' + it.error + '. Captúralo(a) de nuevo a mano.';
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = 'Quitar';
+          btn.addEventListener('click', function(){
+            offlineEliminarPendiente_(it.id).then(offlineActualizarAviso_);
+          });
+          fila.appendChild(span);
+          fila.appendChild(btn);
+          fallidosBox.appendChild(fila);
+        });
+      }
+    }
   });
 }
 
@@ -919,7 +1033,9 @@ function offlineIntentarEnviarPendientes_(){
       return items.reduce(function(cadena, item){
         return cadena.then(function(sigueOk){
           if(!sigueOk) return false;
-          return fetch('/api/submitReporte', {
+          const tipo = item.tipo || 'reporte'; // compatibilidad con filas guardadas antes de que existiera este campo
+          const endpoint = OFFLINE_ENDPOINT_POR_TIPO[tipo] || OFFLINE_ENDPOINT_POR_TIPO.reporte;
+          return fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ args: [item.record] }),
@@ -929,10 +1045,19 @@ function offlineIntentarEnviarPendientes_(){
               return res.json();
             })
             .then(function(data){
-              if(!data || !data.success) throw new Error((data && data.error) || 'El servidor rechazó el reporte.');
+              if(!data || !data.success){
+                // El servidor sí contestó (hay señal) pero dijo que no --
+                // ya no es falta de señal, es un rechazo de verdad (p.ej. un
+                // movimiento que ya no aplica porque cambió algo mientras no
+                // había señal). Reintentarlo después no lo va a arreglar
+                // solo, así que no tiene caso detener aquí el resto de la
+                // cola por esto: se deja marcado con el motivo (ver
+                // offlineActualizarAviso_) y se sigue con lo demás.
+                return offlineMarcarFallido_(item.id, (data && data.error) || 'El servidor rechazó el envío.').then(function(){ return true; });
+              }
               return offlineEliminarPendiente_(item.id).then(function(){ return true; });
             })
-            .catch(function(){ return false; });
+            .catch(function(){ return false; }); // fetch no se completó (sin señal) o HTTP de plano falló -- aquí sí hay que detenerse y reintentar todo más al rato
         });
       }, Promise.resolve(true));
     })
@@ -1640,6 +1765,20 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// Deja el formulario de "Cargar Diesel" listo para la siguiente captura --
+// se usa tanto cuando la carga se envía de verdad (éxito) como cuando se
+// guarda sin señal en la cola offline, igual que limpiarFormularioReporte_.
+function limpiarFormularioDiesel_(){
+  unitSearchInputDiesel.value = '';
+  unidadSeleccionadaDiesel = null;
+  unitSelectWrapDiesel.classList.remove('selected');
+  document.getElementById('f-litros').value = '';
+  document.getElementById('f-lectura').value = '';
+  implementoSearchInputDiesel.value = '';
+  implementoSeleccionadoDiesel = null;
+  implementoSelectWrapDiesel.classList.remove('selected');
+}
+
 document.getElementById('btn-submit-diesel').onclick = () => {
   const litros = document.getElementById('f-litros').value.trim();
   const lectura = document.getElementById('f-lectura').value.trim();
@@ -1648,7 +1787,10 @@ document.getElementById('btn-submit-diesel').onclick = () => {
 
   function showDieselStatus(msg, ok){
     statusEl.textContent = msg;
-    statusEl.className = 'status show ' + (ok ? 'ok' : 'err');
+    // "ok" acepta true (verde, enviado), false (rojo, error) o 'warn'
+    // (ámbar, guardado sin señal — ver offlineEncolarDiesel_ más abajo).
+    const clase = ok === 'warn' ? 'warn' : (ok ? 'ok' : 'err');
+    statusEl.className = 'status show ' + clase;
   }
 
   if(!unidadSeleccionadaDiesel || !litros){
@@ -1684,19 +1826,27 @@ document.getElementById('btn-submit-diesel').onclick = () => {
         return;
       }
       showDieselStatus('Carga registrada correctamente. Folio ' + result.folio, true);
-      unitSearchInputDiesel.value = '';
-      unidadSeleccionadaDiesel = null;
-      unitSelectWrapDiesel.classList.remove('selected');
-      document.getElementById('f-litros').value = '';
-      document.getElementById('f-lectura').value = '';
-      implementoSearchInputDiesel.value = '';
-      implementoSeleccionadoDiesel = null;
-      implementoSelectWrapDiesel.classList.remove('selected');
+      limpiarFormularioDiesel_();
     })
     .withFailureHandler((err) => {
-      btn.disabled = false;
-      btn.textContent = 'Registrar carga';
-      showDieselStatus('No se pudo registrar la carga. Intenta de nuevo.', false);
+      console.error(err);
+      // Igual que en Reportar: esto solo se dispara cuando ni siquiera hubo
+      // forma de contactar al servidor (sin señal), no cuando el servidor
+      // respondió que no. En ese caso se guarda la carga en este celular
+      // para mandarla sola en cuanto vuelva a haber señal.
+      offlineEncolarDiesel_(record)
+        .then(() => {
+          btn.disabled = false;
+          btn.textContent = 'Registrar carga';
+          showDieselStatus('Sin señal: tu carga quedó guardada en este celular y se enviará sola en cuanto haya señal. No cierres ni desinstales la app mientras tanto.', 'warn');
+          limpiarFormularioDiesel_();
+          offlineActualizarAviso_();
+        })
+        .catch(() => {
+          btn.disabled = false;
+          btn.textContent = 'Registrar carga';
+          showDieselStatus('No se pudo registrar la carga ni guardarla en este celular. Intenta de nuevo.', false);
+        });
     })
     .submitDiesel(record);
 };
@@ -1965,6 +2115,27 @@ function cargarMovimientosTab(){
     .getMovimientosDeUsuario(nombre);
 }
 
+// Deja el formulario de salida de "Movimientos" listo para la siguiente
+// captura -- se usa tanto cuando la salida se envía de verdad (éxito) como
+// cuando se guarda sin señal en la cola offline. A propósito NO recarga la
+// lista de movimientos (cargarMovimientosTab(), que sí se llama aparte en
+// el caso de éxito en línea): sin señal esa recarga solo fallaría sin
+// avisar nada útil.
+function limpiarFormularioMovimientoSalida_(){
+  unitSearchInputMov.value = '';
+  unidadSeleccionadaMov = null;
+  unitSelectWrapMov.classList.remove('selected');
+  document.getElementById('f-huerta-destino-mov').selectedIndex = 0;
+  document.getElementById('f-comentario-mov').value = '';
+  fotoSalidaMovDataUrl = null;
+  photoBoxMov.classList.remove('has-photo');
+  photoBoxMov.style.display = 'none';
+  photoBoxMov.innerHTML = '';
+  mediaActionsMov.style.display = 'flex';
+  cameraPhotoInputMov.value = '';
+  galleryInputMov.value = '';
+}
+
 document.getElementById('btn-submit-salida-mov').onclick = () => {
   const huertaDestino = document.getElementById('f-huerta-destino-mov').value;
   const comentario = document.getElementById('f-comentario-mov').value.trim();
@@ -1973,7 +2144,10 @@ document.getElementById('btn-submit-salida-mov').onclick = () => {
 
   function showMovStatus(msg, ok){
     statusEl.textContent = msg;
-    statusEl.className = 'status show ' + (ok ? 'ok' : 'err');
+    // "ok" acepta true (verde, enviado), false (rojo, error) o 'warn'
+    // (ámbar, guardado sin señal — ver offlineEncolarMovimiento_ más abajo).
+    const clase = ok === 'warn' ? 'warn' : (ok ? 'ok' : 'err');
+    statusEl.className = 'status show ' + clase;
   }
 
   if(!unidadSeleccionadaMov || !huertaDestino){
@@ -1985,6 +2159,15 @@ document.getElementById('btn-submit-salida-mov').onclick = () => {
   btn.disabled = true;
   btn.textContent = 'Guardando...';
 
+  const record = {
+    nombre: nombre,
+    unidad: unidadSeleccionadaMov.v,
+    unidadLabel: unidadSeleccionadaMov.l,
+    huertaDestino: huertaDestino,
+    comentario: comentario,
+    foto: fotoSalidaMovDataUrl
+  };
+
   google.script.run
     .withSuccessHandler((res) => {
       btn.disabled = false;
@@ -1994,33 +2177,34 @@ document.getElementById('btn-submit-salida-mov').onclick = () => {
         return;
       }
       showMovStatus('Salida registrada: ' + res.folio + '. Cuando llegue a su destino, el encargado de esa huerta debe confirmar la llegada.', true);
-      unitSearchInputMov.value = '';
-      unidadSeleccionadaMov = null;
-      unitSelectWrapMov.classList.remove('selected');
-      document.getElementById('f-huerta-destino-mov').selectedIndex = 0;
-      document.getElementById('f-comentario-mov').value = '';
-      fotoSalidaMovDataUrl = null;
-      photoBoxMov.classList.remove('has-photo');
-      photoBoxMov.style.display = 'none';
-      photoBoxMov.innerHTML = '';
-      mediaActionsMov.style.display = 'flex';
-      cameraPhotoInputMov.value = '';
-      galleryInputMov.value = '';
+      limpiarFormularioMovimientoSalida_();
       cargarMovimientosTab();
     })
-    .withFailureHandler(() => {
-      btn.disabled = false;
-      btn.textContent = 'Registrar salida';
-      showMovStatus('No se pudo registrar la salida. Intenta de nuevo.', false);
+    .withFailureHandler((err) => {
+      console.error(err);
+      // Igual que en Reportar y Cargar Diesel: esto solo se dispara cuando
+      // ni siquiera hubo forma de contactar al servidor (sin señal). Nota:
+      // las validaciones de este movimiento (que la unidad de verdad esté
+      // en tu huerta, que no tenga ya otro movimiento pendiente, etc.) las
+      // hace el servidor, no este celular -- si al mandarse más tarde el
+      // servidor la rechaza por alguna de esas razones, se avisa aparte
+      // (ver offlineMarcarFallido_/offlineActualizarAviso_) en vez de
+      // perderse en silencio.
+      offlineEncolarMovimiento_(record)
+        .then(() => {
+          btn.disabled = false;
+          btn.textContent = 'Registrar salida';
+          showMovStatus('Sin señal: esta salida quedó guardada en este celular y se enviará sola en cuanto haya señal. No cierres ni desinstales la app mientras tanto.', 'warn');
+          limpiarFormularioMovimientoSalida_();
+          offlineActualizarAviso_();
+        })
+        .catch(() => {
+          btn.disabled = false;
+          btn.textContent = 'Registrar salida';
+          showMovStatus('No se pudo registrar la salida ni guardarla en este celular. Intenta de nuevo.', false);
+        });
     })
-    .submitMovimientoSalida({
-      nombre: nombre,
-      unidad: unidadSeleccionadaMov.v,
-      unidadLabel: unidadSeleccionadaMov.l,
-      huertaDestino: huertaDestino,
-      comentario: comentario,
-      foto: fotoSalidaMovDataUrl
-    });
+    .submitMovimientoSalida(record);
 };
 
 const photoBox = document.getElementById('photo-box');

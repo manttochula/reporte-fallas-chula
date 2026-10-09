@@ -1400,6 +1400,12 @@
         <div class="dzh-lista" id="dzh-lista"><div class="empty">Cargando...</div></div>
       </div>
 
+      <div class="dz-resumen" id="dzd-container">
+        <div class="dz-resumen-header">Diesel por departamento</div>
+        <div class="mnt-subtext" style="margin:2px 0 12px;">Cuánto ha cargado cada departamento (Campo/Cosecha/Preparación) y en qué huertas — por ejemplo, para ver que Preparación carga tanto en Alma Lucia como en otras huertas. Solo cuenta lo CARGADO: lo entregado a una huerta es un tanque compartido, no se sabe de antemano para qué departamento es, así que ese dato se sigue viendo nada más por huerta (arriba). Haz clic en un departamento para ver su desglose por huerta.</div>
+        <div class="dzh-lista" id="dzd-lista"><div class="empty">Cargando...</div></div>
+      </div>
+
       <div class="dz-resumen">
         <div class="dz-resumen-header">Diesel restante por huerta</div>
         <div class="toolbar" style="margin-bottom:10px;">
@@ -5138,6 +5144,7 @@ ptabDiesel.addEventListener('click', function(){
   if(!RENDIMIENTO_CARGADO){ cargarRendimientoMaquinaria(); }
   if(!MAQUINARIA_CARGADA){ cargarMaquinaria(); }
   if(!DZH_ACORDEON_CONSTRUIDO){ DZH_ACORDEON_CONSTRUIDO = true; construirAcordeonDiesel_(); }
+  if(!DZD_ACORDEON_CONSTRUIDO){ DZD_ACORDEON_CONSTRUIDO = true; construirAcordeonDepartamento_(); }
 });
 ptabCombustibleAutomotriz.addEventListener('click', function(){
   activarPanelTab(ptabCombustibleAutomotriz, pviewCombustibleAutomotriz);
@@ -5591,6 +5598,7 @@ function renderDiesel(){
   if(records.length === 0){
     tbody.innerHTML = '<tr><td colspan="14"><div class="empty">No hay cargas de diesel que coincidan.</div></td></tr>';
     dzhRefrescarTrasRenderDiesel_();
+    dzdRefrescarTrasRenderDiesel_();
     return;
   }
 
@@ -5686,6 +5694,7 @@ function renderDiesel(){
   });
   ocultarControlesSoloLectura();
   dzhRefrescarTrasRenderDiesel_();
+  dzdRefrescarTrasRenderDiesel_();
 }
 
 document.querySelectorAll('#pview-diesel thead th[data-key]').forEach(function(th){
@@ -10331,6 +10340,167 @@ function dzhRenderEntregas_(i){
   });
   ocultarControlesSoloLectura();
 }
+
+// ------------------------------------------------------------------
+// --- Diesel por departamento (acordeón) ---
+// Pedido por Carlos: ver cuánto carga cada departamento (Campo/Cosecha/
+// Preparación) y en qué huertas lo hace — p.ej. que Preparación carga
+// tanto en Alma Lucia como en otras huertas. A diferencia del acordeón
+// "Diesel por huerta" de arriba, este NO necesita pedir nada nuevo al
+// servidor ni tiene su propia captura: el departamento de cada carga ya
+// viene incluido en ALL_DIESEL (JOIN a maquinaria.departamento, ver
+// DIESEL_SELECT en server/handlers.js), así que todo se calcula aquí
+// mismo en el navegador a partir de esos mismos datos. Por eso mismo
+// tampoco tiene su propio filtro de "mostrar eliminados": siempre
+// descuenta las cargas eliminadas (igual que el saldo por huerta), para
+// que los totales no se puedan inflar por error.
+//
+// "Sin departamento" junta las cargas cuyo equipo no tiene departamento
+// asignado en el Catálogo (o ya no existe ahí) — se muestra aparte, nunca
+// se esconde, para que ese diesel no desaparezca de la vista sin que
+// nadie se dé cuenta.
+let DZD_ACORDEON_CONSTRUIDO = false;
+const DZD_GRUPOS = [
+  { key: 'CAMPO', label: 'Campo' },
+  { key: 'COSECHA', label: 'Cosecha' },
+  { key: 'PREPARACION', label: 'Preparación' },
+  { key: '', label: 'Sin departamento' },
+];
+
+function dzdCargasDelGrupo_(grupoKey){
+  return ALL_DIESEL.filter(function(r){
+    if(r.Eliminado) return false;
+    return (r.Departamento || '').toUpperCase() === grupoKey;
+  });
+}
+
+function construirAcordeonDepartamento_(){
+  const cont = document.getElementById('dzd-lista');
+  cont.innerHTML = DZD_GRUPOS.map(function(g, i){
+    return `
+    <div class="dzh-card" id="dzd-card-${i}" data-idx="${i}">
+      <button type="button" class="dzh-card-header" data-idx="${i}">
+        <span class="dzh-card-nombre">${escapeHtml(g.label)}</span>
+        <span class="dzh-card-saldo" id="dzd-total-badge-${i}">Cargando...</span>
+        <span class="dzh-card-arrow">▾</span>
+      </button>
+      <div class="dzh-card-body" id="dzd-body-${i}"></div>
+    </div>
+    `;
+  }).join('');
+
+  cont.querySelectorAll('.dzh-card-header').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      dzdToggleTarjeta_(parseInt(btn.dataset.idx, 10));
+    });
+  });
+
+  actualizarTotalesAcordeonDepartamento_();
+}
+
+function dzdToggleTarjeta_(i){
+  const card = document.getElementById('dzd-card-' + i);
+  if(!card) return;
+  if(card.classList.contains('open')){
+    card.classList.remove('open');
+    return;
+  }
+  card.classList.add('open');
+  const body = document.getElementById('dzd-body-' + i);
+  if(!body.dataset.construido){
+    body.innerHTML = dzdCuerpoTarjetaHtml_(i);
+    body.dataset.construido = '1';
+    dzdInicializarTarjeta_(i);
+  }
+}
+
+function dzdCuerpoTarjetaHtml_(i){
+  return `
+    <div class="dzh-sub">
+      <div class="dzh-sub-header">Desglose por huerta</div>
+      <div class="toolbar" style="margin-bottom:8px;">
+        <span class="toolbar-date-group">
+          <label class="toolbar-date-label">Desde</label>
+          <input type="date" id="dzd-desde-${i}">
+          <label class="toolbar-date-label">hasta</label>
+          <input type="date" id="dzd-hasta-${i}">
+          <button type="button" class="export-btn dzd-btn-limpiar" data-idx="${i}" title="Quitar el filtro de fechas">✕</button>
+        </span>
+      </div>
+      <div class="table-wrap">
+        <table class="dzh-tabla-compacta">
+          <thead><tr><th>Huerta</th><th>Litros cargados</th><th>Cargas</th></tr></thead>
+          <tbody id="dzd-tbody-${i}"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function dzdInicializarTarjeta_(i){
+  dzdRenderDetalle_(i);
+  document.getElementById('dzd-desde-' + i).addEventListener('change', function(){ dzdRenderDetalle_(i); });
+  document.getElementById('dzd-hasta-' + i).addEventListener('change', function(){ dzdRenderDetalle_(i); });
+  document.querySelector('.dzd-btn-limpiar[data-idx="' + i + '"]').addEventListener('click', function(){
+    document.getElementById('dzd-desde-' + i).value = '';
+    document.getElementById('dzd-hasta-' + i).value = '';
+    dzdRenderDetalle_(i);
+  });
+}
+
+function dzdRenderDetalle_(i){
+  const tbody = document.getElementById('dzd-tbody-' + i);
+  if(!tbody) return;
+  const grupo = DZD_GRUPOS[i];
+  const desdeStr = document.getElementById('dzd-desde-' + i).value;
+  const hastaStr = document.getElementById('dzd-hasta-' + i).value;
+  const desde = desdeStr ? new Date(desdeStr + 'T00:00:00') : null;
+  const hasta = hastaStr ? new Date(hastaStr + 'T23:59:59') : null;
+
+  const cargas = dzdCargasDelGrupo_(grupo.key).filter(function(r){
+    if(!desde && !hasta) return true;
+    const f = r.Fecha ? new Date(r.Fecha) : null;
+    if(!f || isNaN(f.getTime())) return false;
+    if(desde && f < desde) return false;
+    if(hasta && f > hasta) return false;
+    return true;
+  });
+
+  const porHuerta = {};
+  cargas.forEach(function(r){
+    const key = (r.Huerta || 'Sin huerta').trim().toUpperCase();
+    if(!porHuerta[key]) porHuerta[key] = { huerta: (r.Huerta || 'Sin huerta').trim(), litros: 0, cargas: 0 };
+    porHuerta[key].litros += parseFloat(r.Litros) || 0;
+    porHuerta[key].cargas += 1;
+  });
+  const filas = Object.keys(porHuerta).map(function(k){ return porHuerta[k]; })
+    .sort(function(a, b){ return b.litros - a.litros; });
+
+  if(filas.length === 0){
+    tbody.innerHTML = '<tr><td colspan="3"><div class="empty">No hay cargas que coincidan.</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = filas.map(function(f){
+    return `<tr><td>${escapeHtml(f.huerta)}</td><td>${f.litros.toLocaleString('es-MX')}</td><td>${f.cargas}</td></tr>`;
+  }).join('');
+}
+
+function actualizarTotalesAcordeonDepartamento_(){
+  DZD_GRUPOS.forEach(function(g, i){
+    const badge = document.getElementById('dzd-total-badge-' + i);
+    if(!badge) return;
+    const total = dzdCargasDelGrupo_(g.key).reduce(function(sum, r){ return sum + (parseFloat(r.Litros) || 0); }, 0);
+    badge.innerHTML = 'Cargado: <b>' + total.toLocaleString('es-MX') + ' L</b>';
+    const card = document.getElementById('dzd-card-' + i);
+    if(card && card.classList.contains('open')) dzdRenderDetalle_(i);
+  });
+}
+
+function dzdRefrescarTrasRenderDiesel_(){
+  if(!DZD_ACORDEON_CONSTRUIDO) return;
+  actualizarTotalesAcordeonDepartamento_();
+}
+// ------------------------------------------------------------------
 
 // --- Pestaña Maquinaria ---
 let ALL_MAQUINARIA = [];

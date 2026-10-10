@@ -766,6 +766,11 @@
   .dzh-tabla-compacta{ min-width:0; }
   .dzh-tabla-compacta thead th{ white-space:normal; padding:8px 6px; font-size:10px; line-height:1.3; }
   .dzh-tabla-compacta tbody td{ padding:7px 6px; font-size:12px; }
+  /* Lista de huertas anidada dentro de una tarjeta de "Diesel por
+     departamento" (ver dzdConstruirHuertasDelGrupo_): mismas tarjetas de
+     huerta (.dzh-card) que "Diesel por huerta", solo que indentadas para
+     que se note que están dentro de un departamento. */
+  .dzd-huertas-anidadas{ margin-top:2px; padding-left:14px; border-left:2px solid var(--line); }
   /* Insignia de estatus para la pestaña Insumos (Pendiente/Autorizado/Entregado). */
   .ins-badge{
     font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.03em;
@@ -1402,11 +1407,11 @@
 
       <div class="dz-resumen" id="dzd-container">
         <div class="dz-resumen-header">Diesel por departamento</div>
-        <div class="mnt-subtext" style="margin:2px 0 12px;">Cuánto ha cargado cada departamento (Campo/Cosecha/Preparación) y en qué huertas — por ejemplo, para ver que Preparación carga tanto en Alma Lucia como en otras huertas. Solo cuenta lo CARGADO: lo entregado a una huerta es un tanque compartido, no se sabe de antemano para qué departamento es, así que ese dato se sigue viendo nada más por huerta (arriba). Haz clic en un departamento para ver su desglose por huerta.</div>
+        <div class="mnt-subtext" style="margin:2px 0 12px;">Cuánto ha cargado cada departamento (Campo/Cosecha/Preparación) y en qué huertas — por ejemplo, para ver que Preparación carga tanto en Alma Lucia como en otras huertas. Solo cuenta lo CARGADO: lo entregado a una huerta es un tanque compartido, no se sabe de antemano para qué departamento es, así que ese dato se sigue viendo nada más por huerta. Haz clic en un departamento para ver sus huertas, y en una huerta para ver su saldo, registrar una entrega o ver/agregar sus cargas — es la misma tarjeta que en "Diesel por huerta" de arriba.</div>
         <div class="dzh-lista" id="dzd-lista"><div class="empty">Cargando...</div></div>
       </div>
 
-      <div class="dz-resumen">
+      <div class="dz-resumen" id="dz-restante-container">
         <div class="dz-resumen-header">Diesel restante por huerta</div>
         <div class="toolbar" style="margin-bottom:10px;">
           <select id="dzr-huerta"><option value="">Todas las huertas</option></select>
@@ -1435,7 +1440,7 @@
         </div>
       </div>
 
-      <div class="dz-entregas">
+      <div class="dz-entregas" id="dz-entregas-container">
         <div class="dz-entregas-header">Diesel entregado a huertas</div>
         <div class="dz-entregas-form">
           <select id="ent-huerta"><option value="" disabled selected>Selecciona huerta</option></select>
@@ -1474,6 +1479,7 @@
         </div>
       </div>
 
+      <div id="dz-tabla-container">
       <div class="toolbar">
         <input type="text" id="dz-search" placeholder="Buscar por folio, unidad, huerta o quien cargó...">
         <select id="dz-huerta"><option value="">Todas las huertas</option></select>
@@ -1523,6 +1529,7 @@
           <tbody id="dz-table-body"></tbody>
         </table>
       </div>
+      </div>
 
       <div class="dz-resumen" id="dz-notif-container">
         <div class="dz-resumen-header">Notificaciones (odómetro/horómetro repetido, rendimiento u horas excedidos)</div>
@@ -1551,7 +1558,7 @@
         </div>
       </div>
 
-      <div class="dz-resumen">
+      <div class="dz-resumen" id="dz-rendimiento-container">
         <div class="dz-resumen-header">Rendimiento y horas máximas aceptables por equipo (litros por hora de labor / horas entre cargas)</div>
         <div class="toolbar" style="margin-bottom:10px;">
           <input type="text" id="rend-search" placeholder="Buscar equipo..." style="max-width:320px;">
@@ -2902,6 +2909,11 @@
           <label><input type="checkbox" id="usr-f-ve-soldadura"> Ve la casilla "Es trabajo para el Área de Soldadura"</label>
           <label style="display:block;margin-top:6px;"><input type="checkbox" id="usr-f-ve-automotriz"> Ve la casilla "Es trabajo Automotriz"</label>
         </div>
+        <div class="usr-permisos-panel" id="usr-diesel-cuadros-wrap">
+          <div class="usr-permisos-title">Cuadros de Combustible Agrícola que ve (todos marcados = los ve todos)</div>
+          <div class="mnt-subtext" style="margin:-4px 0 8px;">Desmarca los que esta persona no necesite ver en la pestaña Diesel del Panel — solo aplica si tiene acceso a esa pestaña arriba.</div>
+          <div class="usr-huertas-grid" id="usr-diesel-cuadros-grid"></div>
+        </div>
         <select id="usr-huerta"><option value="">Sin huerta asignada</option></select>
         <input type="text" id="usr-password" placeholder="Contraseña (vacío = no cambiar)">
         <button class="usr-save-btn" id="usr-save">Guardar asignación</button>
@@ -3106,6 +3118,47 @@ let PANEL_HUERTAS_ORDENES = [];
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
 const PESTANAS_PANEL_UI = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'refacciones', 'insumos', 'usuarios'];
+
+// --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
+// ve: Diesel por huerta/departamento, restante, entregado, la tabla
+// general, Notificaciones y Rendimiento. Es un permiso que asigna el admin
+// desde Usuarios (usr-diesel-cuadros-grid / guardarUsuario), igual que
+// PANEL_HUERTAS_ORDENES — no algo que cada quien elige por su cuenta. Se
+// llena al iniciar sesión (ver validarUsuario/iniciarPanel) y se guarda en
+// localStorage para re-entrar sin pedir contraseña. Vacío = ve todos los
+// cuadros (default, para no sorprender a nadie que no se haya configurado
+// explícitamente).
+const DZ_CUADROS = [
+  { id: 'dzh-container', label: 'Diesel por huerta' },
+  { id: 'dzd-container', label: 'Diesel por departamento' },
+  { id: 'dz-restante-container', label: 'Diesel restante por huerta' },
+  { id: 'dz-entregas-container', label: 'Diesel entregado a huertas' },
+  { id: 'dz-tabla-container', label: 'Cargas de diesel (tabla general)' },
+  { id: 'dz-notif-container', label: 'Notificaciones' },
+  { id: 'dz-rendimiento-container', label: 'Rendimiento y horas máximas por equipo' },
+];
+let PANEL_DIESEL_CUADROS_OCULTOS = [];
+
+function aplicarCuadrosDiesel_(){
+  const ocultos = new Set(PANEL_DIESEL_CUADROS_OCULTOS || []);
+  DZ_CUADROS.forEach(function(c){
+    const el = document.getElementById(c.id);
+    if(el) el.style.display = ocultos.has(c.id) ? 'none' : '';
+  });
+}
+
+// El checklist de Usuarios es estático (no depende de ningún catálogo del
+// servidor), así que se arma una sola vez, de entrada — todas las casillas
+// empiezan marcadas (= ve todos los cuadros) hasta que se cargue una
+// persona concreta (ver left.addEventListener('click', ...) en
+// renderUsuarios) o se limpie el formulario tras guardar.
+(function poblarUsrDieselCuadrosGrid_(){
+  const grid = document.getElementById('usr-diesel-cuadros-grid');
+  if(!grid) return;
+  grid.innerHTML = DZ_CUADROS.map(function(c){
+    return '<label class="usr-huerta-check"><input type="checkbox" value="' + c.id + '" checked> ' + escapeHtml(c.label) + '</label>';
+  }).join('');
+})();
 function nivelPanel(pestana){
   return (PANEL_PERMISOS && PANEL_PERMISOS[pestana]) || null;
 }
@@ -3292,7 +3345,7 @@ function ocultarControlesSoloLectura(){
     ]);
   }
   if(!puedeCapturarPestana('usuarios')){
-    ocultar(['#usr-save', '.usr-delete', '#usr-permisos-wrap', '#usr-huertas-ordenes-wrap', '#usr-letrero-wrap', '#usr-huertas-reportar-wrap', '#usr-casillas-wrap']);
+    ocultar(['#usr-save', '.usr-delete', '#usr-permisos-wrap', '#usr-huertas-ordenes-wrap', '#usr-letrero-wrap', '#usr-huertas-reportar-wrap', '#usr-casillas-wrap', '#usr-diesel-cuadros-wrap']);
   }
 }
 
@@ -3347,6 +3400,12 @@ function iniciarPanel(nombre){
   } catch (e) {
     PANEL_VE_LETRERO_ORD_PEND = true;
   }
+  try {
+    PANEL_DIESEL_CUADROS_OCULTOS = JSON.parse(localStorage.getItem('panel_diesel_cuadros_ocultos') || '[]') || [];
+  } catch (e) {
+    PANEL_DIESEL_CUADROS_OCULTOS = [];
+  }
+  aplicarCuadrosDiesel_();
   cargarOrdPendAtencionDias_();
   document.getElementById('login-overlay').hidden = true;
   document.getElementById('view-main').style.display = 'block';
@@ -3393,6 +3452,7 @@ function submitGate(){
         localStorage.setItem('panel_permisos', JSON.stringify(res.panelPermisos || {}));
         localStorage.setItem('panel_huertas_ordenes', JSON.stringify(res.huertasOrdenes || []));
         localStorage.setItem('panel_ve_letrero_ord_pend', JSON.stringify(res.veLetreroOrdPend !== false));
+        localStorage.setItem('panel_diesel_cuadros_ocultos', JSON.stringify(res.dieselCuadrosOcultos || []));
         iniciarPanel(nombre);
       } else {
         loginStatus.textContent = (res && res.error) || 'No se pudo iniciar sesión.';
@@ -8730,6 +8790,16 @@ function renderUsuarios(usuarios){
       autoSpan.textContent = 'Ve casilla Automotriz';
       left.appendChild(autoSpan);
     }
+    if((u.DieselCuadrosOcultos || []).length > 0){
+      const dieselSpan = document.createElement('span');
+      dieselSpan.className = 'huerta-restr-pill';
+      dieselSpan.textContent = 'Diesel: ' + (DZ_CUADROS.length - u.DieselCuadrosOcultos.length) + '/' + DZ_CUADROS.length + ' cuadros';
+      dieselSpan.title = 'En la pestaña Diesel del Panel NO ve: ' + u.DieselCuadrosOcultos.map(function(id){
+        const c = DZ_CUADROS.find(function(x){ return x.id === id; });
+        return c ? c.label : id;
+      }).join(', ');
+      left.appendChild(dieselSpan);
+    }
 
     left.addEventListener('click', function(){
       document.getElementById('usr-nombre').value = u.Nombre;
@@ -8745,6 +8815,10 @@ function renderUsuarios(usuarios){
       });
       document.getElementById('usr-f-ve-soldadura').checked = !!u.VeCasillaSoldadura;
       document.getElementById('usr-f-ve-automotriz').checked = !!u.VeCasillaAutomotriz;
+      const dieselCuadrosOcultosSel = new Set(u.DieselCuadrosOcultos || []);
+      document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]').forEach(function(cb){
+        cb.checked = !dieselCuadrosOcultosSel.has(cb.value);
+      });
       const mods = u.Modulos || [];
       document.getElementById('usr-mod-reportar').checked = mods.indexOf('Reportar') !== -1;
       document.getElementById('usr-mod-taller').checked = mods.indexOf('Taller') !== -1;
@@ -8799,6 +8873,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
   const huertasReportar = Array.from(document.querySelectorAll('#usr-huertas-reportar-grid input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
   const veCasillaSoldadura = document.getElementById('usr-f-ve-soldadura').checked;
   const veCasillaAutomotriz = document.getElementById('usr-f-ve-automotriz').checked;
+  const dieselCuadrosOcultos = Array.from(document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]:not(:checked)')).map(function(cb){ return cb.value; });
 
   if(!nombre){
     statusEl.textContent = 'Escribe el nombre de la persona.';
@@ -8842,6 +8917,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       document.querySelectorAll('#usr-huertas-reportar-grid input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
       document.getElementById('usr-f-ve-soldadura').checked = false;
       document.getElementById('usr-f-ve-automotriz').checked = false;
+      document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]').forEach(function(cb){ cb.checked = true; });
       cargarUsuarios();
     })
     .withFailureHandler(function(){
@@ -8850,7 +8926,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
       statusEl.className = 'usr-status err';
     })
-    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz);
+    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos);
 });
 
 // --- Rendimiento aceptable por equipo (dentro de la pestaña Diesel) ---
@@ -9789,20 +9865,27 @@ function dzhFilaSaldo_(huerta){
 }
 
 function actualizarSaldosAcordeonDiesel_(){
-  DZH_HUERTAS.forEach(function(h, i){
-    const badge = document.getElementById('dzh-saldo-badge-' + i);
-    if(!badge) return;
-    const fila = dzhFilaSaldo_(h);
-    const disponible = Number(fila.DieselDisponible) || 0;
-    badge.innerHTML = 'Restante: <b class="' + (disponible < 0 ? 'dz-resumen-neg' : '') + '">' + disponible.toLocaleString('es-MX') + ' L</b>';
-    // Si la tarjeta está abierta y no tiene su propio filtro de fechas
-    // activo (ver dzhCargarSaldoPropio_), el detalle de abajo se refresca
-    // junto con el saldo general.
-    const detalle = document.getElementById('dzh-saldo-detalle-' + i);
-    if(detalle && !detalle.dataset.fechaPropia){
-      dzhPintarDetalleSaldo_(i, fila);
-    }
-  });
+  // Recorre tanto las tarjetas de la lista plana "Diesel por huerta" (índice
+  // numérico) como las tarjetas de huerta anidadas dentro de "Diesel por
+  // departamento" (slot tipo "d2_0" — ver dzdConstruirHuertasDelGrupo_ y
+  // DZD_SLOTS_HUERTA), ya que ambas comparten el mismo saldo por huerta.
+  DZH_HUERTAS.forEach(function(h, i){ dzhActualizarBadgeYDetalle_(i, h); });
+  DZD_SLOTS_HUERTA.forEach(function(slot){ dzhActualizarBadgeYDetalle_(slot, DZH_HUERTAS[slot]); });
+}
+
+function dzhActualizarBadgeYDetalle_(i, h){
+  const badge = document.getElementById('dzh-saldo-badge-' + i);
+  if(!badge) return;
+  const fila = dzhFilaSaldo_(h);
+  const disponible = Number(fila.DieselDisponible) || 0;
+  badge.innerHTML = 'Restante: <b class="' + (disponible < 0 ? 'dz-resumen-neg' : '') + '">' + disponible.toLocaleString('es-MX') + ' L</b>';
+  // Si la tarjeta está abierta y no tiene su propio filtro de fechas
+  // activo (ver dzhCargarSaldoPropio_), el detalle de abajo se refresca
+  // junto con el saldo general.
+  const detalle = document.getElementById('dzh-saldo-detalle-' + i);
+  if(detalle && !detalle.dataset.fechaPropia){
+    dzhPintarDetalleSaldo_(i, fila);
+  }
 }
 
 function dzhPintarDetalleSaldo_(i, fila){
@@ -10036,7 +10119,10 @@ function dzhRefrescarTrasRenderEntregas_(){
   }
 }
 function dzhRenderTarjetasAbiertas_(tipo){
-  DZH_HUERTAS.forEach(function(h, i){
+  // Igual que actualizarSaldosAcordeonDiesel_: cubre tanto los índices de la
+  // lista plana como los slots anidados dentro de "Diesel por departamento".
+  const slots = DZH_HUERTAS.map(function(h, i){ return i; }).concat(DZD_SLOTS_HUERTA);
+  slots.forEach(function(i){
     const card = document.getElementById('dzh-card-' + i);
     if(!card || !card.classList.contains('open')) return;
     if(tipo === 'cargas') dzhRenderCargas_(i);
@@ -10360,6 +10446,13 @@ function dzhRenderEntregas_(i){
 // se esconde, para que ese diesel no desaparezca de la vista sin que
 // nadie se dé cuenta.
 let DZD_ACORDEON_CONSTRUIDO = false;
+// Slots ("d{idxDepartamento}_{idxHuerta}") de las tarjetas de huerta
+// anidadas dentro de cada departamento — ver dzdConstruirHuertasDelGrupo_.
+// Reutilizan DZH_HUERTAS[slot] (guardado ahí mismo) y las funciones
+// dzh* de arriba (dzhToggleTarjeta_, dzhCuerpoTarjetaHtml_, etc.), que son
+// genéricas sobre "i" (solo lo usan como texto para armar ids), así que
+// funcionan igual con un slot de texto que con un índice numérico.
+let DZD_SLOTS_HUERTA = [];
 const DZD_GRUPOS = [
   { key: 'CAMPO', label: 'Campo' },
   { key: 'COSECHA', label: 'Cosecha' },
@@ -10417,72 +10510,70 @@ function dzdToggleTarjeta_(i){
 function dzdCuerpoTarjetaHtml_(i){
   return `
     <div class="dzh-sub">
-      <div class="dzh-sub-header">Desglose por huerta</div>
-      <div class="toolbar" style="margin-bottom:8px;">
-        <span class="toolbar-date-group">
-          <label class="toolbar-date-label">Desde</label>
-          <input type="date" id="dzd-desde-${i}">
-          <label class="toolbar-date-label">hasta</label>
-          <input type="date" id="dzd-hasta-${i}">
-          <button type="button" class="export-btn dzd-btn-limpiar" data-idx="${i}" title="Quitar el filtro de fechas">✕</button>
-        </span>
-      </div>
-      <div class="table-wrap">
-        <table class="dzh-tabla-compacta">
-          <thead><tr><th>Huerta</th><th>Litros cargados</th><th>Cargas</th></tr></thead>
-          <tbody id="dzd-tbody-${i}"></tbody>
-        </table>
-      </div>
+      <div class="dzh-sub-header">Huertas de este departamento</div>
+      <div class="dzh-lista dzd-huertas-anidadas" id="dzd-huertas-lista-${i}"><div class="empty">Cargando...</div></div>
     </div>
   `;
 }
 
-function dzdInicializarTarjeta_(i){
-  dzdRenderDetalle_(i);
-  document.getElementById('dzd-desde-' + i).addEventListener('change', function(){ dzdRenderDetalle_(i); });
-  document.getElementById('dzd-hasta-' + i).addEventListener('change', function(){ dzdRenderDetalle_(i); });
-  document.querySelector('.dzd-btn-limpiar[data-idx="' + i + '"]').addEventListener('click', function(){
-    document.getElementById('dzd-desde-' + i).value = '';
-    document.getElementById('dzd-hasta-' + i).value = '';
-    dzdRenderDetalle_(i);
+// Nombres de huerta donde este departamento tiene cargas registradas,
+// ordenados de mayor a menor litros cargados (mismo criterio que antes
+// tenía la tabla "Desglose por huerta").
+function dzdHuertasDelGrupo_(grupoKey){
+  const porHuerta = {};
+  dzdCargasDelGrupo_(grupoKey).forEach(function(r){
+    const key = (r.Huerta || 'Sin huerta').trim().toUpperCase();
+    if(!porHuerta[key]) porHuerta[key] = { huerta: (r.Huerta || 'Sin huerta').trim(), litros: 0 };
+    porHuerta[key].litros += parseFloat(r.Litros) || 0;
   });
+  return Object.keys(porHuerta).map(function(k){ return porHuerta[k]; })
+    .sort(function(a, b){ return b.litros - a.litros; })
+    .map(function(f){ return f.huerta; });
 }
 
-function dzdRenderDetalle_(i){
-  const tbody = document.getElementById('dzd-tbody-' + i);
-  if(!tbody) return;
+function dzdInicializarTarjeta_(i){
+  dzdConstruirHuertasDelGrupo_(i);
+}
+
+// Arma, dentro de la tarjeta del departamento i, una tarjeta de huerta por
+// cada huerta donde ese departamento cargó diesel — reutilizando la MISMA
+// tarjeta (saldo, registrar entrega, cargas de la huerta con sus filtros,
+// entregas) que ya se usa en "Diesel por huerta". Cada una recibe un slot
+// de texto ("d{i}_{hIdx}") en vez del índice numérico de la lista plana,
+// para no chocar con esas tarjetas ni entre sí (una misma huerta puede
+// aparecer en más de un departamento si varios la usan).
+function dzdConstruirHuertasDelGrupo_(i){
+  const cont = document.getElementById('dzd-huertas-lista-' + i);
+  if(!cont) return;
   const grupo = DZD_GRUPOS[i];
-  const desdeStr = document.getElementById('dzd-desde-' + i).value;
-  const hastaStr = document.getElementById('dzd-hasta-' + i).value;
-  const desde = desdeStr ? new Date(desdeStr + 'T00:00:00') : null;
-  const hasta = hastaStr ? new Date(hastaStr + 'T23:59:59') : null;
-
-  const cargas = dzdCargasDelGrupo_(grupo.key).filter(function(r){
-    if(!desde && !hasta) return true;
-    const f = r.Fecha ? new Date(r.Fecha) : null;
-    if(!f || isNaN(f.getTime())) return false;
-    if(desde && f < desde) return false;
-    if(hasta && f > hasta) return false;
-    return true;
-  });
-
-  const porHuerta = {};
-  cargas.forEach(function(r){
-    const key = (r.Huerta || 'Sin huerta').trim().toUpperCase();
-    if(!porHuerta[key]) porHuerta[key] = { huerta: (r.Huerta || 'Sin huerta').trim(), litros: 0, cargas: 0 };
-    porHuerta[key].litros += parseFloat(r.Litros) || 0;
-    porHuerta[key].cargas += 1;
-  });
-  const filas = Object.keys(porHuerta).map(function(k){ return porHuerta[k]; })
-    .sort(function(a, b){ return b.litros - a.litros; });
-
-  if(filas.length === 0){
-    tbody.innerHTML = '<tr><td colspan="3"><div class="empty">No hay cargas que coincidan.</div></td></tr>';
+  const huertas = dzdHuertasDelGrupo_(grupo.key);
+  if(huertas.length === 0){
+    cont.innerHTML = '<div class="empty">No hay cargas registradas para este departamento.</div>';
     return;
   }
-  tbody.innerHTML = filas.map(function(f){
-    return `<tr><td>${escapeHtml(f.huerta)}</td><td>${f.litros.toLocaleString('es-MX')}</td><td>${f.cargas}</td></tr>`;
+  cont.innerHTML = huertas.map(function(h, hIdx){
+    const slot = 'd' + i + '_' + hIdx;
+    DZH_HUERTAS[slot] = h;
+    DZD_SLOTS_HUERTA.push(slot);
+    return `
+    <div class="dzh-card" id="dzh-card-${slot}" data-idx="${slot}">
+      <button type="button" class="dzh-card-header" data-idx="${slot}">
+        <span class="dzh-card-nombre">${escapeHtml(h)}</span>
+        <span class="dzh-card-saldo" id="dzh-saldo-badge-${slot}">Cargando...</span>
+        <span class="dzh-card-arrow">▾</span>
+      </button>
+      <div class="dzh-card-body" id="dzh-body-${slot}"></div>
+    </div>
+    `;
   }).join('');
+
+  cont.querySelectorAll('.dzh-card-header').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      dzhToggleTarjeta_(btn.dataset.idx);
+    });
+  });
+
+  actualizarSaldosAcordeonDiesel_();
 }
 
 function actualizarTotalesAcordeonDepartamento_(){
@@ -10491,8 +10582,6 @@ function actualizarTotalesAcordeonDepartamento_(){
     if(!badge) return;
     const total = dzdCargasDelGrupo_(g.key).reduce(function(sum, r){ return sum + (parseFloat(r.Litros) || 0); }, 0);
     badge.innerHTML = 'Cargado: <b>' + total.toLocaleString('es-MX') + ' L</b>';
-    const card = document.getElementById('dzd-card-' + i);
-    if(card && card.classList.contains('open')) dzdRenderDetalle_(i);
   });
 }
 

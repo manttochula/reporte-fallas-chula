@@ -1212,6 +1212,28 @@ EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
 
 -- ------------------------------------------------------------
+-- Qué cuadros de la pestaña Diesel (Combustible Agrícola) del Panel ve
+-- cada persona — Diesel por huerta, por departamento, restante por huerta,
+-- entregado a huertas, la tabla general de cargas, Notificaciones y
+-- Rendimiento/horas máximas (ver DZ_CUADROS en Panel.html). Es un permiso
+-- que asigna el admin desde Usuarios (como huertas_ordenes/huertas_reportar
+-- de arriba), no algo que cada quien elige por su cuenta. Guarda un JSON
+-- con los ids de los cuadros que esa persona NO debe ver, por ejemplo
+-- ["dz-notif-container","dz-rendimiento-container"]. NULL o un arreglo
+-- vacío significa "los ve todos" — así que a nadie que no se configure
+-- explícitamente desde Usuarios se le oculta nada.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'usuarios' AND column_name = 'diesel_cuadros_ocultos'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE usuarios ADD COLUMN diesel_cuadros_ocultos TEXT DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
 -- Bitácora de auditoría: quién capturó, editó o eliminó cada orden,
 -- carga de diesel o movimiento de maquinaria desde el Panel — sobrevive
 -- aunque el registro original se borre (por eso es una tabla aparte, no

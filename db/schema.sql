@@ -1546,6 +1546,42 @@ CREATE TABLE IF NOT EXISTS mantenimiento_servicios (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ------------------------------------------------------------
+-- SERVICIOS AUTOMOTRICES: pedido por Carlos, funciona "igual que
+-- Preventivos Agrícolas" pero para vehículos automotrices (camionetas,
+-- camiones, autobuses, motos — los que tienen maquinaria.usa_gasolina = 1,
+-- el mismo criterio que ya separa Combustible Agrícola de Combustible
+-- Automotriz). NO necesita tablas nuevas: mantenimiento_reglas /
+-- mantenimiento_servicios / tipos_preventivo ya son genéricas (tipo_
+-- periodicidad ya soporta 'kilometros', no solo 'horas') — "Servicios
+-- Automotrices" es, en el fondo, el MISMO motor que Preventivos Agrícolas,
+-- nada más que la pestaña filtra las reglas/equipos a los automotrices (ver
+-- obtenerReglasMantenimiento_/obtenerServiciosMantenimiento_ en
+-- server/handlers.js) y usa su propio permiso ('servicios_automotrices',
+-- abajo) para poder dárselo a alguien sin darle Preventivos Agrícolas.
+--
+-- Se precargan los dos tipos de servicio que trae el primer listado que
+-- mandó Carlos (SERVICIOS_1.xlsx) — administrable después desde Catálogo o
+-- desde el "+ Tipo de preventivo" de la propia pestaña, igual que los tipos
+-- agrícolas (PREVENTIVO MOTOR/HIDRAULICO).
+-- ------------------------------------------------------------
+INSERT INTO tipos_preventivo (nombre)
+SELECT 'SERVICIO AGENCIA' WHERE NOT EXISTS (SELECT 1 FROM tipos_preventivo WHERE nombre = 'SERVICIO AGENCIA');
+INSERT INTO tipos_preventivo (nombre)
+SELECT 'CAMBIO DE ACEITE Y FILTROS' WHERE NOT EXISTS (SELECT 1 FROM tipos_preventivo WHERE nombre = 'CAMBIO DE ACEITE Y FILTROS');
+
+-- A quien ya tenía panel_permisos configurado (ya usa el Panel) se le
+-- agrega "capturar" para la pestaña nueva, igual que se hizo cuando se
+-- agregó combustible_automotriz/insumos — así no hay que ir a Usuarios a
+-- dar de alta el permiso uno por uno para que el Panel no se vea "roto"
+-- (pestaña sin acceso) a quien ya podía ver Preventivos Agrícolas. A quien
+-- se le quiera quitar, se hace desde Usuarios como cualquier otro permiso.
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.servicios_automotrices', 'capturar')
+WHERE panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_EXTRACT(panel_permisos, '$.servicios_automotrices') IS NULL;
+
+-- ------------------------------------------------------------
 -- Catálogos simples que antes vivían "quemados" en el código del Panel
 -- (el arreglo HUERTAS, los botones CAMPO/COSECHA/..., el texto libre de
 -- "Tipo de unidad"): ahora se pueden dar de alta/editar/borrar desde la

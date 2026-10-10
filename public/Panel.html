@@ -1128,6 +1128,7 @@
       <div class="panel-tab" id="ptab-maquinaria">Maquinaria</div>
       <div class="panel-tab" id="ptab-catalogo">Catálogo</div>
       <div class="panel-tab" id="ptab-mantenimiento">Preventivos Agrícolas</div>
+      <div class="panel-tab" id="ptab-servicios-automotrices">Servicios Automotrices</div>
       <div class="panel-tab" id="ptab-refacciones">Refacciones</div>
       <div class="panel-tab" id="ptab-insumos">Insumos</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
@@ -2423,6 +2424,67 @@
       </div>
     </div>
 
+    <div id="pview-servicios-automotrices" style="display:none;">
+      <h3 class="ref-reporte-titulo" style="margin-top:0;">Reglas por modelo</h3>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Una regla = un modelo + un tipo de servicio (ej. "HILUX — SERVICIO AGENCIA"), con su periodicidad en kilómetros. Aplica automáticamente a TODOS los vehículos de ese modelo marcados como automotrices en Catálogo.</div>
+      <div class="toolbar">
+        <input type="text" id="sa-mnt-search" placeholder="Buscar por marca, modelo o tipo de servicio...">
+        <select id="sa-mnt-tipo-filter"><option value="">Todos los tipos</option></select>
+        <button class="export-btn" id="sa-mnt-tipo-add">+ Tipo de servicio</button>
+        <button class="export-btn" id="sa-mnt-add">+ Agregar regla</button>
+        <button class="export-btn" id="sa-mnt-import">Importar lista</button>
+      </div>
+      <div class="summary" id="sa-mnt-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Marca / Modelo</th>
+              <th>Tipo de servicio</th>
+              <th>Periodicidad</th>
+              <th>Aceite</th>
+              <th>Refacciones</th>
+              <th>Estatus</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="sa-mnt-table-body"></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Servicios (por vehículo)</h3>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Estado real de cada vehículo según la regla de su modelo: último servicio capturado (fecha/kilometraje) y próximo servicio calculado a partir de ahí. El kilometraje actual se toma automáticamente de Combustible Automotriz (odómetro capturado en cada ticket), salvo que se actualice a mano. Un vehículo sin ningún registro capturado todavía aparece como "Sin línea base".</div>
+      <div class="toolbar">
+        <input type="text" id="sa-srv-search" placeholder="Buscar por unidad, modelo o tipo de servicio...">
+        <select id="sa-srv-estatus">
+          <option value="">Todos los estatus</option>
+          <option value="vencido">Vencido</option>
+          <option value="al_dia">Al día</option>
+          <option value="sin_base">Sin línea base</option>
+        </select>
+        <button class="export-btn" id="sa-srv-export">Exportar a Excel</button>
+      </div>
+      <div class="summary" id="sa-srv-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Unidad</th>
+              <th>Modelo</th>
+              <th>Tipo de servicio</th>
+              <th>Último registro</th>
+              <th>Lectura actual</th>
+              <th>Próximo servicio</th>
+              <th>Km para próximo servicio</th>
+              <th>Estatus</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="sa-srv-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div id="pview-refacciones" style="display:none;">
       <div class="toolbar">
         <input type="text" id="ref-search" placeholder="Buscar por descripción, no. de parte o proveedor...">
@@ -2801,6 +2863,133 @@
       </div>
     </div>
 
+    <div class="maq-modal-overlay" id="sa-mnt-modal-overlay">
+      <div class="maq-modal">
+        <button class="maq-modal-close" id="sa-mnt-modal-close">&times;</button>
+        <h3 id="sa-mnt-modal-title">Agregar regla de servicio automotriz</h3>
+        <input type="hidden" id="sa-mnt-f-id">
+        <div class="maq-field-row">
+          <div class="maq-field">
+            <label>Marca *</label>
+            <select id="sa-mnt-f-marca-id"><option value="">Selecciona marca...</option></select>
+          </div>
+          <div class="maq-field">
+            <label>Modelo *</label>
+            <select id="sa-mnt-f-modelo-id" disabled><option value="">Elige una marca primero...</option></select>
+          </div>
+        </div>
+        <div class="maq-field">
+          <label>Tipo de servicio *</label>
+          <div class="mnt-ref-add-row">
+            <select id="sa-mnt-f-tipo-preventivo-id"><option value="">Selecciona tipo...</option></select>
+            <button type="button" class="export-btn" id="sa-mnt-tipo-nuevo">+ Nuevo</button>
+          </div>
+        </div>
+        <div class="maq-field">
+          <label>Periodicidad *</label>
+          <select id="sa-mnt-f-tipo">
+            <option value="kilometros">Por kilómetros</option>
+            <option value="tiempo">Por tiempo (meses)</option>
+          </select>
+        </div>
+        <div class="maq-field"><label id="sa-mnt-f-intervalo-label">Cada cuántos kilómetros</label><input type="number" id="sa-mnt-f-intervalo" min="0" step="0.01"></div>
+        <div class="maq-field">
+          <label>Refacciones asignadas</label>
+          <div class="mnt-ref-add-row">
+            <select id="sa-mnt-ref-select"><option value="">Selecciona refacción...</option></select>
+            <input type="number" id="sa-mnt-ref-cantidad" min="0.01" step="0.01" value="1" placeholder="Cant.">
+            <button type="button" class="export-btn" id="sa-mnt-ref-agregar">+ Agregar</button>
+          </div>
+          <div class="mnt-ref-add-row" style="margin-top:2px;">
+            <select id="sa-mnt-aceite-select"><option value="">Selecciona aceite...</option></select>
+            <input type="number" id="sa-mnt-aceite-cantidad" min="0.01" step="0.01" value="1" placeholder="Litros">
+            <button type="button" class="export-btn" id="sa-mnt-aceite-agregar">+ Agregar aceite</button>
+          </div>
+          <div class="mnt-subtext" style="margin-bottom:8px;">El aceite se da de alta como refacción (pestaña Refacciones) y se cotiza igual que las demás partes — aquí solo aparecen las que tienen asignada la categoría "Aceite" (pestaña Refacciones → Categorías).</div>
+          <ul id="sa-mnt-ref-lista" class="mnt-ref-lista"></ul>
+        </div>
+        <div class="maq-field"><label>Notas adicionales (opcional)</label><textarea id="sa-mnt-f-refacciones" placeholder="Cualquier detalle adicional sobre refacciones"></textarea></div>
+        <div class="maq-field"><label>Aceite (litros) — dato antiguo, opcional</label><input type="number" id="sa-mnt-f-aceite" min="0" step="0.01"></div>
+        <div class="maq-field"><label><input type="checkbox" id="sa-mnt-f-activo" checked style="width:auto;margin-right:6px;">Regla activa</label></div>
+        <div class="maq-modal-actions">
+          <button class="maq-delete-btn" id="sa-mnt-btn-delete" style="display:none;">Eliminar</button>
+          <button class="maq-save-btn" id="sa-mnt-btn-save">Guardar</button>
+        </div>
+        <div class="maq-modal-status" id="sa-mnt-modal-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="sa-srv-modal-overlay">
+      <div class="maq-modal">
+        <button class="maq-modal-close" id="sa-srv-modal-close">&times;</button>
+        <h3>Editar servicio del vehículo</h3>
+        <input type="hidden" id="sa-srv-f-regla-id">
+        <input type="hidden" id="sa-srv-f-codigo-unidad">
+        <div class="maq-field" id="sa-srv-f-resumen" style="font-size:12.5px;color:#555;margin-bottom:14px;"></div>
+        <div class="maq-field-row">
+          <div class="maq-field" id="sa-srv-f-lectura-wrap"><label id="sa-srv-f-lectura-label">Última lectura</label><input type="number" id="sa-srv-f-lectura" min="0" step="0.01"></div>
+          <div class="maq-field"><label>Última fecha de servicio</label><input type="date" id="sa-srv-f-fecha"></div>
+        </div>
+        <div class="maq-field">
+          <label id="sa-srv-f-override-label">Intervalo propio para este vehículo (opcional)</label>
+          <input type="number" id="sa-srv-f-override" min="0" step="0.01" placeholder="Vacío = usa el intervalo estándar del modelo">
+        </div>
+        <div class="maq-modal-actions">
+          <button class="maq-save-btn" id="sa-srv-btn-save">Guardar</button>
+        </div>
+        <div class="maq-modal-status" id="sa-srv-modal-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="sa-ord-modal-overlay">
+      <div class="maq-modal">
+        <button class="maq-modal-close" id="sa-ord-modal-close">&times;</button>
+        <h3>Generar orden de servicio automotriz</h3>
+        <input type="hidden" id="sa-ord-f-regla-id">
+        <input type="hidden" id="sa-ord-f-codigo-unidad">
+        <div class="maq-field" id="sa-ord-f-resumen" style="font-size:12.5px;color:#555;margin-bottom:14px;"></div>
+        <div class="maq-field"><label>Generado por</label><input type="text" id="sa-ord-f-nombre" readonly style="background:#eee;color:#555;"></div>
+        <div class="maq-field"><label>Comentario (opcional)</label><input type="text" id="sa-ord-f-comentario"></div>
+        <div class="maq-modal-actions">
+          <button class="maq-save-btn" id="sa-ord-btn-generar">Generar orden</button>
+        </div>
+        <div class="maq-modal-status" id="sa-ord-modal-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="sa-imp-modal-overlay">
+      <div class="maq-modal" style="max-width:820px;">
+        <button class="maq-modal-close" id="sa-imp-modal-close">&times;</button>
+        <h3>Importar lista de servicios automotrices</h3>
+        <div class="mnt-subtext" style="margin-bottom:10px;">Sube el Excel (.xlsx) o CSV con el listado de vehículos: columnas de unidad (ej. "LOC_VEH" con el número "AF-###"), tipo de servicio, último kilometraje, fecha del último servicio y periodicidad (cada cuántos km). Primero se muestra una vista previa para revisar los emparejamientos antes de guardar nada.</div>
+        <div class="maq-field"><input type="file" id="sa-imp-file" accept=".xlsx,.xls,.csv"></div>
+        <div class="maq-modal-actions">
+          <button class="maq-save-btn" id="sa-imp-btn-analizar">Vista previa</button>
+        </div>
+        <div class="maq-modal-status" id="sa-imp-modal-status"></div>
+        <div id="sa-imp-resumen" style="margin:10px 0;font-size:12.5px;color:#555;"></div>
+        <div id="sa-imp-tabla-wrap" class="table-wrap" style="display:none;max-height:360px;overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Fila del archivo</th>
+                <th>Vehículo</th>
+                <th>Tipo de servicio</th>
+                <th>Último km</th>
+                <th>Fecha</th>
+                <th>Periodicidad (km)</th>
+                <th>Incluir</th>
+              </tr>
+            </thead>
+            <tbody id="sa-imp-table-body"></tbody>
+          </table>
+        </div>
+        <div class="maq-modal-actions" id="sa-imp-confirmar-wrap" style="display:none;margin-top:12px;">
+          <button class="maq-save-btn" id="sa-imp-btn-confirmar">Confirmar importación</button>
+        </div>
+      </div>
+    </div>
+
     <div id="pview-insumos" style="display:none;">
       <div class="toolbar">
         <input type="text" id="ins-search" placeholder="Buscar por folio, insumo, huerta o encargado...">
@@ -2891,6 +3080,7 @@
             <div class="usr-permiso-row"><label>Maquinaria</label><select id="usr-perm-maquinaria" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Catálogo</label><select id="usr-perm-catalogo" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Mantenimiento</label><select id="usr-perm-mantenimiento" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Servicios Automotrices</label><select id="usr-perm-servicios_automotrices" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Refacciones</label><select id="usr-perm-refacciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Insumos</label><select id="usr-perm-insumos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
@@ -2966,6 +3156,10 @@
     <div class="row-status-msg" id="modal-status"></div>
   </div>
 </div>
+
+<!-- SheetJS (lectura de .xlsx/.xls en el navegador) — solo se usa en el
+     botón "Importar lista" de Servicios Automotrices (ver sa-imp-*). -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <script>
 // ============================================================
@@ -3122,7 +3316,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'refacciones', 'insumos', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -3204,6 +3398,7 @@ function aplicarPermisosPanelUI(){
     ['maquinaria', ptabMaquinaria, pviewMaquinaria],
     ['catalogo', ptabCatalogo, pviewCatalogo],
     ['mantenimiento', ptabMantenimiento, pviewMantenimiento],
+    ['servicios_automotrices', ptabServiciosAutomotrices, pviewServiciosAutomotrices],
     ['refacciones', ptabRefacciones, pviewRefacciones],
     ['insumos', ptabInsumos, pviewInsumos],
     ['usuarios', ptabUsuarios, pviewUsuarios],
@@ -3328,9 +3523,22 @@ function ocultarControlesSoloLectura(){
   }
   if(!puedeCapturarPestana('mantenimiento')){
     ocultar([
-      '#mnt-add', '#mnt-tipo-add', '.mnt-btn-editar', '.mnt-lectura-link',
+      '#mnt-add', '#mnt-tipo-add', '.mnt-btn-editar', '#srv-table-body .mnt-lectura-link',
       '#mnt-btn-save', '#mnt-btn-delete',
       '.srv-btn-editar', '.srv-btn-orden', '#srv-btn-save', '#ord-btn-generar',
+    ]);
+  }
+  if(!puedeCapturarPestana('servicios_automotrices')){
+    ocultar([
+      // El botón "actualizar" de la columna Lectura actual comparte la
+      // misma clase .mnt-lectura-link con Preventivos Agrícolas (viene del
+      // formateador compartido formatLecturaActual_) — se oculta aquí
+      // acotado a la tabla de Servicios Automotrices (#sa-srv-table-body)
+      // para no afectar también la de Preventivos Agrícolas.
+      '#sa-mnt-add', '#sa-mnt-tipo-add', '#sa-mnt-import', '.sa-mnt-btn-editar', '#sa-srv-table-body .mnt-lectura-link',
+      '#sa-mnt-btn-save', '#sa-mnt-btn-delete',
+      '.sa-srv-btn-editar', '.sa-srv-btn-orden', '#sa-srv-btn-save', '#sa-ord-btn-generar',
+      '#sa-imp-btn-confirmar',
     ]);
   }
   if(!puedeCapturarPestana('refacciones')){
@@ -5163,6 +5371,7 @@ const ptabMovimientos = document.getElementById('ptab-movimientos');
 const ptabMaquinaria = document.getElementById('ptab-maquinaria');
 const ptabCatalogo = document.getElementById('ptab-catalogo');
 const ptabMantenimiento = document.getElementById('ptab-mantenimiento');
+const ptabServiciosAutomotrices = document.getElementById('ptab-servicios-automotrices');
 const ptabRefacciones = document.getElementById('ptab-refacciones');
 const ptabInsumos = document.getElementById('ptab-insumos');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
@@ -5174,6 +5383,7 @@ const pviewMovimientos = document.getElementById('pview-movimientos');
 const pviewMaquinaria = document.getElementById('pview-maquinaria');
 const pviewCatalogo = document.getElementById('pview-catalogo');
 const pviewMantenimiento = document.getElementById('pview-mantenimiento');
+const pviewServiciosAutomotrices = document.getElementById('pview-servicios-automotrices');
 const pviewRefacciones = document.getElementById('pview-refacciones');
 const pviewInsumos = document.getElementById('pview-insumos');
 const pviewUsuarios = document.getElementById('pview-usuarios');
@@ -5183,13 +5393,14 @@ let CA_CARGADO = false;
 let MOVIMIENTOS_CARGADOS = false;
 let MAQUINARIA_CARGADA = false;
 let MANTENIMIENTO_CARGADO = false;
+let SERVICIOS_AUTOMOTRICES_CARGADO = false;
 let REFACCIONES_CARGADAS = false;
 let PROVEEDORES_CARGADOS = false;
 let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabRefacciones, ptabInsumos, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewRefacciones, pviewInsumos, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -5248,6 +5459,14 @@ ptabMantenimiento.addEventListener('click', function(){
   if(!MARCAS_CARGADAS){ cargarMarcas(); }
   if(!MODELOS_CARGADOS){ cargarModelos(); }
   if(!MANTENIMIENTO_CARGADO){ cargarMantenimiento(); }
+  if(!REFACCIONES_CARGADAS){ cargarRefacciones(); }
+});
+ptabServiciosAutomotrices.addEventListener('click', function(){
+  activarPanelTab(ptabServiciosAutomotrices, pviewServiciosAutomotrices);
+  if(!MAQUINARIA_CARGADA){ cargarMaquinaria(); }
+  if(!MARCAS_CARGADAS){ cargarMarcas(); }
+  if(!MODELOS_CARGADOS){ cargarModelos(); }
+  if(!SERVICIOS_AUTOMOTRICES_CARGADO){ cargarServiciosAutomotricesTab(); }
   if(!REFACCIONES_CARGADAS){ cargarRefacciones(); }
 });
 ptabRefacciones.addEventListener('click', function(){
@@ -11806,13 +12025,23 @@ function cargarMantenimiento(){
 // `seleccionarId`: si se pasa, deja ese tipo preselecionado en el modal de
 // reglas después de recargar (se usa justo después de crear uno nuevo con
 // "+ Nuevo" desde ahí).
-function cargarTiposPreventivo(seleccionarId){
+// `destino`: 'mnt' (default, Preventivos Agrícolas) o 'sa' (Servicios
+// Automotrices) — decide en cuál de los dos selects de tipo queda
+// preseleccionado el `seleccionarId` recién creado (ver "+ Nuevo" en cada
+// modal de reglas).
+function cargarTiposPreventivo(seleccionarId, destino){
   google.script.run
     .withSuccessHandler(function(records){
       ALL_TIPOS_PREVENTIVO = records || [];
       poblarSelectTiposPreventivo();
       poblarFiltroTiposPreventivo();
-      if(seleccionarId) document.getElementById('mnt-f-tipo-preventivo-id').value = seleccionarId;
+      if(typeof poblarSelectTiposPreventivoSA === 'function') poblarSelectTiposPreventivoSA();
+      if(typeof poblarFiltroTiposPreventivoSA === 'function') poblarFiltroTiposPreventivoSA();
+      if(seleccionarId){
+        const idDestino = destino === 'sa' ? 'sa-mnt-f-tipo-preventivo-id' : 'mnt-f-tipo-preventivo-id';
+        const el = document.getElementById(idDestino);
+        if(el) el.value = seleccionarId;
+      }
       renderCatalogoSimple('tipospreventivo');
     })
     .withFailureHandler(function(){})
@@ -11872,7 +12101,7 @@ function formatLecturaActual_(r){
   if(r.LecturaActual === null || r.LecturaActual === undefined){
     return '<span class="mnt-subtext">Sin lectura</span>' + boton;
   }
-  const origen = r.LecturaActualOrigen === 'manual' ? 'manual' : 'diesel';
+  const origen = etiquetaOrigenLectura_(r.LecturaActualOrigen);
   const fecha = r.LecturaActualFecha ? new Date(r.LecturaActualFecha).toLocaleDateString('es-MX') : '';
   return escapeHtml(String(r.LecturaActual)) + (r.TipoPeriodicidad === 'kilometros' ? ' km' : ' h') +
     '<span class="mnt-subtext">(' + origen + (fecha ? ' · ' + fecha : '') + ')</span>' + boton;
@@ -11916,9 +12145,18 @@ function textoLecturaActualExcel_(r){
   if(r.TipoPeriodicidad === 'tiempo') return '—';
   if(r.LecturaActual === null || r.LecturaActual === undefined) return 'Sin lectura';
   const unidad = r.TipoPeriodicidad === 'kilometros' ? ' km' : ' h';
-  const origen = r.LecturaActualOrigen === 'manual' ? 'manual' : 'diesel';
+  const origen = etiquetaOrigenLectura_(r.LecturaActualOrigen);
   const fecha = r.LecturaActualFecha ? new Date(r.LecturaActualFecha).toLocaleDateString('es-MX') : '';
   return String(r.LecturaActual) + unidad + ' (' + origen + (fecha ? ' · ' + fecha : '') + ')';
+}
+
+// "LecturaActualOrigen" puede ser 'diesel' (horómetro, agrícola),
+// 'automotriz' (odómetro, Combustible Automotriz) o 'manual' (capturada a
+// mano) — ver getLecturasActualesPorEquipo_ en server/handlers.js.
+function etiquetaOrigenLectura_(origen){
+  if(origen === 'manual') return 'manual';
+  if(origen === 'automotriz') return 'automotriz';
+  return 'diesel';
 }
 
 // Versión en texto plano de "Horas para próximo servicio" (la original
@@ -12654,6 +12892,1034 @@ document.getElementById('ord-btn-generar').addEventListener('click', function(){
       lecturaActual: servicio ? servicio.LecturaActual : null
     });
 });
+
+// --- Pestaña "Servicios Automotrices": igual que Preventivos Agrícolas
+// (reutiliza el mismo motor de reglas/servicios de mantenimiento.js) pero
+// filtrado a los equipos marcados "usa_gasolina" en Catálogo (ver
+// obtenerReglasMantenimiento_/obtenerServiciosMantenimiento_(scope) y
+// verificarModeloDelAmbito_ en server/handlers.js) y con periodicidad en
+// kilómetros en vez de horas. Reutiliza los formateadores ya genéricos de
+// la sección de arriba (formatPeriodicidad_, formatUltimoRegistro_,
+// formatLecturaActual_, formatProximoServicio_, formatHorasParaProximo_,
+// textoLecturaActualExcel_, getEstadoServicio_, compararUrgenciaServicio_)
+// y el catálogo compartido de tipos de preventivo/servicio
+// (ALL_TIPOS_PREVENTIVO, ver cargarTiposPreventivo arriba).
+let ALL_REGLAS_AUTOMOTRICES = [];
+let ALL_SERVICIOS_AUTOMOTRICES = [];
+let ALL_EQUIPOS_AUTOMOTRICES = [];
+
+function cargarServiciosAutomotricesTab(){
+  cargarReglasAutomotrices();
+  cargarServiciosAutomotricesDatos();
+  cargarEquiposAutomotrices();
+  if(!TIPOS_PREVENTIVO_CARGADOS_UNA_VEZ){ TIPOS_PREVENTIVO_CARGADOS_UNA_VEZ = true; cargarTiposPreventivo(); }
+}
+
+function cargarReglasAutomotrices(){
+  const tbody = document.getElementById('sa-mnt-table-body');
+  tbody.innerHTML = '<tr><td colspan="7"><div class="empty">Cargando...</div></td></tr>';
+  google.script.run
+    .withSuccessHandler(function(records){
+      SERVICIOS_AUTOMOTRICES_CARGADO = true;
+      ALL_REGLAS_AUTOMOTRICES = records || [];
+      renderReglasAutomotrices();
+    })
+    .withFailureHandler(function(){
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No se pudieron cargar las reglas de servicio.</div></td></tr>';
+    })
+    .getReglasServiciosAutomotrices(ACCESS_CODE, PANEL_USUARIO);
+}
+
+function cargarServiciosAutomotricesDatos(){
+  const tbody = document.getElementById('sa-srv-table-body');
+  tbody.innerHTML = '<tr><td colspan="9"><div class="empty">Cargando...</div></td></tr>';
+  google.script.run
+    .withSuccessHandler(function(records){
+      ALL_SERVICIOS_AUTOMOTRICES = records || [];
+      renderServiciosAutomotrices();
+    })
+    .withFailureHandler(function(){
+      tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No se pudieron cargar los servicios.</div></td></tr>';
+    })
+    .getServiciosAutomotrices(ACCESS_CODE, PANEL_USUARIO);
+}
+
+// Catálogo de vehículos automotrices (usa_gasolina = 1), usado para el
+// emparejamiento de "Importar lista" (ver procesarFilasImportacionSA_) y
+// para el selector manual de equipo cuando una fila del archivo no hace
+// match automático.
+function cargarEquiposAutomotrices(){
+  google.script.run
+    .withSuccessHandler(function(records){ ALL_EQUIPOS_AUTOMOTRICES = records || []; })
+    .withFailureHandler(function(){})
+    .getEquiposAutomotrices(ACCESS_CODE, PANEL_USUARIO);
+}
+
+// ---- Sección "Reglas" (catálogo por modelo, solo modelos automotrices) ----
+
+function poblarFiltroTiposPreventivoSA(){
+  const sel = document.getElementById('sa-mnt-tipo-filter');
+  if(!sel) return;
+  const valorActual = sel.value;
+  const ordenado = ALL_TIPOS_PREVENTIVO.slice().sort(function(a,b){
+    return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
+  });
+  sel.innerHTML = '<option value="">Todos los tipos</option>' + ordenado.map(function(t){
+    return '<option value="' + t.Id + '">' + escapeHtml(t.Nombre) + '</option>';
+  }).join('');
+  if(valorActual) sel.value = valorActual;
+}
+
+function getReglasAutomotricesFiltradas(){
+  const q = (document.getElementById('sa-mnt-search').value || '').trim().toUpperCase();
+  const tipoId = document.getElementById('sa-mnt-tipo-filter').value;
+  return ALL_REGLAS_AUTOMOTRICES.filter(function(r){
+    if(tipoId && String(r.TipoPreventivoId) !== tipoId) return false;
+    if(q){
+      const haystack = [r.MarcaNombre, r.ModeloNombre, r.TipoPreventivoNombre, r.NombreServicio].join(' ').toUpperCase();
+      if(haystack.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+}
+
+function renderReglasAutomotrices(){
+  const tbody = document.getElementById('sa-mnt-table-body');
+  const records = getReglasAutomotricesFiltradas();
+
+  document.getElementById('sa-mnt-summary').textContent =
+    records.length + ' de ' + ALL_REGLAS_AUTOMOTRICES.length + ' reglas · ' +
+    ALL_REGLAS_AUTOMOTRICES.filter(function(r){ return !r.Activo; }).length + ' inactivas';
+
+  if(records.length === 0){
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No hay reglas de servicio automotriz que coincidan.</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = records.map(function(r){
+    return `
+    <tr>
+      <td>${escapeHtml(r.MarcaNombre)}<span class="mnt-subtext">${escapeHtml(r.ModeloNombre)}</span></td>
+      <td>${escapeHtml(r.TipoPreventivoNombre || r.NombreServicio)}</td>
+      <td>${escapeHtml(formatPeriodicidad_(r))}</td>
+      <td>${r.AceiteLitros !== null && r.AceiteLitros !== undefined ? escapeHtml(String(r.AceiteLitros)) + ' L' : '<span class="mnt-subtext">—</span>'}</td>
+      <td>${r.RefaccionesAsignadas && r.RefaccionesAsignadas.length ? r.RefaccionesAsignadas.length + ' asignada(s)' : '<span class="mnt-subtext">Ninguna</span>'}</td>
+      <td><span class="status-pill ${r.Activo ? 'done' : 'neutral'}">${r.Activo ? 'Activa' : 'Inactiva'}</span></td>
+      <td>
+        <button type="button" class="export-btn sa-mnt-btn-editar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Editar</button>
+      </td>
+    </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.sa-mnt-btn-editar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const regla = ALL_REGLAS_AUTOMOTRICES.find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(regla) abrirModalReglaSA(regla);
+    });
+  });
+  ocultarControlesSoloLectura();
+}
+
+document.getElementById('sa-mnt-search').addEventListener('input', renderReglasAutomotrices);
+document.getElementById('sa-mnt-tipo-filter').addEventListener('change', renderReglasAutomotrices);
+
+// Misma idea que actualizarLecturaManualPrompt (Preventivos Agrícolas) pero
+// recarga la tabla de Servicios Automotrices al terminar.
+function actualizarLecturaManualPromptSA(codigoUnidad, unidadLabel, lecturaActual){
+  const val = window.prompt('Kilometraje actual para ' + unidadLabel + ':', lecturaActual !== null && lecturaActual !== undefined ? lecturaActual : '');
+  if(val === null) return;
+  if(val.trim() === '' || isNaN(Number(val))){
+    alert('Escribe un número válido.');
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        alert('No se pudo actualizar la lectura. ' + ((result && result.error) || ''));
+        return;
+      }
+      cargarServiciosAutomotricesDatos();
+    })
+    .withFailureHandler(function(){
+      alert('No se pudo actualizar la lectura. Intenta de nuevo.');
+    })
+    .actualizarLecturaManual(ACCESS_CODE, PANEL_USUARIO, codigoUnidad, Number(val));
+}
+
+// Llena el select de Marca del modal de reglas (mismo catálogo ALL_MARCAS
+// que Preventivos Agrícolas, sin filtrar — el filtro automotriz se aplica
+// al elegir el Modelo, no la Marca, ya que una marca puede tener modelos
+// de ambos tipos).
+function poblarSelectMarcaSA(){
+  const sel = document.getElementById('sa-mnt-f-marca-id');
+  const valorActual = sel.value;
+  const ordenado = ALL_MARCAS.slice().sort(function(a,b){
+    return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
+  });
+  sel.innerHTML = '<option value="">Selecciona marca...</option>' + ordenado.map(function(m){
+    return '<option value="' + m.Id + '">' + escapeHtml(m.Nombre) + '</option>';
+  }).join('');
+  if(valorActual) sel.value = valorActual;
+}
+
+// Llena el select de Modelo del modal de reglas, pero SOLO con los modelos
+// de esa marca que ya tienen al menos un equipo marcado "Aparece en
+// Combustible Automotriz" en Catálogo (ver EsAutomotriz, de getModelos) —
+// así no se pueden crear por accidente reglas automotrices sobre un
+// tractor, por ejemplo. El servidor vuelve a validar esto de forma
+// independiente (ver verificarModeloDelAmbito_).
+function poblarSelectModeloSA(marcaId, seleccionadoId){
+  const sel = document.getElementById('sa-mnt-f-modelo-id');
+  const marcaIdNum = marcaId ? Number(marcaId) : null;
+  if(!marcaIdNum){
+    sel.innerHTML = '<option value="">Elige una marca primero...</option>';
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  const modelos = ALL_MODELOS.filter(function(m){ return m.MarcaId === marcaIdNum && m.EsAutomotriz; })
+    .slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
+  if(modelos.length === 0){
+    sel.innerHTML = '<option value="">Esta marca no tiene modelos automotrices...</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Selecciona modelo...</option>' + modelos.map(function(m){
+    return '<option value="' + m.Id + '">' + escapeHtml(m.Nombre) + '</option>';
+  }).join('');
+  if(seleccionadoId) sel.value = seleccionadoId;
+}
+
+document.getElementById('sa-mnt-f-marca-id').addEventListener('change', function(){
+  poblarSelectModeloSA(this.value, null);
+});
+
+function poblarSelectTiposPreventivoSA(){
+  const sel = document.getElementById('sa-mnt-f-tipo-preventivo-id');
+  if(!sel) return;
+  const valorActual = sel.value;
+  const ordenado = ALL_TIPOS_PREVENTIVO.slice().sort(function(a,b){
+    return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
+  });
+  sel.innerHTML = '<option value="">Selecciona tipo...</option>' + ordenado.map(function(t){
+    return '<option value="' + t.Id + '">' + escapeHtml(t.Nombre) + '</option>';
+  }).join('');
+  if(valorActual) sel.value = valorActual;
+}
+
+// Usado tanto por "+ Tipo de servicio" (toolbar de Reglas) como por
+// "+ Nuevo" (dentro del modal de regla) — mismo catálogo compartido
+// tipos_preventivo que usa Preventivos Agrícolas (ver cargarTiposPreventivo).
+function agregarTipoServicioAutomotrizPrompt(){
+  const nombre = window.prompt('Nombre del nuevo tipo de servicio (ej. CAMBIO DE ACEITE Y FILTROS):', '');
+  if(nombre === null) return;
+  const limpio = nombre.trim();
+  if(!limpio){ alert('Escribe un nombre.'); return; }
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        alert('No se pudo crear el tipo de servicio. ' + ((result && result.error) || ''));
+        return;
+      }
+      cargarTiposPreventivo(result.id, 'sa');
+    })
+    .withFailureHandler(function(){ alert('No se pudo crear el tipo de servicio. Intenta de nuevo.'); })
+    .guardarTipoPreventivo(ACCESS_CODE, PANEL_USUARIO, null, { nombre: limpio });
+}
+document.getElementById('sa-mnt-tipo-add').addEventListener('click', agregarTipoServicioAutomotrizPrompt);
+document.getElementById('sa-mnt-tipo-nuevo').addEventListener('click', agregarTipoServicioAutomotrizPrompt);
+
+// --- Asignación de refacciones dentro del modal de reglas de servicio automotriz ---
+let saFormRefaccionesAsignadas = []; // [{refaccionId, cantidad}]
+
+function poblarSelectRefaccionesSA(){
+  const sel = document.getElementById('sa-mnt-ref-select');
+  const valorActual = sel.value;
+  const ordenado = ALL_REFACCIONES.slice().sort(function(a,b){
+    return (a.Descripcion || '').localeCompare(b.Descripcion || '', 'es');
+  });
+  sel.innerHTML = '<option value="">Selecciona refacción...</option>' + ordenado.map(function(r){
+    return '<option value="' + r.Id + '">' + escapeHtml((r.NoParte ? r.NoParte + ' - ' : '') + r.Descripcion) + '</option>';
+  }).join('');
+  if(valorActual) sel.value = valorActual;
+}
+
+function poblarSelectAceiteSA(){
+  const sel = document.getElementById('sa-mnt-aceite-select');
+  const valorActual = sel.value;
+  const aceites = ALL_REFACCIONES.filter(function(r){
+    if(r.CategoriaId){
+      return (r.Categoria || '').trim().toUpperCase() === 'ACEITE';
+    }
+    return (r.Descripcion || '').trim().toUpperCase().indexOf('ACEITE') === 0;
+  }).slice().sort(function(a,b){
+    return (a.Descripcion || '').localeCompare(b.Descripcion || '', 'es');
+  });
+  sel.innerHTML = '<option value="">Selecciona aceite...</option>' + aceites.map(function(r){
+    return '<option value="' + r.Id + '">' + escapeHtml((r.NoParte ? r.NoParte + ' - ' : '') + r.Descripcion) + '</option>';
+  }).join('');
+  if(valorActual) sel.value = valorActual;
+}
+
+function renderListaRefaccionesSA(){
+  const ul = document.getElementById('sa-mnt-ref-lista');
+  if(saFormRefaccionesAsignadas.length === 0){
+    ul.innerHTML = '<li style="background:none;">Sin refacciones asignadas.</li>';
+    return;
+  }
+  ul.innerHTML = saFormRefaccionesAsignadas.map(function(a, idx){
+    const ref = ALL_REFACCIONES.find(function(r){ return r.Id === a.refaccionId; });
+    const label = ref ? ((ref.NoParte ? ref.NoParte + ' - ' : '') + ref.Descripcion) : ('Refacción #' + a.refaccionId);
+    return '<li><span>' + escapeHtml(label) + ' × ' + a.cantidad + '</span>' +
+      '<button type="button" class="sa-mnt-ref-quitar" data-idx="' + idx + '">&times;</button></li>';
+  }).join('');
+  ul.querySelectorAll('.sa-mnt-ref-quitar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      saFormRefaccionesAsignadas.splice(Number(btn.dataset.idx), 1);
+      renderListaRefaccionesSA();
+    });
+  });
+}
+
+document.getElementById('sa-mnt-ref-agregar').addEventListener('click', function(){
+  const sel = document.getElementById('sa-mnt-ref-select');
+  const refaccionId = Number(sel.value);
+  const cantidad = Number(document.getElementById('sa-mnt-ref-cantidad').value);
+  if(!refaccionId){ alert('Selecciona una refacción.'); return; }
+  if(!cantidad || cantidad <= 0){ alert('Captura una cantidad válida.'); return; }
+  const existente = saFormRefaccionesAsignadas.find(function(a){ return a.refaccionId === refaccionId; });
+  if(existente){ existente.cantidad = cantidad; }
+  else { saFormRefaccionesAsignadas.push({ refaccionId: refaccionId, cantidad: cantidad }); }
+  sel.value = '';
+  document.getElementById('sa-mnt-ref-cantidad').value = '1';
+  renderListaRefaccionesSA();
+});
+
+document.getElementById('sa-mnt-aceite-agregar').addEventListener('click', function(){
+  const sel = document.getElementById('sa-mnt-aceite-select');
+  const refaccionId = Number(sel.value);
+  const cantidad = Number(document.getElementById('sa-mnt-aceite-cantidad').value);
+  if(!refaccionId){ alert('Selecciona un aceite.'); return; }
+  if(!cantidad || cantidad <= 0){ alert('Captura los litros.'); return; }
+  const existente = saFormRefaccionesAsignadas.find(function(a){ return a.refaccionId === refaccionId; });
+  if(existente){ existente.cantidad = cantidad; }
+  else { saFormRefaccionesAsignadas.push({ refaccionId: refaccionId, cantidad: cantidad }); }
+  sel.value = '';
+  document.getElementById('sa-mnt-aceite-cantidad').value = '1';
+  renderListaRefaccionesSA();
+});
+
+// --- Modal agregar/editar regla de servicio automotriz (por modelo) ---
+const saMntModalOverlay = document.getElementById('sa-mnt-modal-overlay');
+
+function actualizarCamposPeriodicidadSA(){
+  const tipo = document.getElementById('sa-mnt-f-tipo').value;
+  const labelIntervalo = document.getElementById('sa-mnt-f-intervalo-label');
+  labelIntervalo.textContent = tipo === 'tiempo' ? 'Cada cuántos meses' : 'Cada cuántos kilómetros';
+}
+document.getElementById('sa-mnt-f-tipo').addEventListener('change', actualizarCamposPeriodicidadSA);
+
+function limpiarModalReglaSA(){
+  document.getElementById('sa-mnt-f-id').value = '';
+  document.getElementById('sa-mnt-f-marca-id').value = '';
+  poblarSelectModeloSA(null, null);
+  document.getElementById('sa-mnt-f-tipo-preventivo-id').value = '';
+  document.getElementById('sa-mnt-f-tipo').value = 'kilometros';
+  document.getElementById('sa-mnt-f-intervalo').value = '';
+  document.getElementById('sa-mnt-f-refacciones').value = '';
+  document.getElementById('sa-mnt-f-aceite').value = '';
+  document.getElementById('sa-mnt-f-activo').checked = true;
+  saFormRefaccionesAsignadas = [];
+  renderListaRefaccionesSA();
+  actualizarCamposPeriodicidadSA();
+  const statusEl = document.getElementById('sa-mnt-modal-status');
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+}
+
+function abrirModalReglaSA(regla){
+  poblarSelectMarcaSA();
+  poblarSelectTiposPreventivoSA();
+  poblarSelectRefaccionesSA();
+  poblarSelectAceiteSA();
+  limpiarModalReglaSA();
+  if(regla){
+    document.getElementById('sa-mnt-modal-title').textContent = 'Editar regla de servicio automotriz';
+    document.getElementById('sa-mnt-f-id').value = regla.Id;
+    document.getElementById('sa-mnt-f-marca-id').value = regla.MarcaId || '';
+    poblarSelectModeloSA(regla.MarcaId, regla.ModeloId);
+    document.getElementById('sa-mnt-f-tipo-preventivo-id').value = regla.TipoPreventivoId || '';
+    document.getElementById('sa-mnt-f-tipo').value = regla.TipoPeriodicidad === 'tiempo' ? 'tiempo' : 'kilometros';
+    document.getElementById('sa-mnt-f-intervalo').value = regla.Intervalo;
+    document.getElementById('sa-mnt-f-refacciones').value = regla.Notas || '';
+    document.getElementById('sa-mnt-f-aceite').value = regla.AceiteLitros !== null && regla.AceiteLitros !== undefined ? regla.AceiteLitros : '';
+    document.getElementById('sa-mnt-f-activo').checked = !!regla.Activo;
+    saFormRefaccionesAsignadas = (regla.RefaccionesAsignadas || []).map(function(a){
+      return { refaccionId: a.Id, cantidad: a.Cantidad };
+    });
+    renderListaRefaccionesSA();
+    actualizarCamposPeriodicidadSA();
+    document.getElementById('sa-mnt-btn-delete').style.display = '';
+  } else {
+    document.getElementById('sa-mnt-modal-title').textContent = 'Agregar regla de servicio automotriz';
+    document.getElementById('sa-mnt-btn-delete').style.display = 'none';
+  }
+  saMntModalOverlay.classList.add('open');
+}
+
+function cerrarModalReglaSA(){
+  saMntModalOverlay.classList.remove('open');
+}
+
+document.getElementById('sa-mnt-add').addEventListener('click', function(){ abrirModalReglaSA(null); });
+document.getElementById('sa-mnt-modal-close').addEventListener('click', cerrarModalReglaSA);
+saMntModalOverlay.addEventListener('click', function(e){
+  if(e.target === saMntModalOverlay) cerrarModalReglaSA();
+});
+
+document.getElementById('sa-mnt-btn-save').addEventListener('click', function(){
+  const id = document.getElementById('sa-mnt-f-id').value.trim();
+  const marcaId = document.getElementById('sa-mnt-f-marca-id').value;
+  const modeloId = document.getElementById('sa-mnt-f-modelo-id').value;
+  const tipoPreventivoId = document.getElementById('sa-mnt-f-tipo-preventivo-id').value;
+  const tipoPeriodicidad = document.getElementById('sa-mnt-f-tipo').value;
+  const intervalo = document.getElementById('sa-mnt-f-intervalo').value;
+  const statusEl = document.getElementById('sa-mnt-modal-status');
+  const btn = document.getElementById('sa-mnt-btn-save');
+
+  if(!marcaId || !modeloId){
+    statusEl.textContent = 'Selecciona la marca y el modelo.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  if(!tipoPreventivoId){
+    statusEl.textContent = 'Selecciona el tipo de servicio.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  if(!intervalo || Number(intervalo) <= 0){
+    statusEl.textContent = 'Captura un intervalo mayor a cero.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+
+  const datos = {
+    modeloId: modeloId,
+    tipoPreventivoId: tipoPreventivoId,
+    tipoPeriodicidad: tipoPeriodicidad,
+    intervalo: intervalo,
+    refacciones: document.getElementById('sa-mnt-f-refacciones').value.trim(),
+    aceiteLitros: document.getElementById('sa-mnt-f-aceite').value,
+    activo: document.getElementById('sa-mnt-f-activo').checked,
+    refaccionesAsignadas: saFormRefaccionesAsignadas
+  };
+
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      if(!result || !result.success){
+        statusEl.textContent = 'No se pudo guardar. ' + ((result && result.error) || '');
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      statusEl.textContent = 'Guardado correctamente.';
+      statusEl.className = 'maq-modal-status show ok';
+      cargarReglasAutomotrices();
+      setTimeout(cerrarModalReglaSA, 600);
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .guardarReglaServicioAutomotriz(ACCESS_CODE, PANEL_USUARIO, id ? Number(id) : null, datos);
+});
+
+document.getElementById('sa-mnt-btn-delete').addEventListener('click', function(){
+  const id = document.getElementById('sa-mnt-f-id').value.trim();
+  if(!id) return;
+  if(!confirm('¿Eliminar esta regla de servicio automotriz? También se borra el historial de servicios (por vehículo) ligado a ella. Las órdenes ya generadas no se borran.')) return;
+  const statusEl = document.getElementById('sa-mnt-modal-status');
+  google.script.run
+    .withSuccessHandler(function(){
+      cargarReglasAutomotrices();
+      cerrarModalReglaSA();
+    })
+    .withFailureHandler(function(){
+      statusEl.textContent = 'No se pudo eliminar.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .eliminarReglaServicioAutomotriz(ACCESS_CODE, PANEL_USUARIO, Number(id));
+});
+
+// ---- Sección "Servicios" (último registro por vehículo) ----
+
+function getServiciosAutomotricesFiltrados(){
+  const q = (document.getElementById('sa-srv-search').value || '').trim().toUpperCase();
+  const estatus = document.getElementById('sa-srv-estatus').value;
+  return ALL_SERVICIOS_AUTOMOTRICES.filter(function(r){
+    if(estatus === 'vencido' && !r.Vencido) return false;
+    if(estatus === 'al_dia' && (r.Vencido || r.SinLineaBase)) return false;
+    if(estatus === 'sin_base' && !r.SinLineaBase) return false;
+    if(q){
+      const haystack = [r.Unidad, r.CodigoUnidad, r.MarcaNombre, r.ModeloNombre, r.TipoPreventivoNombre, r.NombreServicio, r.Huerta].join(' ').toUpperCase();
+      if(haystack.indexOf(q) === -1) return false;
+    }
+    return true;
+  }).sort(compararUrgenciaServicio_);
+}
+
+function renderServiciosAutomotrices(){
+  const tbody = document.getElementById('sa-srv-table-body');
+  const records = getServiciosAutomotricesFiltrados();
+
+  document.getElementById('sa-srv-summary').textContent =
+    records.length + ' de ' + ALL_SERVICIOS_AUTOMOTRICES.length + ' servicios · ' +
+    ALL_SERVICIOS_AUTOMOTRICES.filter(function(r){ return r.Vencido; }).length + ' vencidos';
+
+  if(records.length === 0){
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No hay servicios que coincidan.</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = records.map(function(r){
+    const estado = getEstadoServicio_(r);
+    return `
+    <tr>
+      <td>${escapeHtml(r.Unidad || r.CodigoUnidad)}<span class="mnt-subtext">${escapeHtml(r.Huerta || 'Sin ubicación')}</span></td>
+      <td>${escapeHtml(r.MarcaNombre)}<span class="mnt-subtext">${escapeHtml(r.ModeloNombre)}</span></td>
+      <td>${escapeHtml(r.TipoPreventivoNombre || r.NombreServicio)}</td>
+      <td>${escapeHtml(formatUltimoRegistro_(r))}</td>
+      <td>${formatLecturaActual_(r)}</td>
+      <td>${formatProximoServicio_(r)}</td>
+      <td>${formatHorasParaProximo_(r)}</td>
+      <td><span class="status-pill ${estado.cls}">${estado.label}</span></td>
+      <td>
+        <button type="button" class="export-btn sa-srv-btn-editar" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;">Editar</button>
+        <button type="button" class="export-btn sa-srv-btn-orden" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;margin-left:4px;">Generar orden</button>
+      </td>
+    </tr>
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.sa-srv-btn-editar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const servicio = ALL_SERVICIOS_AUTOMOTRICES.find(function(r){ return String(r.ReglaId) === btn.dataset.regla && r.CodigoUnidad === btn.dataset.codigo; });
+      if(servicio) abrirModalServicioSA(servicio);
+    });
+  });
+  tbody.querySelectorAll('.sa-srv-btn-orden').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const servicio = ALL_SERVICIOS_AUTOMOTRICES.find(function(r){ return String(r.ReglaId) === btn.dataset.regla && r.CodigoUnidad === btn.dataset.codigo; });
+      if(servicio) abrirModalOrdenSA(servicio);
+    });
+  });
+  // El botón "actualizar" lo pinta formatLecturaActual_ (compartido con
+  // Preventivos Agrícolas) con la clase .mnt-lectura-link — tbody aquí ya
+  // es #sa-srv-table-body, así que querySelectorAll queda acotado a esta
+  // tabla sin necesidad de una clase aparte.
+  tbody.querySelectorAll('.mnt-lectura-link').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const codigo = btn.dataset.codigo;
+      const servicio = ALL_SERVICIOS_AUTOMOTRICES.find(function(r){ return r.CodigoUnidad === codigo; });
+      actualizarLecturaManualPromptSA(codigo, servicio ? servicio.Unidad : codigo, servicio ? servicio.LecturaActual : null);
+    });
+  });
+  ocultarControlesSoloLectura();
+}
+
+document.getElementById('sa-srv-search').addEventListener('input', renderServiciosAutomotrices);
+document.getElementById('sa-srv-estatus').addEventListener('change', renderServiciosAutomotrices);
+
+function saSrvFiltrosTextoActivos_(){
+  const filtros = [];
+  const q = document.getElementById('sa-srv-search').value.trim();
+  if(q) filtros.push('Búsqueda: "' + q + '"');
+  const estatusSel = document.getElementById('sa-srv-estatus');
+  if(estatusSel.value) filtros.push('Estatus: ' + estatusSel.options[estatusSel.selectedIndex].textContent);
+  return filtros;
+}
+
+document.getElementById('sa-srv-export').addEventListener('click', function(){
+  const registros = getServiciosAutomotricesFiltrados();
+  if(registros.length === 0){ alert('No hay servicios que coincidan con el filtro actual.'); return; }
+  const columnas = [
+    {header:'Unidad', key:'unidad', width:16},
+    {header:'Huerta', key:'huerta', width:16},
+    {header:'Marca', key:'marca', width:14},
+    {header:'Modelo', key:'modelo', width:16},
+    {header:'Tipo de servicio', key:'tipo', width:22, wrap:true},
+    {header:'Último registro', key:'ultimoRegistro', width:18},
+    {header:'Lectura actual', key:'lecturaActual', width:24, wrap:true},
+    {header:'Próximo servicio', key:'proximoServicio', width:26, wrap:true},
+    {header:'Km para próximo servicio', key:'horasParaProximo', width:22, wrap:true},
+    {header:'Estatus', key:'estatus', width:14},
+  ];
+  const filas = registros.map(function(r){
+    const estado = getEstadoServicio_(r);
+    return {
+      unidad: r.Unidad || r.CodigoUnidad || '',
+      huerta: r.Huerta || '',
+      marca: r.MarcaNombre || '',
+      modelo: r.ModeloNombre || '',
+      tipo: r.TipoPreventivoNombre || r.NombreServicio || '',
+      ultimoRegistro: formatUltimoRegistro_(r),
+      lecturaActual: textoLecturaActualExcel_(r),
+      proximoServicio: textoProximoServicioExcel_(r),
+      horasParaProximo: textoHorasParaProximoExcel_(r),
+      estatus: estado.label,
+    };
+  });
+  const filtros = saSrvFiltrosTextoActivos_();
+  const subtitulo = 'Generado el ' + new Date().toLocaleString('es-MX') + (filtros.length ? ' · ' + filtros.join(' · ') : '');
+  descargarComoExcel_('Servicios automotrices por vehículo', subtitulo, [{ columnas: columnas, filas: filas, autoFiltro: true }], 'servicios_automotrices_por_vehiculo');
+});
+
+// --- Modal editar servicio (último registro de un vehículo para una regla) ---
+const saSrvModalOverlay = document.getElementById('sa-srv-modal-overlay');
+
+function abrirModalServicioSA(servicio){
+  document.getElementById('sa-srv-f-regla-id').value = servicio.ReglaId;
+  document.getElementById('sa-srv-f-codigo-unidad').value = servicio.CodigoUnidad;
+  document.getElementById('sa-srv-f-resumen').innerHTML =
+    '<b>' + escapeHtml(servicio.Unidad || servicio.CodigoUnidad) + '</b> — ' + escapeHtml((servicio.MarcaNombre || '') + ' ' + (servicio.ModeloNombre || '')) +
+    '<br>' + escapeHtml(servicio.TipoPreventivoNombre || servicio.NombreServicio) + ' · ' + escapeHtml(formatPeriodicidad_(servicio));
+
+  const wrapLectura = document.getElementById('sa-srv-f-lectura-wrap');
+  const labelLectura = document.getElementById('sa-srv-f-lectura-label');
+  const labelOverride = document.getElementById('sa-srv-f-override-label');
+  if(servicio.TipoPeriodicidad === 'tiempo'){
+    wrapLectura.style.display = 'none';
+    labelOverride.textContent = 'Intervalo propio para este vehículo, en MESES (opcional)';
+  } else {
+    wrapLectura.style.display = '';
+    labelLectura.textContent = 'Última lectura (kilómetros)';
+    labelOverride.textContent = 'Intervalo propio para este vehículo, en KM (opcional)';
+  }
+  document.getElementById('sa-srv-f-lectura').value = servicio.UltimaLectura !== null && servicio.UltimaLectura !== undefined ? servicio.UltimaLectura : '';
+  document.getElementById('sa-srv-f-fecha').value = servicio.UltimaFecha ? servicio.UltimaFecha.substring(0,10) : '';
+  document.getElementById('sa-srv-f-override').value = servicio.IntervaloOverride !== null && servicio.IntervaloOverride !== undefined ? servicio.IntervaloOverride : '';
+
+  const statusEl = document.getElementById('sa-srv-modal-status');
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+  saSrvModalOverlay.classList.add('open');
+}
+
+function cerrarModalServicioSA(){
+  saSrvModalOverlay.classList.remove('open');
+}
+
+document.getElementById('sa-srv-modal-close').addEventListener('click', cerrarModalServicioSA);
+saSrvModalOverlay.addEventListener('click', function(e){
+  if(e.target === saSrvModalOverlay) cerrarModalServicioSA();
+});
+
+document.getElementById('sa-srv-btn-save').addEventListener('click', function(){
+  const reglaId = Number(document.getElementById('sa-srv-f-regla-id').value);
+  const codigoUnidad = document.getElementById('sa-srv-f-codigo-unidad').value;
+  const statusEl = document.getElementById('sa-srv-modal-status');
+  const btn = document.getElementById('sa-srv-btn-save');
+
+  const datos = {
+    ultimaLectura: document.getElementById('sa-srv-f-lectura').value,
+    ultimaFecha: document.getElementById('sa-srv-f-fecha').value,
+    intervaloOverride: document.getElementById('sa-srv-f-override').value
+  };
+
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      if(!result || !result.success){
+        statusEl.textContent = 'No se pudo guardar. ' + ((result && result.error) || '');
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      statusEl.textContent = 'Guardado correctamente.';
+      statusEl.className = 'maq-modal-status show ok';
+      cargarServiciosAutomotricesDatos();
+      setTimeout(cerrarModalServicioSA, 600);
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .guardarServicioAutomotriz(ACCESS_CODE, PANEL_USUARIO, reglaId, codigoUnidad, datos);
+});
+
+// --- Modal generar orden, desde un servicio (vehículo + regla de su modelo) ---
+const saOrdModalOverlay = document.getElementById('sa-ord-modal-overlay');
+
+function abrirModalOrdenSA(servicio){
+  document.getElementById('sa-ord-f-regla-id').value = servicio.ReglaId;
+  document.getElementById('sa-ord-f-codigo-unidad').value = servicio.CodigoUnidad;
+  document.getElementById('sa-ord-f-nombre').value = PANEL_USUARIO || '';
+  document.getElementById('sa-ord-f-comentario').value = '';
+  const estado = getEstadoServicio_(servicio);
+  document.getElementById('sa-ord-f-resumen').innerHTML =
+    '<b>' + escapeHtml(servicio.Unidad || servicio.CodigoUnidad) + '</b> — ' + escapeHtml(servicio.TipoPreventivoNombre || servicio.NombreServicio) +
+    '<br>' + escapeHtml((servicio.MarcaNombre || '') + ' ' + (servicio.ModeloNombre || '')) +
+    '<br>' + escapeHtml(formatPeriodicidad_(servicio)) + ' · ' + escapeHtml(estado.label) +
+    ((servicio.RefaccionesAsignadas && servicio.RefaccionesAsignadas.length)
+      ? '<br>Refacciones: ' + servicio.RefaccionesAsignadas.map(function(a){ return escapeHtml(a.Descripcion) + ' x' + a.Cantidad; }).join(', ')
+      : '') +
+    (servicio.Notas ? '<br>Notas: ' + escapeHtml(servicio.Notas) : '') +
+    (servicio.AceiteLitros ? '<br>Aceite: ' + escapeHtml(String(servicio.AceiteLitros)) + ' L' : '');
+  const statusEl = document.getElementById('sa-ord-modal-status');
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+  saOrdModalOverlay.classList.add('open');
+}
+
+function cerrarModalOrdenSA(){
+  saOrdModalOverlay.classList.remove('open');
+}
+
+document.getElementById('sa-ord-modal-close').addEventListener('click', cerrarModalOrdenSA);
+saOrdModalOverlay.addEventListener('click', function(e){
+  if(e.target === saOrdModalOverlay) cerrarModalOrdenSA();
+});
+
+document.getElementById('sa-ord-btn-generar').addEventListener('click', function(){
+  const reglaId = Number(document.getElementById('sa-ord-f-regla-id').value);
+  const codigoUnidad = document.getElementById('sa-ord-f-codigo-unidad').value;
+  const servicio = ALL_SERVICIOS_AUTOMOTRICES.find(function(r){ return r.ReglaId === reglaId && r.CodigoUnidad === codigoUnidad; });
+  const nombre = document.getElementById('sa-ord-f-nombre').value.trim();
+  const comentario = document.getElementById('sa-ord-f-comentario').value.trim();
+  const statusEl = document.getElementById('sa-ord-modal-status');
+  const btn = document.getElementById('sa-ord-btn-generar');
+
+  if(!nombre){
+    statusEl.textContent = 'Escribe quién genera la orden.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Generando...';
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      btn.textContent = 'Generar orden';
+      if(!result || !result.success){
+        statusEl.textContent = 'No se pudo generar la orden. ' + ((result && result.error) || '');
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      statusEl.textContent = 'Orden generada: ' + result.orden + ' (ya está en la pestaña Órdenes → Automotriz).';
+      statusEl.className = 'maq-modal-status show ok';
+      setTimeout(cerrarModalOrdenSA, 1400);
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      btn.textContent = 'Generar orden';
+      statusEl.textContent = 'No se pudo generar la orden. Intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .generarOrdenServicioAutomotriz(ACCESS_CODE, PANEL_USUARIO, reglaId, codigoUnidad, {
+      nombre: nombre,
+      comentario: comentario,
+      lecturaActual: servicio ? servicio.LecturaActual : null
+    });
+});
+
+// --- "Importar lista" (botón en la toolbar de Reglas): sube un Excel/CSV
+// con columnas de vehículo (LOC_VEH, con el número "AF-###"), tipo de
+// servicio, último kilometraje, fecha del último servicio y periodicidad
+// (cada cuántos km) — lo lee el NAVEGADOR con SheetJS (ver <script
+// src=".../xlsx.full.min.js"> al inicio del archivo), empareja cada fila
+// con un vehículo de ALL_EQUIPOS_AUTOMOTRICES por el número "AF-###" (mismo
+// criterio ya probado en revisar_automotrices_vs_lista.js), muestra una
+// vista previa para revisar/corregir el emparejamiento, y al confirmar
+// manda las filas ya resueltas a importarServiciosAutomotrices (servidor),
+// que crea/actualiza las reglas y guarda el último servicio de cada una.
+let SA_IMP_FILAS = [];
+
+function normalizarEncabezadoSA_(h){
+  return String(h || '').toUpperCase().trim().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function extraerAFSA_(texto){
+  if(!texto) return null;
+  const m = String(texto).match(/AF[-\s]?(\d+)/i);
+  return m ? m[1].replace(/^0+(?=\d)/, '') : null;
+}
+
+function parsearFechaExcelSA_(valor){
+  if(valor === null || valor === undefined || valor === '') return null;
+  if(valor instanceof Date && !isNaN(valor.getTime())){
+    return valor.toISOString().substring(0,10);
+  }
+  const texto = String(valor).trim();
+  if(!texto) return null;
+  let m = texto.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m){
+    const dd = m[1].padStart(2,'0'), mm = m[2].padStart(2,'0'), yyyy = m[3];
+    return yyyy + '-' + mm + '-' + dd;
+  }
+  m = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[1] + '-' + m[2] + '-' + m[3];
+  if(/^\d+(\.\d+)?$/.test(texto)){
+    const serial = Number(texto);
+    const ms = Math.round((serial - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if(!isNaN(d.getTime())) return d.toISOString().substring(0,10);
+  }
+  return null;
+}
+
+function renderSaImpPreview_(){
+  const tbody = document.getElementById('sa-imp-table-body');
+  if(SA_IMP_FILAS.length === 0){
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No se encontraron filas de datos en el archivo.</div></td></tr>';
+    return;
+  }
+  const equiposOrdenados = ALL_EQUIPOS_AUTOMOTRICES.slice().sort(function(a,b){
+    return (a.Unidad || a.CodigoUnidad || '').localeCompare(b.Unidad || b.CodigoUnidad || '', 'es');
+  });
+  tbody.innerHTML = SA_IMP_FILAS.map(function(f, idx){
+    const opciones = '<option value="">Sin equipo (no importar)</option>' + equiposOrdenados.map(function(eq){
+      const sel = eq.CodigoUnidad === f.codigoUnidadElegido ? ' selected' : '';
+      return '<option value="' + escapeHtml(eq.CodigoUnidad) + '"' + sel + '>' + escapeHtml(eq.Unidad || eq.CodigoUnidad) + '</option>';
+    }).join('');
+    return '<tr>' +
+      '<td>' + f.filaNum + '<div class="mnt-subtext">' + escapeHtml(f.loc || '') + '</div></td>' +
+      '<td><select class="sa-imp-equipo-select" data-idx="' + idx + '">' + opciones + '</select>' +
+        (f.codigoUnidadSugerido ? '' : '<div class="mnt-subtext">Sin coincidencia automática — elige el vehículo</div>') + '</td>' +
+      '<td>' + escapeHtml(f.tipoServicio || '') + '</td>' +
+      '<td>' + (f.ultimoKm !== null ? escapeHtml(String(f.ultimoKm)) : '<span class="mnt-subtext">—</span>') + '</td>' +
+      '<td>' + (f.fechaUltimo ? escapeHtml(f.fechaUltimo) : '<span class="mnt-subtext">—</span>') + '</td>' +
+      '<td>' + (f.periodicidad !== null ? escapeHtml(String(f.periodicidad)) : '<span class="mnt-subtext">—</span>') + '</td>' +
+      '<td><input type="checkbox" class="sa-imp-incluir" data-idx="' + idx + '"' + (f.incluir ? ' checked' : '') + '></td>' +
+    '</tr>';
+  }).join('');
+  tbody.querySelectorAll('.sa-imp-equipo-select').forEach(function(sel){
+    sel.addEventListener('change', function(){
+      const idx = Number(sel.dataset.idx);
+      SA_IMP_FILAS[idx].codigoUnidadElegido = sel.value || null;
+      SA_IMP_FILAS[idx].incluir = !!sel.value && !!SA_IMP_FILAS[idx].tipoServicio && !!SA_IMP_FILAS[idx].periodicidad;
+      renderSaImpPreview_();
+    });
+  });
+  tbody.querySelectorAll('.sa-imp-incluir').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      const idx = Number(cb.dataset.idx);
+      SA_IMP_FILAS[idx].incluir = cb.checked;
+    });
+  });
+}
+
+function procesarFilasImportacionSA_(filas){
+  const statusEl = document.getElementById('sa-imp-modal-status');
+  if(!filas || filas.length === 0){
+    statusEl.textContent = 'El archivo está vacío.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+
+  // Busca la fila de encabezados (la primera que reconozca al menos 3 de
+  // las 5 columnas esperadas) -- por si el archivo trae una fila en blanco
+  // o un título arriba de la tabla real.
+  let filaEncabezado = -1, colLoc = -1, colTipo = -1, colKm = -1, colFecha = -1, colPeriodicidad = -1;
+  for(let i = 0; i < Math.min(filas.length, 10); i++){
+    const fila = filas[i] || [];
+    let cLoc=-1, cTipo=-1, cKm=-1, cFecha=-1, cPer=-1;
+    fila.forEach(function(celda, j){
+      const h = normalizarEncabezadoSA_(celda);
+      if(!h) return;
+      if(cLoc === -1 && (h.indexOf('LOC') !== -1 || h === 'VEHICULO' || h === 'UNIDAD' || h.indexOf('ECONOMICO') !== -1)) cLoc = j;
+      if(cTipo === -1 && h.indexOf('TIPO') !== -1 && h.indexOf('SERVICIO') !== -1) cTipo = j;
+      if(cFecha === -1 && h.indexOf('FECHA') !== -1) cFecha = j;
+      if(cKm === -1 && h.indexOf('FECHA') === -1 && (h.indexOf('ULTIMO') !== -1 || h.indexOf('ULITMO') !== -1) &&
+         (h.indexOf('MANTENIMIENTO') !== -1 || h.indexOf('KM') !== -1 || h.indexOf('KILOMETRAJE') !== -1 || h.indexOf('SERVICIO') !== -1)) cKm = j;
+      if(cPer === -1 && (h.indexOf('PERIODICIDAD') !== -1 || h.indexOf('INTERVALO') !== -1)) cPer = j;
+    });
+    const encontradas = [cLoc, cTipo, cKm, cFecha, cPer].filter(function(v){ return v !== -1; }).length;
+    if(encontradas >= 3){
+      filaEncabezado = i; colLoc = cLoc; colTipo = cTipo; colKm = cKm; colFecha = cFecha; colPeriodicidad = cPer;
+      break;
+    }
+  }
+  if(filaEncabezado === -1){
+    statusEl.textContent = 'No se reconocieron las columnas del archivo. Revisa que tenga encabezados como "LOC_VEH", "TIPO DE SERVICIO", "ULTIMO MANTENIMIENTO", "FECHA ULTIMO MANTENIMIENTO" y "PERIODICIDAD".';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+
+  const equiposPorAF = {};
+  ALL_EQUIPOS_AUTOMOTRICES.forEach(function(eq){
+    const af = extraerAFSA_(eq.CodigoUnidad) || extraerAFSA_(eq.Unidad);
+    if(af) equiposPorAF[af] = eq;
+  });
+
+  const procesadas = [];
+  for(let i = filaEncabezado + 1; i < filas.length; i++){
+    const fila = filas[i] || [];
+    if(fila.every(function(c){ return String(c || '').trim() === ''; })) continue;
+    const loc = colLoc !== -1 ? fila[colLoc] : '';
+    const tipoServicio = colTipo !== -1 ? String(fila[colTipo] || '').trim().toUpperCase() : '';
+    const ultimoKmTexto = colKm !== -1 ? String(fila[colKm] || '').trim() : '';
+    const periodicidadTexto = colPeriodicidad !== -1 ? String(fila[colPeriodicidad] || '').trim() : '';
+    const fechaCelda = colFecha !== -1 ? fila[colFecha] : '';
+
+    const ultimoKmNum = ultimoKmTexto === '' ? null : Number(ultimoKmTexto.replace(/,/g, ''));
+    const periodicidadNum = periodicidadTexto === '' ? null : Number(periodicidadTexto.replace(/,/g, ''));
+    const fechaUltimo = parsearFechaExcelSA_(fechaCelda);
+
+    const af = extraerAFSA_(loc);
+    const equipo = af ? equiposPorAF[af] : null;
+
+    procesadas.push({
+      filaNum: i + 1,
+      loc: loc,
+      afNum: af,
+      tipoServicio: tipoServicio,
+      ultimoKm: (ultimoKmNum !== null && !isNaN(ultimoKmNum)) ? ultimoKmNum : null,
+      fechaUltimo: fechaUltimo,
+      periodicidad: (periodicidadNum !== null && !isNaN(periodicidadNum)) ? periodicidadNum : null,
+      codigoUnidadSugerido: equipo ? equipo.CodigoUnidad : null,
+      codigoUnidadElegido: equipo ? equipo.CodigoUnidad : null,
+      incluir: !!(equipo && tipoServicio && periodicidadNum)
+    });
+  }
+
+  SA_IMP_FILAS = procesadas;
+  const sinMatch = procesadas.filter(function(f){ return !f.codigoUnidadSugerido; }).length;
+  statusEl.textContent = procesadas.length === 0
+    ? 'No se encontraron filas de datos debajo del encabezado.'
+    : 'Se leyeron ' + procesadas.length + ' fila(s). ' +
+      (sinMatch ? sinMatch + ' sin coincidencia automática (elige el vehículo manualmente abajo).' : 'Todas encontraron vehículo automáticamente.');
+  statusEl.className = 'maq-modal-status show ' + (procesadas.length === 0 ? 'err' : (sinMatch ? '' : 'ok'));
+  document.getElementById('sa-imp-tabla-wrap').style.display = procesadas.length ? '' : 'none';
+  document.getElementById('sa-imp-confirmar-wrap').style.display = procesadas.length ? '' : 'none';
+  renderSaImpPreview_();
+}
+
+document.getElementById('sa-imp-btn-analizar').addEventListener('click', function(){
+  const fileInput = document.getElementById('sa-imp-file');
+  const statusEl = document.getElementById('sa-imp-modal-status');
+  const file = fileInput.files && fileInput.files[0];
+  if(!file){
+    statusEl.textContent = 'Selecciona un archivo primero.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  statusEl.textContent = 'Leyendo archivo...';
+  statusEl.className = 'maq-modal-status show';
+  const esCsv = /\.csv$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onerror = function(){
+    statusEl.textContent = 'No se pudo leer el archivo.';
+    statusEl.className = 'maq-modal-status show err';
+  };
+  reader.onload = function(e){
+    try{
+      const workbook = esCsv
+        ? XLSX.read(e.target.result, { type: 'string' })
+        : XLSX.read(e.target.result, { type: 'array' });
+      const hojaNombre = workbook.SheetNames[0];
+      const hoja = workbook.Sheets[hojaNombre];
+      const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: '' });
+      procesarFilasImportacionSA_(filas);
+    } catch(err){
+      statusEl.textContent = 'No se pudo leer el archivo. ¿Es un Excel o CSV válido? (' + (err && err.message ? err.message : err) + ')';
+      statusEl.className = 'maq-modal-status show err';
+    }
+  };
+  if(esCsv){ reader.readAsText(file, 'utf-8'); } else { reader.readAsArrayBuffer(file); }
+});
+
+document.getElementById('sa-imp-btn-confirmar').addEventListener('click', function(){
+  const statusEl = document.getElementById('sa-imp-modal-status');
+  const btn = document.getElementById('sa-imp-btn-confirmar');
+  const filas = SA_IMP_FILAS.filter(function(f){ return f.incluir && f.codigoUnidadElegido; }).map(function(f){
+    return {
+      codigoUnidad: f.codigoUnidadElegido,
+      tipoServicio: f.tipoServicio,
+      ultimoKm: f.ultimoKm,
+      fechaUltimo: f.fechaUltimo,
+      periodicidad: f.periodicidad
+    };
+  });
+  if(filas.length === 0){
+    statusEl.textContent = 'No hay filas marcadas para importar.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Importando...';
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      btn.textContent = 'Confirmar importación';
+      if(!result || !result.success){
+        statusEl.textContent = 'No se pudo importar. ' + ((result && result.error) || '');
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      let msg = 'Listo: ' + result.guardados + ' servicio(s) guardado(s), ' + result.reglasCreadas + ' regla(s) nueva(s), ' + result.reglasActualizadas + ' regla(s) actualizada(s).';
+      const hayErrores = result.errores && result.errores.length;
+      if(hayErrores){
+        msg += ' ' + result.errores.length + ' fila(s) con error: ' + result.errores.map(function(e){ return e.fila + ' (' + e.error + ')'; }).join('; ');
+      }
+      statusEl.textContent = msg;
+      statusEl.className = 'maq-modal-status show ' + (hayErrores ? 'err' : 'ok');
+      cargarReglasAutomotrices();
+      cargarServiciosAutomotricesDatos();
+      if(!hayErrores) setTimeout(cerrarModalImportarSA, 1800);
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      btn.textContent = 'Confirmar importación';
+      statusEl.textContent = 'No se pudo importar. Intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .importarServiciosAutomotrices(ACCESS_CODE, PANEL_USUARIO, filas);
+});
+
+const saImpModalOverlay = document.getElementById('sa-imp-modal-overlay');
+
+function abrirModalImportarSA(){
+  document.getElementById('sa-imp-file').value = '';
+  const statusEl = document.getElementById('sa-imp-modal-status');
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+  document.getElementById('sa-imp-tabla-wrap').style.display = 'none';
+  document.getElementById('sa-imp-confirmar-wrap').style.display = 'none';
+  document.getElementById('sa-imp-table-body').innerHTML = '';
+  SA_IMP_FILAS = [];
+  if(ALL_EQUIPOS_AUTOMOTRICES.length === 0) cargarEquiposAutomotrices();
+  saImpModalOverlay.classList.add('open');
+}
+function cerrarModalImportarSA(){
+  saImpModalOverlay.classList.remove('open');
+}
+document.getElementById('sa-mnt-import').addEventListener('click', abrirModalImportarSA);
+document.getElementById('sa-imp-modal-close').addEventListener('click', cerrarModalImportarSA);
+saImpModalOverlay.addEventListener('click', function(e){
+  if(e.target === saImpModalOverlay) cerrarModalImportarSA();
+});
+
 
 // --- Pestaña Refacciones (catálogo de partes + reporte por servicio) ---
 let ALL_REFACCIONES = [];

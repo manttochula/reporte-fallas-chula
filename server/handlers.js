@@ -25,8 +25,11 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // eliminarMaquinaria) — por eso, para esas acciones, basta con tener
 // permiso en CUALQUIERA de las dos. "combustible_automotriz" es aparte de
 // "diesel": son pestañas y permisos independientes (autos vs. maquinaria
-// agrícola) — ver combustible_automotriz en schema.sql.
-const PESTANAS_PANEL = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'refacciones', 'insumos', 'usuarios'];
+// agrícola) — ver combustible_automotriz en schema.sql. Mismo criterio para
+// "servicios_automotrices" contra "mantenimiento" (Preventivos Agrícolas):
+// mismo motor por debajo (mantenimiento_reglas/mantenimiento_servicios),
+// pero pestañas y permisos independientes para poder dar uno sin el otro.
+const PESTANAS_PANEL = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -1420,8 +1423,9 @@ async function editarCargaGasolina(code, nombreUsuario, id, data) {
   try {
     const idNum = Number(id);
     if (!idNum) return { success: false, error: 'Falta el identificador de la carga.' };
-    const [rows] = await pool.query('SELECT id, unidad FROM combustible_automotriz WHERE id = ?', [idNum]);
+    const [rows] = await pool.query('SELECT id, codigo_unidad, unidad FROM combustible_automotriz WHERE id = ?', [idNum]);
     if (rows.length === 0) return { success: false, error: 'No se encontró esa carga de gasolina.' };
+    const codigoUnidadOriginal = rows[0].codigo_unidad;
 
     const codigoUnidad = (data.unidad || '').toString().trim();
     const unidadLabel = (data.unidadLabel || '').toString().trim();
@@ -1453,6 +1457,16 @@ async function editarCargaGasolina(code, nombreUsuario, id, data) {
       [codigoUnidad, unidadLabel, litros, precioLitro, total, lectura, tipoCombustible, empresa, proveedor, fecha, modificadoPor, idNum]
     );
     await registrarAuditoria_('combustible_automotriz', idNum, 'editar', nombreUsuario, unidadLabel + ' — ' + litros + ' L');
+    // Si esta carga traía la lectura (odómetro) que se estaba usando como
+    // "lectura actual" de algún servicio de Servicios Automotrices, al
+    // corregirla puede que ese vehículo ya no esté vencido — revisa y
+    // cancela esas órdenes (mismo criterio que editarCargaDiesel). Se
+    // revisan tanto el vehículo original como el nuevo, por si la carga se
+    // reasignó de vehículo.
+    await cancelarOrdenesPreventivasYaNoVencidas_(codigoUnidadOriginal, nombreUsuario);
+    if (codigoUnidad !== codigoUnidadOriginal) {
+      await cancelarOrdenesPreventivasYaNoVencidas_(codigoUnidad, nombreUsuario);
+    }
     return { success: true };
   } catch (err) {
     return { success: false, error: err.toString() };
@@ -1465,7 +1479,7 @@ async function eliminarCargaGasolina(code, nombreUsuario, id) {
   try {
     const idNum = Number(id);
     if (!idNum) return { success: false, error: 'Falta el identificador de la carga.' };
-    const [rows] = await pool.query('SELECT id, unidad, litros, eliminado FROM combustible_automotriz WHERE id = ?', [idNum]);
+    const [rows] = await pool.query('SELECT id, codigo_unidad, unidad, litros, eliminado FROM combustible_automotriz WHERE id = ?', [idNum]);
     if (rows.length === 0) return { success: false, error: 'No se encontró esa carga de gasolina.' };
     if (rows[0].eliminado) return { success: false, error: 'Esa carga ya estaba eliminada.' };
     const eliminadoPor = (nombreUsuario || '').toString().trim() || null;
@@ -1474,6 +1488,10 @@ async function eliminarCargaGasolina(code, nombreUsuario, id) {
       [eliminadoPor, idNum]
     );
     await registrarAuditoria_('combustible_automotriz', idNum, 'eliminar', nombreUsuario, (rows[0].unidad || '') + ' — ' + rows[0].litros + ' L');
+    // Si esta carga era la que se estaba usando como "lectura actual" de
+    // algún servicio, al borrarla el vehículo puede volver a su lectura
+    // anterior (o quedarse sin ninguna) y dejar de estar vencido.
+    await cancelarOrdenesPreventivasYaNoVencidas_(rows[0].codigo_unidad, nombreUsuario);
     return { success: true };
   } catch (err) {
     return { success: false, error: err.toString() };
@@ -3054,14 +3072,20 @@ function calcularProximoServicio_(tipo, intervalo, ultimaLectura, ultimaFecha, l
 }
 
 // Lectura vigente (horómetro/odómetro) de cada equipo: la última carga de
-// diesel con lectura capturada, o la lectura manual si es más reciente
-// (ver también getMaquinaria/getReglasMantenimiento originalmente).
+// diesel (horómetro, agrícola) o de Combustible Automotriz (odómetro, autos/
+// camionetas/camiones/motos) con lectura capturada, o la lectura manual si
+// es más reciente (ver también getMaquinaria/getReglasMantenimiento
+// originalmente). Un equipo normalmente solo aparece en diesel O en
+// combustible_automotriz (nunca en los dos: uno es agrícola por huerta, el
+// otro es autos por ticket de gasolinera) — pero por si acaso se toma
+// siempre la más reciente de las dos, igual que ya se hacía entre la
+// automática y la manual.
 async function getLecturasActualesPorEquipo_() {
   // Antes esto comparaba por MAX(fecha) y hacía JOIN contra esa fecha: si
-  // una unidad tenía dos cargas de diesel con la MISMA fecha (algo normal —
-  // "fecha" es un DATETIME, pero varias capturas quedan a medianoche
-  // cuando se editan a mano o vienen de un campo de solo fecha), el JOIN
-  // podía regresar ambas filas empatadas y cuál "ganaba" en el mapa final
+  // una unidad tenía dos cargas con la MISMA fecha (algo normal — "fecha"
+  // es un DATETIME, pero varias capturas quedan a medianoche cuando se
+  // editan a mano o vienen de un campo de solo fecha), el JOIN podía
+  // regresar ambas filas empatadas y cuál "ganaba" en el mapa final
   // dependía del orden en que MySQL las devolviera — no necesariamente la
   // más reciente. Eso hacía que, por ejemplo, al corregir una lectura mal
   // capturada, la pantalla de Servicios/Preventivos pudiera seguir
@@ -3083,6 +3107,20 @@ async function getLecturasActualesPorEquipo_() {
     dieselMap[r.CodigoUnidad] = { lectura: Number(r.Lectura), fecha: r.Fecha };
   });
 
+  const [automotrizUlt] = await pool.query(`
+    SELECT CodigoUnidad, Lectura, Fecha FROM (
+      SELECT c.codigo_unidad AS CodigoUnidad, c.lectura AS Lectura, c.fecha AS Fecha,
+             ROW_NUMBER() OVER (PARTITION BY c.codigo_unidad ORDER BY c.fecha DESC, c.id DESC) AS rn
+      FROM combustible_automotriz c
+      WHERE c.lectura IS NOT NULL AND c.eliminado = 0
+    ) ranked
+    WHERE rn = 1
+  `);
+  const automotrizMap = {};
+  automotrizUlt.forEach((r) => {
+    automotrizMap[r.CodigoUnidad] = { lectura: Number(r.Lectura), fecha: r.Fecha };
+  });
+
   const [maquinas] = await pool.query(
     'SELECT codigo_unidad AS CodigoUnidad, lectura_manual AS LecturaManual, lectura_manual_fecha AS LecturaManualFecha FROM maquinaria'
   );
@@ -3090,7 +3128,24 @@ async function getLecturasActualesPorEquipo_() {
   const map = {};
   maquinas.forEach((m) => {
     const codigo = m.CodigoUnidad;
-    const auto = dieselMap[codigo] || null;
+    const deDiesel = dieselMap[codigo] || null;
+    const deAutomotriz = automotrizMap[codigo] || null;
+    // Entre diesel y combustible_automotriz, se queda con la más reciente
+    // (normalmente solo una de las dos existe para un equipo dado).
+    let auto = null;
+    let autoOrigen = null;
+    if (deDiesel && deAutomotriz) {
+      if (new Date(deAutomotriz.fecha).getTime() >= new Date(deDiesel.fecha).getTime()) {
+        auto = deAutomotriz; autoOrigen = 'automotriz';
+      } else {
+        auto = deDiesel; autoOrigen = 'diesel';
+      }
+    } else if (deAutomotriz) {
+      auto = deAutomotriz; autoOrigen = 'automotriz';
+    } else if (deDiesel) {
+      auto = deDiesel; autoOrigen = 'diesel';
+    }
+
     const manualLectura = m.LecturaManual !== null && m.LecturaManual !== undefined ? Number(m.LecturaManual) : null;
     const manualFecha = m.LecturaManualFecha ? new Date(m.LecturaManualFecha) : null;
 
@@ -3101,10 +3156,10 @@ async function getLecturasActualesPorEquipo_() {
       if (manualFecha.getTime() >= new Date(auto.fecha).getTime()) {
         lecturaActual = manualLectura; lecturaActualFecha = manualFecha; lecturaActualOrigen = 'manual';
       } else {
-        lecturaActual = auto.lectura; lecturaActualFecha = new Date(auto.fecha); lecturaActualOrigen = 'diesel';
+        lecturaActual = auto.lectura; lecturaActualFecha = new Date(auto.fecha); lecturaActualOrigen = autoOrigen;
       }
     } else if (auto) {
-      lecturaActual = auto.lectura; lecturaActualFecha = new Date(auto.fecha); lecturaActualOrigen = 'diesel';
+      lecturaActual = auto.lectura; lecturaActualFecha = new Date(auto.fecha); lecturaActualOrigen = autoOrigen;
     } else if (manualLectura !== null) {
       lecturaActual = manualLectura; lecturaActualFecha = manualFecha; lecturaActualOrigen = 'manual';
     }
@@ -3147,7 +3202,7 @@ async function getRefaccionesAsignadasPorRegla_() {
 // ---------------------------------------------------------------
 // También administrable desde la pestaña Catálogo (además de Preventivos
 // Agrícolas, donde ya se podía dar de alta con "+ Tipo de preventivo").
-const PESTANAS_CATALOGO_TIPO_PREVENTIVO_ = ['mantenimiento', 'catalogo'];
+const PESTANAS_CATALOGO_TIPO_PREVENTIVO_ = ['mantenimiento', 'servicios_automotrices', 'catalogo'];
 
 async function getTiposPreventivo(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_TIPO_PREVENTIVO_, 'visualizar');
@@ -3193,9 +3248,12 @@ async function eliminarTipoPreventivo(code, nombreUsuario, id) {
 // viejas por equipo (previas a este cambio) se quedan en la tabla
 // desactivadas, sin modelo_id, y no aparecen en este listado.
 // ---------------------------------------------------------------
-async function getReglasMantenimiento(code, nombreUsuario) {
-  await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'visualizar');
-
+// Núcleo compartido entre Preventivos Agrícolas y Servicios Automotrices
+// (mismo motor, ver el comentario grande junto a SERVICIOS AUTOMOTRICES en
+// schema.sql). "scope": 'agricola' deja solo las reglas de modelos SIN
+// ningún equipo usa_gasolina=1, 'automotriz' deja solo las que SÍ tienen —
+// así cada pestaña, y cada permiso, ve únicamente lo suyo.
+async function obtenerReglasMantenimiento_(scope) {
   const [reglas] = await pool.query(`
     SELECT
       r.id                AS Id,
@@ -3210,7 +3268,8 @@ async function getReglasMantenimiento(code, nombreUsuario) {
       r.intervalo         AS Intervalo,
       r.refacciones       AS Refacciones,
       r.aceite_litros     AS AceiteLitros,
-      r.activo            AS Activo
+      r.activo            AS Activo,
+      EXISTS(SELECT 1 FROM maquinaria mm WHERE mm.modelo_id = r.modelo_id AND mm.usa_gasolina = 1) AS EsAutomotriz
     FROM mantenimiento_reglas r
     LEFT JOIN modelos_refacciones mo ON mo.id = r.modelo_id
     LEFT JOIN marcas_refacciones mc ON mc.id = mo.marca_id
@@ -3221,7 +3280,7 @@ async function getReglasMantenimiento(code, nombreUsuario) {
 
   const asignadasPorRegla = await getRefaccionesAsignadasPorRegla_();
 
-  return reglas.map((r) => ({
+  const mapeadas = reglas.map((r) => ({
     Id: r.Id,
     ModeloId: r.ModeloId,
     ModeloNombre: r.ModeloNombre || '',
@@ -3236,11 +3295,55 @@ async function getReglasMantenimiento(code, nombreUsuario) {
     RefaccionesAsignadas: asignadasPorRegla[r.Id] || [],
     AceiteLitros: r.AceiteLitros !== null && r.AceiteLitros !== undefined ? Number(r.AceiteLitros) : null,
     Activo: !!r.Activo,
+    EsAutomotriz: !!r.EsAutomotriz,
   }));
+
+  if (scope === 'agricola') return mapeadas.filter((r) => !r.EsAutomotriz);
+  if (scope === 'automotriz') return mapeadas.filter((r) => r.EsAutomotriz);
+  return mapeadas;
+}
+
+async function getReglasMantenimiento(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'visualizar');
+  return obtenerReglasMantenimiento_('agricola');
+}
+
+async function getReglasServiciosAutomotrices(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'visualizar');
+  return obtenerReglasMantenimiento_('automotriz');
+}
+
+// Valida que el modelo elegido sea del ámbito correcto para el permiso que
+// se está usando ('agricola' | 'automotriz') — así alguien con SOLO el
+// permiso de Servicios Automotrices no puede crear/editar una regla de un
+// modelo agrícola (y alguien con solo Preventivos Agrícolas no puede tocar
+// una de un modelo automotriz). Mismo criterio que obtenerReglasMantenimiento_
+// (usa_gasolina de los equipos de ese modelo). Un modelo sin NINGÚN equipo
+// capturado todavía (recién dado de alta en Catálogo) se deja pasar en
+// cualquiera de los dos ámbitos, porque todavía no se puede saber cuál es.
+async function verificarModeloDelAmbito_(modeloId, scope) {
+  if (!scope || !modeloId) return true;
+  const [rows] = await pool.query(
+    'SELECT COUNT(*) AS total, COALESCE(SUM(usa_gasolina), 0) AS automotrices FROM maquinaria WHERE modelo_id = ?',
+    [modeloId]
+  );
+  const total = Number(rows[0].total) || 0;
+  if (total === 0) return true;
+  const esAutomotriz = Number(rows[0].automotrices) > 0;
+  return scope === 'automotriz' ? esAutomotriz : !esAutomotriz;
 }
 
 async function guardarReglaMantenimiento(code, nombreUsuario, id, data) {
   await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'capturar');
+  return guardarReglaMantenimiento_(id, data, 'agricola');
+}
+
+async function guardarReglaServicioAutomotriz(code, nombreUsuario, id, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'capturar');
+  return guardarReglaMantenimiento_(id, data, 'automotriz');
+}
+
+async function guardarReglaMantenimiento_(id, data, scope) {
   data = data || {};
   try {
     const modeloId = (data.modeloId === '' || data.modeloId === undefined || data.modeloId === null)
@@ -3251,6 +3354,14 @@ async function guardarReglaMantenimiento(code, nombreUsuario, id, data) {
     const intervalo = Number(data.intervalo);
 
     if (!modeloId) return { success: false, error: 'Selecciona el modelo.' };
+    if (!(await verificarModeloDelAmbito_(modeloId, scope))) {
+      return {
+        success: false,
+        error: scope === 'automotriz'
+          ? 'Ese modelo no es de un vehículo automotriz.'
+          : 'Ese modelo es de un vehículo automotriz — captura sus reglas desde Servicios Automotrices.',
+      };
+    }
     if (!tipoPreventivoId) return { success: false, error: 'Selecciona el tipo de preventivo.' };
     if (['horas', 'kilometros', 'tiempo'].indexOf(tipo) === -1) {
       return { success: false, error: 'Selecciona un tipo de periodicidad válido.' };
@@ -3314,6 +3425,25 @@ async function guardarReglaMantenimiento(code, nombreUsuario, id, data) {
 
 async function eliminarReglaMantenimiento(code, nombreUsuario, id) {
   await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'capturar');
+  return eliminarReglaMantenimiento_(id, 'agricola');
+}
+
+async function eliminarReglaServicioAutomotriz(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'capturar');
+  return eliminarReglaMantenimiento_(id, 'automotriz');
+}
+
+async function eliminarReglaMantenimiento_(id, scope) {
+  const [reglas] = await pool.query('SELECT modelo_id FROM mantenimiento_reglas WHERE id = ?', [id]);
+  if (reglas.length === 0) return { success: true }; // ya no existe, nada que hacer
+  if (!(await verificarModeloDelAmbito_(reglas[0].modelo_id, scope))) {
+    return {
+      success: false,
+      error: scope === 'automotriz'
+        ? 'Esa regla no es de un vehículo automotriz.'
+        : 'Esa regla es de un vehículo automotriz — elimínala desde Servicios Automotrices.',
+    };
+  }
   await pool.query('DELETE FROM mantenimiento_ordenes WHERE regla_id = ?', [id]);
   await pool.query('DELETE FROM mantenimiento_servicios WHERE regla_id = ?', [id]);
   await pool.query('DELETE FROM mantenimiento_regla_refacciones WHERE regla_id = ?', [id]);
@@ -3331,7 +3461,16 @@ async function eliminarReglaMantenimiento(code, nombreUsuario, id) {
 // ---------------------------------------------------------------
 async function getServiciosMantenimiento(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'visualizar');
-  const servicios = await obtenerServiciosMantenimiento_();
+  return getServiciosConHuertasRestringidas_(nombreUsuario, 'agricola');
+}
+
+async function getServiciosAutomotrices(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'visualizar');
+  return getServiciosConHuertasRestringidas_(nombreUsuario, 'automotriz');
+}
+
+async function getServiciosConHuertasRestringidas_(nombreUsuario, scope) {
+  const servicios = await obtenerServiciosMantenimiento_(scope);
   const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
   if (!huertasRestringidas) return servicios;
   // Las reglas (pestaña "Reglas") no tienen huerta propia — aplican por
@@ -3343,11 +3482,15 @@ async function getServiciosMantenimiento(code, nombreUsuario) {
   return servicios.filter((s) => huertaPermitida_(huertasRestringidas, s.Huerta));
 }
 
-// Misma consulta que getServiciosMantenimiento, sin el chequeo de permiso,
-// para uso interno (p.ej. el job automático que revisa si hay que generar
-// una orden). No exportar directamente: siempre pasar por una función que
-// sí valide permiso cuando la llame el frontend.
-async function obtenerServiciosMantenimiento_() {
+// Misma consulta que getServiciosMantenimiento/getServiciosAutomotrices, sin
+// el chequeo de permiso ni de huertas restringidas, para uso interno (p.ej.
+// el job automático que revisa si hay que generar una orden — que debe
+// cubrir TODOS los equipos, agrícolas y automotrices, así que llama esta
+// función sin "scope"). No exportar directamente: siempre pasar por una
+// función que sí valide permiso cuando la llame el frontend. "scope":
+// 'agricola' deja solo equipos SIN usa_gasolina, 'automotriz' solo los que
+// SÍ lo tienen, sin valor deja los dos.
+async function obtenerServiciosMantenimiento_(scope) {
   const [filas] = await pool.query(`
     SELECT
       r.id                 AS ReglaId,
@@ -3362,6 +3505,7 @@ async function obtenerServiciosMantenimiento_() {
       m.codigo_unidad      AS CodigoUnidad,
       m.unidad             AS Unidad,
       m.departamento       AS Departamento,
+      m.usa_gasolina       AS EsAutomotriz,
       s.id                 AS ServicioId,
       s.intervalo_override AS IntervaloOverride,
       s.ultima_lectura     AS UltimaLectura,
@@ -3382,7 +3526,7 @@ async function obtenerServiciosMantenimiento_() {
 
   const ahora = Date.now();
 
-  return filas.map((r) => {
+  let resultado = filas.map((r) => {
     const codigo = r.CodigoUnidad;
     const lect = lecturaMap[codigo] || { lecturaActual: null, lecturaActualFecha: null, lecturaActualOrigen: null };
     const tipo = r.TipoPeriodicidad;
@@ -3402,6 +3546,7 @@ async function obtenerServiciosMantenimiento_() {
       Departamento: r.Departamento || '',
       ModeloNombre: r.ModeloNombre || '',
       MarcaNombre: r.MarcaNombre || '',
+      EsAutomotriz: !!r.EsAutomotriz,
       TipoPreventivoNombre: r.TipoPreventivoNombre || '',
       NombreServicio: r.NombreServicio,
       TipoPeriodicidad: tipo,
@@ -3423,6 +3568,10 @@ async function obtenerServiciosMantenimiento_() {
       Vencido: calc.vencido,
     };
   });
+
+  if (scope === 'agricola') resultado = resultado.filter((r) => !r.EsAutomotriz);
+  if (scope === 'automotriz') resultado = resultado.filter((r) => r.EsAutomotriz);
+  return resultado;
 }
 
 // Captura/edita a mano el "último servicio" (fecha + horómetro) de un
@@ -3430,6 +3579,15 @@ async function obtenerServiciosMantenimiento_() {
 // para ese equipo (intervaloOverride) distinto al estándar del modelo.
 async function guardarServicioMantenimiento(code, nombreUsuario, reglaId, codigoUnidad, data) {
   await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'capturar');
+  return guardarServicioMantenimiento_(nombreUsuario, reglaId, codigoUnidad, data, 'agricola');
+}
+
+async function guardarServicioAutomotriz(code, nombreUsuario, reglaId, codigoUnidad, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'capturar');
+  return guardarServicioMantenimiento_(nombreUsuario, reglaId, codigoUnidad, data, 'automotriz');
+}
+
+async function guardarServicioMantenimiento_(nombreUsuario, reglaId, codigoUnidad, data, scope) {
   data = data || {};
   try {
     if (!reglaId) return { success: false, error: 'Falta la regla.' };
@@ -3438,10 +3596,16 @@ async function guardarServicioMantenimiento(code, nombreUsuario, reglaId, codigo
 
     const [reglas] = await pool.query('SELECT modelo_id FROM mantenimiento_reglas WHERE id = ?', [reglaId]);
     if (reglas.length === 0) return { success: false, error: 'No se encontró la regla de mantenimiento.' };
-    const [maquinas] = await pool.query('SELECT modelo_id FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
+    const [maquinas] = await pool.query('SELECT modelo_id, usa_gasolina FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
     if (maquinas.length === 0) return { success: false, error: 'No se encontró el equipo.' };
     if (!reglas[0].modelo_id || reglas[0].modelo_id !== maquinas[0].modelo_id) {
       return { success: false, error: 'Ese equipo no es del modelo de esta regla.' };
+    }
+    if (scope === 'automotriz' && !maquinas[0].usa_gasolina) {
+      return { success: false, error: 'Ese equipo no es un vehículo automotriz.' };
+    }
+    if (scope === 'agricola' && maquinas[0].usa_gasolina) {
+      return { success: false, error: 'Ese equipo es un vehículo automotriz — captúralo desde Servicios Automotrices.' };
     }
 
     const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
@@ -3471,6 +3635,109 @@ async function guardarServicioMantenimiento(code, nombreUsuario, reglaId, codigo
   } catch (err) {
     return { success: false, error: err.toString() };
   }
+}
+
+// Lista mínima de equipos automotrices (código + nombre + modelo), para el
+// botón "Importar lista" de Servicios Automotrices: con esto el navegador
+// hace el emparejamiento entre cada fila del Excel/CSV y el equipo real
+// ANTES de pedir confirmación (ver importarServiciosAutomotrices abajo, que
+// ya recibe el emparejamiento ya resuelto, no vuelve a adivinarlo).
+async function getEquiposAutomotrices(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'visualizar');
+  const [rows] = await pool.query(
+    'SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, modelo_id AS ModeloId FROM maquinaria WHERE usa_gasolina = 1 ORDER BY unidad'
+  );
+  return rows.map((r) => ({ CodigoUnidad: r.CodigoUnidad, Unidad: r.Unidad, ModeloId: r.ModeloId }));
+}
+
+// Importación en lote del listado de Servicios Automotrices (botón
+// "Importar lista"): el navegador ya resolvió cada fila a un codigo_unidad
+// real (ver getEquiposAutomotrices arriba) y las mandó aquí ya revisadas
+// por quien las subió. Por cada fila: encuentra o crea el tipo de
+// preventivo (por nombre), encuentra o crea/actualiza la regla de ese
+// modelo+tipo (tipo_periodicidad SIEMPRE 'kilometros' — Servicios
+// Automotrices es, por ahora, solo por kilometraje) y guarda el "último
+// servicio" (fecha + km) de ese equipo — mismo UPSERT que
+// guardarServicioMantenimiento_. Nunca borra nada que ya exista: si la
+// regla ya existía con otro intervalo, lo actualiza al de la importación
+// (se asume que el listado nuevo es la fuente de verdad más reciente).
+async function importarServiciosAutomotrices(code, nombreUsuario, filas) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'capturar');
+  filas = Array.isArray(filas) ? filas : [];
+  const resultado = { success: true, guardados: 0, reglasCreadas: 0, reglasActualizadas: 0, errores: [] };
+  const reglaCache = {}; // "modeloId::TIPO" -> reglaId, para no repetir trabajo dentro de la misma importación
+
+  for (const fila of filas) {
+    const descripcionFila = (fila && (fila.unidad || fila.codigoUnidad)) || JSON.stringify(fila);
+    try {
+      const codigoUnidad = ((fila && fila.codigoUnidad) || '').toString().trim();
+      const tipoServicio = ((fila && fila.tipoServicio) || '').toString().trim().toUpperCase();
+      const ultimoKm = (!fila || fila.ultimoKm === '' || fila.ultimoKm === undefined || fila.ultimoKm === null)
+        ? null : Number(fila.ultimoKm);
+      const fechaUltimo = (fila && fila.fechaUltimo) || null;
+      const periodicidad = Number(fila && fila.periodicidad);
+
+      if (!codigoUnidad) { resultado.errores.push({ fila: descripcionFila, error: 'Falta el equipo.' }); continue; }
+      if (!tipoServicio) { resultado.errores.push({ fila: descripcionFila, error: 'Falta el tipo de servicio.' }); continue; }
+      if (!periodicidad || periodicidad <= 0) { resultado.errores.push({ fila: descripcionFila, error: 'La periodicidad (en km) no es válida.' }); continue; }
+
+      const [maquinas] = await pool.query('SELECT modelo_id, usa_gasolina FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
+      if (maquinas.length === 0) { resultado.errores.push({ fila: descripcionFila, error: 'No se encontró el equipo ' + codigoUnidad + '.' }); continue; }
+      if (!maquinas[0].usa_gasolina) { resultado.errores.push({ fila: descripcionFila, error: codigoUnidad + ' no está marcado como automotriz en Catálogo.' }); continue; }
+      const modeloId = maquinas[0].modelo_id;
+      if (!modeloId) { resultado.errores.push({ fila: descripcionFila, error: codigoUnidad + ' no tiene marca/modelo asignado en Catálogo — asígnaselo primero.' }); continue; }
+
+      const cacheKey = modeloId + '::' + tipoServicio;
+      let reglaId = reglaCache[cacheKey];
+      if (!reglaId) {
+        const [tipos] = await pool.query('SELECT id FROM tipos_preventivo WHERE nombre = ?', [tipoServicio]);
+        let tipoPreventivoId;
+        if (tipos.length === 0) {
+          const [insTipo] = await pool.query('INSERT INTO tipos_preventivo (nombre) VALUES (?)', [tipoServicio]);
+          tipoPreventivoId = insTipo.insertId;
+        } else {
+          tipoPreventivoId = tipos[0].id;
+        }
+
+        const [reglas] = await pool.query(
+          'SELECT id, intervalo, tipo_periodicidad, activo FROM mantenimiento_reglas WHERE modelo_id = ? AND tipo_preventivo_id = ?',
+          [modeloId, tipoPreventivoId]
+        );
+        if (reglas.length === 0) {
+          const [insRegla] = await pool.query(
+            `INSERT INTO mantenimiento_reglas (modelo_id, tipo_preventivo_id, nombre_servicio, tipo_periodicidad, intervalo, activo)
+             VALUES (?, ?, ?, 'kilometros', ?, 1)`,
+            [modeloId, tipoPreventivoId, tipoServicio, periodicidad]
+          );
+          reglaId = insRegla.insertId;
+          resultado.reglasCreadas++;
+        } else {
+          reglaId = reglas[0].id;
+          const cambia = Number(reglas[0].intervalo) !== periodicidad || reglas[0].tipo_periodicidad !== 'kilometros' || !reglas[0].activo;
+          if (cambia) {
+            await pool.query(
+              'UPDATE mantenimiento_reglas SET intervalo = ?, tipo_periodicidad = ?, activo = 1 WHERE id = ?',
+              [periodicidad, 'kilometros', reglaId]
+            );
+            resultado.reglasActualizadas++;
+          }
+        }
+        reglaCache[cacheKey] = reglaId;
+      }
+
+      await pool.query(
+        `INSERT INTO mantenimiento_servicios (regla_id, codigo_unidad, ultima_lectura, ultima_fecha)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE ultima_lectura = VALUES(ultima_lectura), ultima_fecha = VALUES(ultima_fecha)`,
+        [reglaId, codigoUnidad, ultimoKm, fechaUltimo]
+      );
+      resultado.guardados++;
+    } catch (err) {
+      resultado.errores.push({ fila: descripcionFila, error: err.toString() });
+    }
+  }
+
+  return resultado;
 }
 
 // ---------------------------------------------------------------
@@ -4376,7 +4643,7 @@ async function eliminarProveedorCombustible(code, nombreUsuario, id) { return ca
 // también se puede administrar desde Catálogo y Maquinaria (para elegir o
 // dar de alta la marca/modelo de un equipo, y para el "+" del modal de
 // equipo) — mismo permiso para las tres.
-const PESTANAS_CATALOGO_MARCAS_ = ['refacciones', 'maquinaria', 'catalogo'];
+const PESTANAS_CATALOGO_MARCAS_ = ['refacciones', 'maquinaria', 'catalogo', 'servicios_automotrices'];
 
 async function getMarcas(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_MARCAS_, 'visualizar');
@@ -4421,12 +4688,19 @@ async function eliminarMarca(code, nombreUsuario, id) {
 
 async function getModelos(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_MARCAS_, 'visualizar');
+  // EsAutomotriz: si ALGÚN equipo de este modelo tiene usa_gasolina = 1
+  // (mismo criterio que Combustible Automotriz) — lo usa la pestaña
+  // "Servicios Automotrices" para mostrar en su selector de modelo solo
+  // los modelos de vehículos, y Preventivos Agrícolas para lo contrario
+  // (ver pobladoSelectoresModeloMnt_/pobladoSelectoresModeloAuto_ en
+  // Panel.html). No cambia nada para quien ya usaba este listado tal cual.
   const [rows] = await pool.query(`
-    SELECT m.id AS Id, m.marca_id AS MarcaId, m.nombre AS Nombre
+    SELECT m.id AS Id, m.marca_id AS MarcaId, m.nombre AS Nombre,
+      EXISTS(SELECT 1 FROM maquinaria mm WHERE mm.modelo_id = m.id AND mm.usa_gasolina = 1) AS EsAutomotriz
     FROM modelos_refacciones m
     ORDER BY m.nombre
   `);
-  return rows.map((r) => ({ Id: r.Id, MarcaId: r.MarcaId, Nombre: r.Nombre }));
+  return rows.map((r) => ({ Id: r.Id, MarcaId: r.MarcaId, Nombre: r.Nombre, EsAutomotriz: !!r.EsAutomotriz }));
 }
 
 async function guardarModelo(code, nombreUsuario, id, data) {
@@ -5156,6 +5430,27 @@ async function generarOrdenMantenimiento(code, nombreUsuario, reglaId, codigoUni
   return crearOrdenDesdeRegla_(reglaId, codigoUnidad, data);
 }
 
+// Mismo botón "Generar orden" pero desde Servicios Automotrices — mismo
+// núcleo (crearOrdenDesdeRegla_ ya marca es_automotriz=1 solo, ver arriba),
+// solo cambia el permiso que se exige.
+async function generarOrdenServicioAutomotriz(code, nombreUsuario, reglaId, codigoUnidad, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'capturar');
+  const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  if (huertasRestringidas) {
+    let codigoUnidadResuelto = (codigoUnidad || '').toString().trim() || null;
+    if (!codigoUnidadResuelto) {
+      const [reglas] = await pool.query('SELECT codigo_unidad FROM mantenimiento_reglas WHERE id = ?', [reglaId]);
+      if (reglas.length > 0) codigoUnidadResuelto = reglas[0].codigo_unidad || null;
+    }
+    const ubicMap = await getUbicacionesActuales_();
+    const huertaEquipo = codigoUnidadResuelto ? (ubicMap[codigoUnidadResuelto] || '') : '';
+    if (!huertaPermitida_(huertasRestringidas, huertaEquipo)) {
+      return { success: false, error: 'Tu usuario no tiene acceso a este equipo (huerta ' + (huertaEquipo || 'sin huerta') + ').' };
+    }
+  }
+  return crearOrdenDesdeRegla_(reglaId, codigoUnidad, data);
+}
+
 // Núcleo de generarOrdenMantenimiento, sin el chequeo de permiso — lo usa
 // tanto la ruta manual (botón "Generar orden" del Panel, ya autenticada más
 // arriba) como el job automático (revisarYGenerarOrdenesPreventivasAutomaticas_,
@@ -5182,8 +5477,15 @@ async function crearOrdenDesdeRegla_(reglaId, codigoUnidad, data) {
     }
     if (!codigoUnidad) return { success: false, error: 'No se pudo determinar el equipo de esta orden.' };
 
-    const [maquinasLabel] = await pool.query('SELECT unidad FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
+    const [maquinasLabel] = await pool.query('SELECT unidad, usa_gasolina FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
     const unidadLabel = maquinasLabel.length > 0 ? maquinasLabel[0].unidad : codigoUnidad;
+    // Las órdenes generadas desde una regla de un equipo automotriz
+    // (usa_gasolina = 1, el mismo criterio que Combustible Automotriz y
+    // Servicios Automotrices) se marcan como "Es trabajo Automotriz" para
+    // que aparezcan en el apartado de Automotriz de Órdenes, igual que si
+    // alguien hubiera marcado esa casilla a mano — así Carlos las ve ahí,
+    // no mezcladas con la tabla principal (que es la de huertas/agrícola).
+    const esAutomotriz = maquinasLabel.length > 0 && !!maquinasLabel[0].usa_gasolina;
 
     const ubicMap = await getUbicacionesActuales_();
     const huerta = ubicMap[codigoUnidad] || '';
@@ -5216,9 +5518,9 @@ async function crearOrdenDesdeRegla_(reglaId, codigoUnidad, data) {
 
     const orden = await siguienteFolio_(pool, 'orden', 'OF', 5);
     await pool.query(
-      `INSERT INTO reportes (orden, codigo_unidad, unidad, huerta, descripcion, nombre, fecha)
-       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-      [orden, codigoUnidad, unidadLabel, huerta, descripcion, data.nombre]
+      `INSERT INTO reportes (orden, codigo_unidad, unidad, huerta, descripcion, nombre, fecha, es_automotriz)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [orden, codigoUnidad, unidadLabel, huerta, descripcion, data.nombre, esAutomotriz ? 1 : 0]
     );
 
     const lecturaGeneracion = (data.lecturaActual === '' || data.lecturaActual === undefined || data.lecturaActual === null)
@@ -5468,6 +5770,13 @@ module.exports = {
   eliminarReglaMantenimiento,
   getServiciosMantenimiento,
   guardarServicioMantenimiento,
+  getReglasServiciosAutomotrices,
+  guardarReglaServicioAutomotriz,
+  eliminarReglaServicioAutomotriz,
+  getServiciosAutomotrices,
+  guardarServicioAutomotriz,
+  getEquiposAutomotrices,
+  importarServiciosAutomotrices,
   actualizarLecturaManual,
   getRefacciones,
   guardarRefaccion,
@@ -5514,6 +5823,7 @@ module.exports = {
   guardarProveedorCombustible,
   eliminarProveedorCombustible,
   generarOrdenMantenimiento,
+  generarOrdenServicioAutomotriz,
   revisarYGenerarOrdenesPreventivasAutomaticas_,
   getProveedores,
   guardarProveedor,

@@ -1347,7 +1347,7 @@ SET @col_exists = (
   WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'combustible_automotriz_tipo'
 );
 SET @sql_alter = IF(@col_exists = 0,
-  "ALTER TABLE maquinaria ADD COLUMN combustible_automotriz_tipo VARCHAR(10) NOT NULL DEFAULT 'gasolina'",
+  'ALTER TABLE maquinaria ADD COLUMN combustible_automotriz_tipo VARCHAR(10) NOT NULL DEFAULT ''gasolina''',
   'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
@@ -1416,7 +1416,7 @@ SET @col_exists = (
   WHERE table_schema = DATABASE() AND table_name = 'combustible_automotriz' AND column_name = 'tipo_combustible'
 );
 SET @sql_alter = IF(@col_exists = 0,
-  "ALTER TABLE combustible_automotriz ADD COLUMN tipo_combustible VARCHAR(10) NOT NULL DEFAULT 'gasolina'",
+  'ALTER TABLE combustible_automotriz ADD COLUMN tipo_combustible VARCHAR(10) NOT NULL DEFAULT ''gasolina''',
   'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;

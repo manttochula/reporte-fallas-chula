@@ -771,6 +771,11 @@
      huerta (.dzh-card) que "Diesel por huerta", solo que indentadas para
      que se note que están dentro de un departamento. */
   .dzd-huertas-anidadas{ margin-top:2px; padding-left:14px; border-left:2px solid var(--line); }
+  /* Tabla combinada (cargas + entregas) dentro de cada tarjeta de huerta
+     anidada en "Diesel por departamento" (ver dzdHuertaRenderLedger_). La
+     fila "Saldo inicial" y la fila "TOTAL" se destacan igual que otras
+     filas de totales del Panel (.rpd-total-row). */
+  .dzh-ledger-inicial td, .dzh-ledger-total td{ font-weight:700; border-top:2px solid var(--line); background: rgba(255,255,255,0.03); }
   /* Insignia de estatus para la pestaña Insumos (Pendiente/Autorizado/Entregado). */
   .ins-badge{
     font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.03em;
@@ -1407,7 +1412,7 @@
 
       <div class="dz-resumen" id="dzd-container">
         <div class="dz-resumen-header">Diesel por departamento</div>
-        <div class="mnt-subtext" style="margin:2px 0 12px;">Cuánto ha cargado cada departamento (Campo/Cosecha/Preparación) y en qué huertas — por ejemplo, para ver que Preparación carga tanto en Alma Lucia como en otras huertas. Solo cuenta lo CARGADO: lo entregado a una huerta es un tanque compartido, no se sabe de antemano para qué departamento es, así que ese dato se sigue viendo nada más por huerta. Haz clic en un departamento para ver sus huertas, y en una huerta para ver su saldo, registrar una entrega o ver/agregar sus cargas — es la misma tarjeta que en "Diesel por huerta" de arriba.</div>
+        <div class="mnt-subtext" style="margin:2px 0 12px;">Cuánto ha cargado cada departamento (Campo/Cosecha/Preparación) y en qué huertas — por ejemplo, para ver que Preparación carga tanto en Alma Lucia como en otras huertas. Solo cuenta lo CARGADO: lo entregado a una huerta es un tanque compartido, no se sabe de antemano para qué departamento es, así que ese dato se sigue viendo nada más por huerta. Haz clic en un departamento para ver sus huertas, y en una huerta para ver su saldo, registrar una entrega o ver sus movimientos: aquí las cargas y entregas de cada huerta se ven juntas, en una sola tabla en orden cronológico con el saldo en huerta corrido después de cada movimiento (con Editar/Eliminar en cada fila).</div>
         <div class="dzh-lista" id="dzd-lista"><div class="empty">Cargando...</div></div>
       </div>
 
@@ -9841,6 +9846,16 @@ function construirAcordeonDiesel_(){
   actualizarSaldosAcordeonDiesel_();
 }
 
+// Las tarjetas de huerta anidadas dentro de "Diesel por departamento" usan
+// un slot de texto ("d{idxDepartamento}_{idxHuerta}", ver
+// dzdConstruirHuertasDelGrupo_) en vez del índice numérico de la lista
+// plana "Diesel por huerta" -- así se distingue cuál cuerpo de tarjeta
+// construir (la plana sigue con sus dos tablas separadas; la anidada usa
+// la tabla combinada con saldo corrido, ver dzdHuertaCuerpoTarjetaHtml_).
+function dzhEsSlotAnidado_(i){
+  return typeof i === 'string' && i.indexOf('_') > -1;
+}
+
 function dzhToggleTarjeta_(i){
   const card = document.getElementById('dzh-card-' + i);
   if(!card) return;
@@ -9851,9 +9866,10 @@ function dzhToggleTarjeta_(i){
   card.classList.add('open');
   const body = document.getElementById('dzh-body-' + i);
   if(!body.dataset.construido){
-    body.innerHTML = dzhCuerpoTarjetaHtml_(i);
+    const anidada = dzhEsSlotAnidado_(i);
+    body.innerHTML = anidada ? dzdHuertaCuerpoTarjetaHtml_(i) : dzhCuerpoTarjetaHtml_(i);
     body.dataset.construido = '1';
-    dzhInicializarTarjeta_(i);
+    if(anidada) dzdHuertaInicializarTarjeta_(i); else dzhInicializarTarjeta_(i);
   }
 }
 
@@ -10121,10 +10137,17 @@ function dzhRefrescarTrasRenderEntregas_(){
 function dzhRenderTarjetasAbiertas_(tipo){
   // Igual que actualizarSaldosAcordeonDiesel_: cubre tanto los índices de la
   // lista plana como los slots anidados dentro de "Diesel por departamento".
+  // Las anidadas tienen una sola tabla combinada (cargas + entregas), así
+  // que se refrescan igual sin importar si el cambio vino de una carga o
+  // de una entrega.
   const slots = DZH_HUERTAS.map(function(h, i){ return i; }).concat(DZD_SLOTS_HUERTA);
   slots.forEach(function(i){
     const card = document.getElementById('dzh-card-' + i);
     if(!card || !card.classList.contains('open')) return;
+    if(dzhEsSlotAnidado_(i)){
+      dzdHuertaRenderLedger_(i);
+      return;
+    }
     if(tipo === 'cargas') dzhRenderCargas_(i);
     else dzhRenderEntregas_(i);
   });
@@ -10574,6 +10597,377 @@ function dzdConstruirHuertasDelGrupo_(i){
   });
 
   actualizarSaldosAcordeonDiesel_();
+}
+
+// --- Cuerpo de la tarjeta de huerta ANIDADA dentro de un departamento ---
+// A diferencia de la tarjeta de huerta "plana" (dzhCuerpoTarjetaHtml_, con
+// "Cargas de esta huerta" y "Entregas a esta huerta" como tablas separadas),
+// esta junta ambas en una sola tabla cronológica con saldo corrido (pedido
+// por Carlos), igual a la estructura de su captura de referencia, más la
+// columna de Acciones (Editar/Eliminar) que esa captura no tenía. El saldo
+// y el formulario de "Registrar entrega" se quedan igual que en la plana.
+function dzdHuertaCuerpoTarjetaHtml_(i){
+  return `
+    <div class="dzh-sub">
+      <div class="dzh-sub-header">Saldo de esta huerta</div>
+      <div class="toolbar" style="margin-bottom:8px;">
+        <span class="toolbar-date-group">
+          <label class="toolbar-date-label">Desde</label>
+          <input type="date" id="dzh-saldo-desde-${i}">
+          <label class="toolbar-date-label">hasta</label>
+          <input type="date" id="dzh-saldo-hasta-${i}">
+          <button type="button" class="export-btn dzh-btn-limpiar-saldo" data-idx="${i}" title="Quitar el filtro de fechas">✕</button>
+        </span>
+      </div>
+      <div class="dzh-saldo-detalle" id="dzh-saldo-detalle-${i}">Cargando...</div>
+    </div>
+
+    <div class="dzh-sub">
+      <div class="dzh-sub-header">Registrar entrega a esta huerta</div>
+      <div class="dz-entregas-form">
+        <input type="number" id="dzh-ent-litros-${i}" placeholder="Litros entregados" min="0" step="0.01">
+        <input type="number" id="dzh-ent-precio-${i}" placeholder="Precio/L (opcional)" min="0" step="0.01">
+        <input type="number" id="dzh-ent-total-${i}" placeholder="Total (opcional)" min="0" step="0.01">
+        <input type="text" id="dzh-ent-nombre-${i}" placeholder="Quién entrega / registra">
+        <input type="text" id="dzh-ent-comentario-${i}" placeholder="Comentario (opcional)">
+        <button type="button" class="export-btn dzh-btn-registrar-entrega" data-idx="${i}">Registrar entrega</button>
+      </div>
+      <div class="dz-entregas-status" id="dzh-ent-status-${i}"></div>
+    </div>
+
+    <div class="dzh-sub">
+      <div class="dzh-sub-header">Movimientos de esta huerta (cargas y entregas)</div>
+      <div class="toolbar" style="margin-bottom:8px;">
+        <input type="text" id="dzh-ledger-busca-${i}" placeholder="Buscar equipo o folio..." style="min-width:140px;">
+        <span class="toolbar-date-group">
+          <label class="toolbar-date-label">Desde</label>
+          <input type="date" id="dzh-ledger-desde-${i}">
+          <label class="toolbar-date-label">hasta</label>
+          <input type="date" id="dzh-ledger-hasta-${i}">
+          <button type="button" class="export-btn dzh-btn-limpiar-ledger" data-idx="${i}" title="Quitar los filtros de búsqueda y fechas">✕</button>
+        </span>
+        <select id="dzh-ledger-limite-${i}">
+          <option value="10" selected>Últimos 10</option>
+          <option value="50">Últimos 50</option>
+          <option value="100">Últimos 100</option>
+          <option value="todos">Todos</option>
+        </select>
+        <button type="button" class="export-btn dzh-btn-add-carga" data-idx="${i}">+ Agregar carga</button>
+        <button type="button" class="export-btn dzh-btn-bitacora" data-idx="${i}">📷 Capturar bitácora por foto</button>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;"><input type="checkbox" id="dzh-ledger-eliminados-${i}">Mostrar eliminados</label>
+      </div>
+      <div class="table-wrap">
+        <table class="dzh-tabla-compacta">
+          <thead>
+            <tr>
+              <th>Fecha</th><th>Tipo</th><th>Folio</th><th>Entrega (L)</th><th>Carga (L)</th>
+              <th>Saldo en huerta</th><th>Odóm./Horóm. anterior</th><th>Horas de labor</th>
+              <th>Rendimiento (L/h)</th><th>Odóm./Horóm. actual</th><th>Unidad</th><th>Quién</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="dzh-ledger-tbody-${i}"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function dzdHuertaInicializarTarjeta_(i){
+  const huerta = DZH_HUERTAS[i];
+
+  dzhPintarDetalleSaldo_(i, dzhFilaSaldo_(huerta));
+  document.getElementById('dzh-saldo-desde-' + i).addEventListener('change', function(){ dzhCargarSaldoPropio_(i, huerta); });
+  document.getElementById('dzh-saldo-hasta-' + i).addEventListener('change', function(){ dzhCargarSaldoPropio_(i, huerta); });
+  document.querySelector('.dzh-btn-limpiar-saldo[data-idx="' + i + '"]').addEventListener('click', function(){
+    document.getElementById('dzh-saldo-desde-' + i).value = '';
+    document.getElementById('dzh-saldo-hasta-' + i).value = '';
+    dzhCargarSaldoPropio_(i, huerta);
+  });
+
+  document.querySelector('.dzh-btn-registrar-entrega[data-idx="' + i + '"]').addEventListener('click', function(){
+    dzhRegistrarEntrega_(i, huerta);
+  });
+
+  dzdHuertaRenderLedger_(i);
+  ['dzh-ledger-desde-', 'dzh-ledger-hasta-', 'dzh-ledger-limite-'].forEach(function(prefix){
+    document.getElementById(prefix + i).addEventListener('change', function(){ dzdHuertaRenderLedger_(i); });
+  });
+  document.getElementById('dzh-ledger-busca-' + i).addEventListener('input', function(){ dzdHuertaRenderLedger_(i); });
+  document.getElementById('dzh-ledger-eliminados-' + i).addEventListener('change', function(){
+    dzhAsegurarCargasConEliminados_(function(){
+      dzhAsegurarEntregasConEliminados_(function(){ dzdHuertaRenderLedger_(i); });
+    });
+  });
+  document.querySelector('.dzh-btn-limpiar-ledger[data-idx="' + i + '"]').addEventListener('click', function(){
+    document.getElementById('dzh-ledger-busca-' + i).value = '';
+    document.getElementById('dzh-ledger-desde-' + i).value = '';
+    document.getElementById('dzh-ledger-hasta-' + i).value = '';
+    dzdHuertaRenderLedger_(i);
+  });
+  document.querySelector('.dzh-btn-add-carga[data-idx="' + i + '"]').addEventListener('click', function(){
+    abrirModalDiesel(null, huerta);
+  });
+  document.querySelector('.dzh-btn-bitacora[data-idx="' + i + '"]').addEventListener('click', function(){
+    abrirModalBitacora(huerta);
+  });
+
+  ocultarControlesSoloLectura();
+}
+
+// Junta TODO el historial (cargas + entregas) de esta huerta, en orden
+// cronológico ascendente, con el saldo acumulado ya calculado en cada fila
+// (r._saldo = saldo en huerta justo después de esa fila). Siempre usa el
+// historial completo -- sin límite ni filtro de fecha/búsqueda -- para que
+// el saldo de cada fila sea correcto sin importar qué tanto se filtre
+// después la tabla (ver dzdHuertaLedgerFiltrado_). Las filas eliminadas no
+// mueven el saldo (igual que el resto de los cálculos de saldo del Panel),
+// así que cuando "Mostrar eliminados" está activo se ven en la tabla pero
+// no alteran el saldo corrido.
+function dzdHuertaLedgerCompleto_(i, huerta){
+  const incluirEliminados = document.getElementById('dzh-ledger-eliminados-' + i).checked;
+  const cargas = (incluirEliminados ? (ALL_DIESEL_CON_ELIMINADOS || ALL_DIESEL) : ALL_DIESEL)
+    .filter(function(r){ return (r.Huerta || '').toUpperCase() === huerta.toUpperCase(); })
+    .map(function(r){ return Object.assign({ _tipo: 'carga' }, r); });
+  const entregas = (incluirEliminados ? (ALL_ENTREGAS_CON_ELIMINADOS || ALL_ENTREGAS) : ALL_ENTREGAS)
+    .filter(function(r){ return (r.Huerta || '').toUpperCase() === huerta.toUpperCase(); })
+    .map(function(r){ return Object.assign({ _tipo: 'entrega' }, r); });
+  const todas = cargas.concat(entregas)
+    .sort(function(a, b){ return new Date(a.Fecha) - new Date(b.Fecha); });
+  let saldo = 0;
+  todas.forEach(function(r){
+    if(!r.Eliminado){
+      saldo += r._tipo === 'entrega' ? (parseFloat(r.Litros) || 0) : -(parseFloat(r.Litros) || 0);
+    }
+    r._saldo = saldo;
+  });
+  return todas;
+}
+
+// Aplica los filtros de búsqueda/fecha/límite de la tabla sobre el
+// historial completo ya calculado, y calcula el "Saldo inicial" (el saldo
+// justo antes de la primera fila que se termina mostrando).
+function dzdHuertaLedgerFiltrado_(i, huerta){
+  const todas = dzdHuertaLedgerCompleto_(i, huerta);
+  const q = document.getElementById('dzh-ledger-busca-' + i).value.trim().toUpperCase();
+  const desdeStr = document.getElementById('dzh-ledger-desde-' + i).value;
+  const hastaStr = document.getElementById('dzh-ledger-hasta-' + i).value;
+  const desde = desdeStr ? new Date(desdeStr + 'T00:00:00') : null;
+  const hasta = hastaStr ? new Date(hastaStr + 'T23:59:59') : null;
+  let filtradas = todas.filter(function(r){
+    if(q){
+      const haystack = [r.Folio, r.Unidad, r.CodigoUnidad, r.Implemento, r.CodigoImplemento, r.Nombre].join(' ').toUpperCase();
+      if(haystack.indexOf(q) === -1) return false;
+    }
+    if(desde || hasta){
+      const f = r.Fecha ? new Date(r.Fecha) : null;
+      if(!f || isNaN(f.getTime())) return false;
+      if(desde && f < desde) return false;
+      if(hasta && f > hasta) return false;
+    }
+    return true;
+  });
+  const limiteVal = document.getElementById('dzh-ledger-limite-' + i).value;
+  if(limiteVal !== 'todos'){
+    filtradas = filtradas.slice(-parseInt(limiteVal, 10));
+  }
+  let saldoInicial = 0;
+  if(filtradas.length > 0){
+    const idxPrimera = todas.indexOf(filtradas[0]);
+    saldoInicial = idxPrimera > 0 ? todas[idxPrimera - 1]._saldo : 0;
+  } else if(todas.length > 0){
+    saldoInicial = todas[todas.length - 1]._saldo;
+  }
+  return { filas: filtradas, saldoInicial: saldoInicial };
+}
+
+function dzdHuertaRenderLedger_(i){
+  const huerta = DZH_HUERTAS[i];
+  const tbody = document.getElementById('dzh-ledger-tbody-' + i);
+  if(!tbody) return;
+  const resultado = dzdHuertaLedgerFiltrado_(i, huerta);
+  const filas = resultado.filas;
+  const saldoInicial = resultado.saldoInicial;
+  if(filas.length === 0){
+    tbody.innerHTML = '<tr><td colspan="13"><div class="empty">No hay movimientos que coincidan.</div></td></tr>';
+    return;
+  }
+  let totalEntregas = 0;
+  let totalCargas = 0;
+  const filasHtml = filas.map(function(r){
+    const esCarga = r._tipo === 'carga';
+    if(!r.Eliminado){
+      if(esCarga) totalCargas += parseFloat(r.Litros) || 0;
+      else totalEntregas += parseFloat(r.Litros) || 0;
+    }
+    const audit = r.ModificadoPor ? `<span class="mnt-subtext">Editado por ${escapeHtml(r.ModificadoPor)} · ${formatFechaAudit(r.ModificadoEn)}</span>` : '';
+    const eliminadoInfo = r.Eliminado ? `<span class="mnt-subtext">Eliminada por ${escapeHtml(r.EliminadoPor || '?')} · ${formatFechaAudit(r.EliminadoEn)}</span>` : '';
+    const rendimientoAlto = esCarga && r.Rendimiento !== null && r.Rendimiento !== undefined && r.RendimientoMax !== null && r.RendimientoMax !== undefined && r.Rendimiento > r.RendimientoMax;
+    const horasAltas = esCarga && r.HorasLabor !== null && r.HorasLabor !== undefined && r.HorasMax !== null && r.HorasMax !== undefined && r.HorasLabor > r.HorasMax;
+    let accion;
+    if(r.Eliminado){
+      accion = `<button type="button" class="export-btn ${esCarga ? 'dzh-btn-restaurar-carga' : 'dzh-btn-restaurar-entrega'}" data-id="${r.Id}" data-idx="${i}" style="padding:6px 10px;font-size:11px;">Restaurar</button>`;
+    } else {
+      accion = `<button type="button" class="export-btn ${esCarga ? 'dzh-btn-editar-carga' : 'dzh-btn-editar-entrega'}" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Editar</button>
+        <button type="button" class="export-btn ${esCarga ? 'dzh-btn-eliminar-carga' : 'dzh-btn-eliminar-entrega'}" data-id="${r.Id}" data-idx="${i}" style="padding:6px 10px;font-size:11px;">Eliminar</button>`;
+    }
+    return `
+    <tr${(rendimientoAlto || horasAltas) ? ' class="dz-rend-alto"' : ''}${r.Eliminado ? ' style="opacity:.55;"' : ''}>
+      <td>${new Date(r.Fecha).toLocaleString('es-MX')}</td>
+      <td>${esCarga ? 'Carga' : 'Entrega'}</td>
+      <td class="folio">${escapeHtml(r.Folio)}${audit}${eliminadoInfo}</td>
+      <td>${esCarga ? '—' : escapeHtml(r.Litros != null ? r.Litros : '')}</td>
+      <td>${esCarga ? escapeHtml(r.Litros != null ? r.Litros : '') : '—'}</td>
+      <td><b class="${r._saldo < 0 ? 'dz-resumen-neg' : ''}">${r._saldo.toLocaleString('es-MX')} L</b></td>
+      <td>${esCarga ? (r.LecturaAnterior !== null && r.LecturaAnterior !== undefined && r.LecturaAnterior !== '' ? escapeHtml(r.LecturaAnterior) : '—') : '—'}</td>
+      <td>${esCarga ? (r.HorasLabor !== null && r.HorasLabor !== undefined && r.HorasLabor !== '' ? escapeHtml(r.HorasLabor) : '—') : '—'}</td>
+      <td>${esCarga ? (r.Rendimiento !== null && r.Rendimiento !== undefined ? escapeHtml(r.Rendimiento) : '—') : '—'}</td>
+      <td>${esCarga ? (r.Lectura !== null && r.Lectura !== undefined && r.Lectura !== '' ? escapeHtml(r.Lectura) : '—') : '—'}</td>
+      <td>${esCarga ? escapeHtml(r.Unidad || r.CodigoUnidad || '—') : '—'}</td>
+      <td>${escapeHtml(r.Nombre || '—')}</td>
+      <td>${accion}</td>
+    </tr>
+    `;
+  }).join('');
+
+  const filaInicial = `
+    <tr class="dzh-ledger-inicial">
+      <td colspan="5">Saldo inicial</td>
+      <td><b class="${saldoInicial < 0 ? 'dz-resumen-neg' : ''}">${saldoInicial.toLocaleString('es-MX')} L</b></td>
+      <td colspan="7"></td>
+    </tr>
+  `;
+  const filaTotal = `
+    <tr class="dzh-ledger-total">
+      <td colspan="3">TOTAL</td>
+      <td>${totalEntregas.toLocaleString('es-MX')} L</td>
+      <td>${totalCargas.toLocaleString('es-MX')} L</td>
+      <td colspan="8"></td>
+    </tr>
+  `;
+
+  tbody.innerHTML = filaInicial + filasHtml + filaTotal;
+
+  tbody.querySelectorAll('.dzh-btn-editar-carga').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const carga = (ALL_DIESEL_CON_ELIMINADOS || ALL_DIESEL).find(function(r){ return String(r.Id) === btn.dataset.id; })
+        || ALL_DIESEL.find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(carga) abrirModalDiesel(carga);
+    });
+  });
+  tbody.querySelectorAll('.dzh-btn-eliminar-carga').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const carga = ALL_DIESEL.find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(!carga) return;
+      if(!confirm('¿Eliminar la carga ' + carga.Folio + ' (' + (carga.Unidad || carga.CodigoUnidad) + ')? Se puede restaurar después desde "Mostrar eliminados".')) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      google.script.run
+        .withSuccessHandler(function(result){
+          if(!result || !result.success){
+            btn.disabled = false;
+            btn.textContent = 'Eliminar';
+            alert('No se pudo eliminar. ' + ((result && result.error) || ''));
+            return;
+          }
+          cargarDiesel();
+          DIESEL_RESUMEN_CARGADO = false; cargarDieselRestante();
+          MAQUINARIA_CARGADA = false;
+        })
+        .withFailureHandler(function(){
+          btn.disabled = false;
+          btn.textContent = 'Eliminar';
+          alert('No se pudo eliminar. Intenta de nuevo.');
+        })
+        .eliminarCargaDiesel(ACCESS_CODE, PANEL_USUARIO, carga.Id);
+    });
+  });
+  tbody.querySelectorAll('.dzh-btn-restaurar-carga').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const carga = (ALL_DIESEL_CON_ELIMINADOS || []).find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(!carga) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      google.script.run
+        .withSuccessHandler(function(result){
+          if(!result || !result.success){
+            btn.disabled = false;
+            btn.textContent = 'Restaurar';
+            alert('No se pudo restaurar. ' + ((result && result.error) || ''));
+            return;
+          }
+          cargarDiesel();
+          DIESEL_RESUMEN_CARGADO = false; cargarDieselRestante();
+          MAQUINARIA_CARGADA = false;
+        })
+        .withFailureHandler(function(){
+          btn.disabled = false;
+          btn.textContent = 'Restaurar';
+          alert('No se pudo restaurar. Intenta de nuevo.');
+        })
+        .restaurarCargaDiesel(ACCESS_CODE, PANEL_USUARIO, carga.Id);
+    });
+  });
+  tbody.querySelectorAll('.dzh-btn-editar-entrega').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const entrega = (ALL_ENTREGAS_CON_ELIMINADOS || ALL_ENTREGAS).find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(entrega) abrirModalEntrega(entrega);
+    });
+  });
+  tbody.querySelectorAll('.dzh-btn-eliminar-entrega').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const entrega = ALL_ENTREGAS.find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(!entrega) return;
+      if(!confirm('¿Eliminar la entrega ' + entrega.Folio + ' (' + (entrega.Huerta || '') + ')? Se puede restaurar después desde "Mostrar eliminados".')) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      google.script.run
+        .withSuccessHandler(function(result){
+          if(!result || !result.success){
+            btn.disabled = false;
+            btn.textContent = 'Eliminar';
+            alert('No se pudo eliminar. ' + ((result && result.error) || ''));
+            return;
+          }
+          cargarEntregas();
+          DIESEL_RESUMEN_CARGADO = false; cargarDieselRestante();
+          MAQUINARIA_CARGADA = false;
+        })
+        .withFailureHandler(function(){
+          btn.disabled = false;
+          btn.textContent = 'Eliminar';
+          alert('No se pudo eliminar. Intenta de nuevo.');
+        })
+        .eliminarDieselEntrega(ACCESS_CODE, PANEL_USUARIO, entrega.Id);
+    });
+  });
+  tbody.querySelectorAll('.dzh-btn-restaurar-entrega').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const entrega = (ALL_ENTREGAS_CON_ELIMINADOS || []).find(function(r){ return String(r.Id) === btn.dataset.id; });
+      if(!entrega) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      google.script.run
+        .withSuccessHandler(function(result){
+          if(!result || !result.success){
+            btn.disabled = false;
+            btn.textContent = 'Restaurar';
+            alert('No se pudo restaurar. ' + ((result && result.error) || ''));
+            return;
+          }
+          cargarEntregas();
+          DIESEL_RESUMEN_CARGADO = false; cargarDieselRestante();
+          MAQUINARIA_CARGADA = false;
+        })
+        .withFailureHandler(function(){
+          btn.disabled = false;
+          btn.textContent = 'Restaurar';
+          alert('No se pudo restaurar. Intenta de nuevo.');
+        })
+        .restaurarDieselEntrega(ACCESS_CODE, PANEL_USUARIO, entrega.Id);
+    });
+  });
+
+  ocultarControlesSoloLectura();
 }
 
 function actualizarTotalesAcordeonDepartamento_(){

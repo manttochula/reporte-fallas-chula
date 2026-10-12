@@ -29,7 +29,14 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // "servicios_automotrices" contra "mantenimiento" (Preventivos Agrícolas):
 // mismo motor por debajo (mantenimiento_reglas/mantenimiento_servicios),
 // pero pestañas y permisos independientes para poder dar uno sin el otro.
-const PESTANAS_PANEL = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
+// "ordenes_soldadura"/"ordenes_automotriz" son permisos independientes de
+// "ordenes" para los otros dos apartados de la pestaña Órdenes (Soldadura y
+// Automotriz respectivamente) — "ordenes" sigue siendo el de Agrícola/
+// principal, para no migrar a nadie. Un mismo usuario puede tener niveles
+// distintos en cada uno (ej. visualizar en Soldadura pero capturar en
+// Agrícola) — ver permisoDeSeccionOrden_/seccionDeFila_ más abajo, que
+// traducen cada orden a cuál de los tres le corresponde.
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -59,7 +66,11 @@ async function requierePermisoPanel_(code, nombreUsuario, pestanas, nivelRequeri
 // manda nombreUsuario, o manda el nombre del mecánico solo para la
 // bitácora de auditoría, pero ese nombre no tiene panel_permisos), basta
 // con la clave compartida.
-async function requiereAccesoOrdenes_(code, nombreUsuario, nivelPanelRequerido) {
+// "pestana" permite exigir el permiso de una sección específica de Órdenes
+// ('ordenes', 'ordenes_soldadura' u 'ordenes_automotriz', o un arreglo con
+// varias — ver permisoDeSeccionOrden_ más abajo); si no se manda, se
+// comporta igual que antes (exige 'ordenes', Agrícola/principal).
+async function requiereAccesoOrdenes_(code, nombreUsuario, nivelPanelRequerido, pestana) {
   const nombre = (nombreUsuario || '').toString().trim();
   if (!nombre) {
     requiereClave_(code, TALLER_ACCESS_CODE);
@@ -71,10 +82,41 @@ async function requiereAccesoOrdenes_(code, nombreUsuario, nivelPanelRequerido) 
   );
   const esUsuarioDePanel = rows.length > 0 && !!rows[0].panel_permisos;
   if (esUsuarioDePanel) {
-    await requierePermisoPanel_(code, nombre, 'ordenes', nivelPanelRequerido);
+    await requierePermisoPanel_(code, nombre, pestana || 'ordenes', nivelPanelRequerido);
   } else {
     requiereClave_(code, TALLER_ACCESS_CODE);
   }
+}
+
+// A qué permiso de Panel corresponde cada sección de la pestaña Órdenes.
+// 'ordenes' sigue siendo el de Agrícola/principal (así nadie pierde acceso
+// al agregarse los otros dos); Soldadura y Automotriz tienen cada uno el
+// suyo, independiente.
+function permisoDeSeccionOrden_(seccion) {
+  if (seccion === 'soldadura') return 'ordenes_soldadura';
+  if (seccion === 'automotriz') return 'ordenes_automotriz';
+  return 'ordenes';
+}
+
+// Misma sección que seccionDeOrden_ del cliente (Panel.html) — a partir de
+// una fila de la tabla reportes (columnas es_soldadura/es_automotriz).
+// Soldadura tiene prioridad sobre Automotriz si por algún motivo las dos
+// banderas estuvieran activas; las tres son mutuamente excluyentes.
+function seccionDeFila_(fila) {
+  if (fila && Number(fila.es_soldadura)) return 'soldadura';
+  if (fila && Number(fila.es_automotriz)) return 'automotriz';
+  return 'principal';
+}
+
+// Para acciones sobre una orden YA EXISTENTE identificada solo por su folio
+// (ej. interpretar/guardar refacciones necesarias): busca a qué sección
+// pertenece y exige el permiso de Panel de esa sección específica. Mismo
+// mecanismo de siempre para Taller.html (requiereAccesoOrdenes_ ya resuelve
+// ese caso sin distinguir sección). Lanza error si la orden no existe.
+async function requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, nivelPanelRequerido) {
+  const [rows] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  if (rows.length === 0) throw new Error('No se encontró la orden ' + orden + '.');
+  await requiereAccesoOrdenes_(code, nombreUsuario, nivelPanelRequerido, permisoDeSeccionOrden_(seccionDeFila_(rows[0])));
 }
 
 // Restricción opcional, por usuario, de qué huertas puede ver/editar/crear
@@ -369,8 +411,12 @@ async function submitReporte(data) {
 // escritorio, no siempre hay una foto a la mano) y la fecha del reporte la
 // elige quien la captura en vez de tomarse siempre como "ahora".
 async function crearOrdenPanel(code, nombreUsuario, data) {
-  await requierePermisoPanel_(code, nombreUsuario, 'ordenes', 'capturar');
   data = data || {};
+  // El permiso depende de a qué sección va la orden nueva (la elige quien
+  // la captura con las casillas "Es trabajo de Soldadura"/"Es trabajo
+  // Automotriz" del modal) -- no siempre es 'ordenes' (Agrícola/principal).
+  const seccionNueva = seccionDeFila_({ es_soldadura: data.esSoldadura ? 1 : 0, es_automotriz: data.esAutomotriz ? 1 : 0 });
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionNueva), 'capturar');
   try {
     const codigoUnidad = (data.unidad || '').toString().trim();
     const unidadLabel = (data.unidadLabel || '').toString().trim();
@@ -417,16 +463,61 @@ async function getReportes(code) {
 }
 
 async function getReportesTaller(code, nombreUsuario) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'visualizar');
+  // Basta con tener 'visualizar' en CUALQUIERA de las tres secciones para
+  // poder entrar a la pestaña -- de cuáles en concreto sí puede ver, se
+  // encarga el filtro de abajo (seccionesPermitidas).
+  await requiereAccesoOrdenes_(code, nombreUsuario, 'visualizar', ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz']);
+
+  // A un usuario de Panel (con panel_permisos propio) solo se le regresan
+  // las secciones de Órdenes que sí puede ver -- así nunca le llega al
+  // cliente una fila de una sección que no debería ver, sin tener que
+  // repetir ese filtro en cada lugar que usa ALL_RECORDS (alertas, letrero
+  // de pendientes, exportaciones, etc.). Taller.html (sin nombreUsuario, o
+  // con un nombre sin fila propia de panel_permisos) sigue viendo las tres,
+  // igual que siempre -- Taller.html no distingue secciones.
+  const nombre = (nombreUsuario || '').toString().trim();
+  let seccionesPermitidas = null;
+  if (nombre) {
+    const [filaUsuario] = await pool.query(
+      'SELECT panel_permisos FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+      [nombre]
+    );
+    if (filaUsuario.length > 0 && filaUsuario[0].panel_permisos) {
+      seccionesPermitidas = ['principal', 'soldadura', 'automotriz'].filter((seccion) =>
+        tienePermisoPanel_(filaUsuario[0].panel_permisos, permisoDeSeccionOrden_(seccion), 'visualizar')
+      );
+    }
+  }
+
   const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
-  const [rows] = huertasRestringidas
-    ? await pool.query(REPORTE_SELECT + ' WHERE UPPER(TRIM(reportes.huerta)) IN (?) ORDER BY reportes.id DESC', [huertasRestringidas])
-    : await pool.query(REPORTE_SELECT + ' ORDER BY reportes.id DESC');
+  const condiciones = [];
+  const params = [];
+  if (huertasRestringidas) {
+    condiciones.push('UPPER(TRIM(reportes.huerta)) IN (?)');
+    params.push(huertasRestringidas);
+  }
+  if (seccionesPermitidas) {
+    const porSeccion = [];
+    if (seccionesPermitidas.includes('principal')) porSeccion.push('(reportes.es_soldadura = 0 AND reportes.es_automotriz = 0)');
+    if (seccionesPermitidas.includes('soldadura')) porSeccion.push('reportes.es_soldadura = 1');
+    if (seccionesPermitidas.includes('automotriz')) porSeccion.push('(reportes.es_automotriz = 1 AND reportes.es_soldadura = 0)');
+    // requiereAccesoOrdenes_ ya garantizó arriba al menos una sección
+    // visible, así que porSeccion nunca queda vacío aquí.
+    condiciones.push('(' + porSeccion.join(' OR ') + ')');
+  }
+  const where = condiciones.length ? ' WHERE ' + condiciones.join(' AND ') : '';
+  const [rows] = await pool.query(REPORTE_SELECT + where + ' ORDER BY reportes.id DESC', params);
   return normalizaFilas(rows);
 }
 
 async function actualizarOrden(code, nombreUsuario, orden, campos) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar');
+  // El permiso depende de a qué sección pertenece ESTA orden (Agrícola,
+  // Soldadura o Automotriz) -- se busca antes de entrar al try para que un
+  // error de permiso se propague igual que antes (no se devuelva como
+  // {success:false}).
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  if (filaSeccion.length === 0) throw new Error('No se encontró la orden ' + orden);
+  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])));
   campos = campos || {};
   try {
     const [existe] = await pool.query('SELECT id, unidad, descripcion, huerta FROM reportes WHERE orden = ?', [orden]);
@@ -566,7 +657,9 @@ async function actualizarOrden(code, nombreUsuario, orden, campos) {
 // (no tiene botón para ello) ni poner la Fecha de atención directamente;
 // eso sigue siendo exclusivo del Panel.
 async function marcarOrdenEnProceso(code, nombreUsuario, orden) {
-  await requierePermisoPanel_(code, nombreUsuario, 'ordenes', 'capturar');
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])), 'capturar');
   try {
     const [rows] = await pool.query(
       'SELECT id, unidad, descripcion, huerta, fecha_atencion, fecha_salida FROM reportes WHERE orden = ?',
@@ -672,8 +765,19 @@ async function sincronizarUbicacionOrdenesAbiertas_(codigoUnidad, huertaNueva, o
 // (modificado_por/modificado_en) y agrega una línea a observaciones_staff,
 // igual que editarMovimiento/editarCargaDiesel.
 async function editarOrden(code, nombreUsuario, orden, data) {
-  await requierePermisoPanel_(code, nombreUsuario, 'ordenes', 'capturar');
   data = data || {};
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  const seccionAnterior = seccionDeFila_(filaSeccion[0]);
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionAnterior), 'capturar');
+  // Este modal también puede cambiar las casillas de Soldadura/Automotriz
+  // (mover la orden a otra sección) -- si la sección destino es distinta,
+  // también se exige permiso de capturar ahí, para que nadie pueda "mover"
+  // una orden a una sección donde no tiene permiso de editar.
+  const seccionNueva = seccionDeFila_({ es_soldadura: data.esSoldadura ? 1 : 0, es_automotriz: data.esAutomotriz ? 1 : 0 });
+  if (seccionNueva !== seccionAnterior) {
+    await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionNueva), 'capturar');
+  }
   try {
     const [rows] = await pool.query('SELECT * FROM reportes WHERE orden = ?', [orden]);
     if (rows.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
@@ -809,7 +913,9 @@ async function editarOrden(code, nombreUsuario, orden, data) {
 // preventivo, para no dejar una referencia suelta a una orden que ya no
 // existe.
 async function eliminarOrden(code, nombreUsuario, orden) {
-  await requierePermisoPanel_(code, nombreUsuario, 'ordenes', 'capturar');
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])), 'capturar');
   try {
     const [rows] = await pool.query('SELECT id, unidad, descripcion, huerta FROM reportes WHERE orden = ?', [orden]);
     if (rows.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
@@ -4211,7 +4317,7 @@ function normalizarItemsInterpretados_(itemsCrudos, rows) {
 }
 
 async function interpretarRefaccionesTexto(code, nombreUsuario, orden, texto) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar');
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'capturar');
   const textoLimpio = (texto || '').toString().trim();
   if (!textoLimpio) return { success: false, error: 'No se recibió ningún texto.' };
 
@@ -4227,7 +4333,7 @@ async function interpretarRefaccionesTexto(code, nombreUsuario, orden, texto) {
 }
 
 async function interpretarRefaccionesFoto(code, nombreUsuario, orden, fotoDataUrl) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar');
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'capturar');
   if (!fotoDataUrl) return { success: false, error: 'No se recibió ninguna foto.' };
 
   const { rows, texto: listaCatalogoTexto } = await catalogoRefaccionesParaPrompt_();
@@ -4252,7 +4358,7 @@ async function interpretarRefaccionesFoto(code, nombreUsuario, orden, fotoDataUr
 // agrega más; no se guardan solas hasta que él confirme con
 // guardarRefaccionesNecesarias.
 async function getRefaccionesNecesarias(code, nombreUsuario, orden) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'visualizar');
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'visualizar');
 
   const [guardadas] = await pool.query(
     `SELECT n.id AS Id, n.refaccion_id AS RefaccionId, n.texto_libre AS TextoLibre, n.cantidad AS Cantidad,
@@ -4320,11 +4426,10 @@ async function getRefaccionesNecesarias(code, nombreUsuario, orden) {
 // simple y sin ambigüedad que calcular la diferencia exacta contra lo que
 // ya había — mismo criterio que refacciones_modelos en guardarRefaccion).
 async function guardarRefaccionesNecesarias(code, nombreUsuario, orden, items) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar');
-  items = Array.isArray(items) ? items : [];
-
-  const [ordenRows] = await pool.query('SELECT orden FROM reportes WHERE orden = ?', [orden]);
+  const [ordenRows] = await pool.query('SELECT orden, es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
   if (ordenRows.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(ordenRows[0])));
+  items = Array.isArray(items) ? items : [];
 
   const capturadoPor = (nombreUsuario || '').toString().trim() || null;
   const limpios = items
@@ -4376,11 +4481,11 @@ async function guardarRefaccionesNecesarias(code, nombreUsuario, orden, items) {
 // marcarInsumoEntregado/marcarInsumoPendiente en Insumos, para no obligar a
 // abrir "Guardar lista" solo para marcar una pieza como entregada.
 async function marcarRefaccionNecesariaEntregada(code, nombreUsuario, id) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar');
   const idNum = Number(id);
   if (!idNum) return { success: false, error: 'Falta el identificador de la pieza.' };
   const [rows] = await pool.query('SELECT id, orden FROM reportes_refacciones_necesarias WHERE id = ?', [idNum]);
   if (!rows.length) return { success: false, error: 'No se encontró esa pieza.' };
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, rows[0].orden, 'capturar');
   await pool.query(
     'UPDATE reportes_refacciones_necesarias SET entregado = 1, entregado_por = ?, entregado_en = NOW() WHERE id = ?',
     [nombreUsuario, idNum]
@@ -4390,11 +4495,11 @@ async function marcarRefaccionNecesariaEntregada(code, nombreUsuario, id) {
 }
 
 async function marcarRefaccionNecesariaPendiente(code, nombreUsuario, id) {
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar');
   const idNum = Number(id);
   if (!idNum) return { success: false, error: 'Falta el identificador de la pieza.' };
   const [rows] = await pool.query('SELECT id, orden FROM reportes_refacciones_necesarias WHERE id = ?', [idNum]);
   if (!rows.length) return { success: false, error: 'No se encontró esa pieza.' };
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, rows[0].orden, 'capturar');
   await pool.query(
     'UPDATE reportes_refacciones_necesarias SET entregado = 0, entregado_por = NULL, entregado_en = NULL WHERE id = ?',
     [idNum]
@@ -4868,7 +4973,12 @@ const ORD_PEND_ATENCION_TIPO_DEFECTO_ = 'todas';
 const ORD_PEND_ATENCION_TIPOS_VALIDOS_ = ['todas', 'preventivos', 'correctivos'];
 
 async function getOrdPendAtencionDias(code, nombreUsuario) {
-  await requierePermisoPanel_(code, nombreUsuario, 'ordenes', 'visualizar');
+  // El letrero solo muestra órdenes de la sección principal (ver
+  // renderOrdenesSinAtencionReciente_ en el cliente), pero esta función se
+  // llama en cuanto se abre la pestaña Órdenes sin importar qué sección(es)
+  // tenga el usuario -- por eso basta con 'visualizar' en cualquiera de las
+  // tres, para no tronar la pestaña a quien solo tiene Soldadura/Automotriz.
+  await requierePermisoPanel_(code, nombreUsuario, ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'], 'visualizar');
   const [rows] = await pool.query(
     "SELECT clave, valor FROM configuracion_general WHERE clave IN ('ord_pend_atencion_dias', 'ord_pend_atencion_tipo')"
   );

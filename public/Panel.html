@@ -1198,7 +1198,7 @@
           </div>
         </div>
       </div>
-      <div class="ord-tabla-sticky-scope">
+      <div class="ord-tabla-sticky-scope" id="ord-principal-wrap">
         <div class="ord-summary-row">
           <div class="summary" id="summary"></div>
           <div class="ord-accion-toolbar" id="ord-accion-toolbar">
@@ -3073,7 +3073,9 @@
         <div class="usr-permisos-panel" id="usr-permisos-wrap">
           <div class="usr-permisos-title">Acceso dentro del Panel (por pestaña) — solo aplica si la persona tiene marcado "Panel" arriba</div>
           <div class="usr-permisos-grid" id="usr-permisos-grid">
-            <div class="usr-permiso-row"><label>Órdenes</label><select id="usr-perm-ordenes" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Órdenes — Agrícola</label><select id="usr-perm-ordenes" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Órdenes — Soldadura</label><select id="usr-perm-ordenes_soldadura" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Órdenes — Automotriz</label><select id="usr-perm-ordenes_automotriz" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Diesel</label><select id="usr-perm-diesel" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Combustible Automotriz</label><select id="usr-perm-combustible_automotriz" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Movimientos</label><select id="usr-perm-movimientos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
@@ -3316,7 +3318,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -3384,7 +3386,10 @@ function puedeCapturarMaquinariaOCatalogo(){
 // la interfaz no muestre botones que de todos modos el servidor rechazaría.
 function aplicarPermisosPanelUI(){
   const mapa = [
-    ['ordenes', ptabOrdenes, pviewOrdenes],
+    // La pestaña se muestra si el usuario puede ver CUALQUIERA de las tres
+    // secciones -- cuál(es) de las tres tablas se muestran ya dentro de la
+    // pestaña se resuelve aparte, en aplicarVisibilidadSeccionesOrdenes_.
+    [['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'], ptabOrdenes, pviewOrdenes],
     ['diesel', ptabDiesel, pviewDiesel],
     ['combustible_automotriz', ptabCombustibleAutomotriz, pviewCombustibleAutomotriz],
     // "Combustible General" (diesel + gasolina juntos) no es una pestaña con
@@ -3432,13 +3437,35 @@ function aplicarPermisosPanelUI(){
   if(aviso) aviso.remove();
   if(tabsWrap) tabsWrap.style.display = '';
 
-  if(!puedeVerPestana('ordenes')){
+  if(!puedeVerPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'])){
     // La pestaña por defecto (Órdenes) no está permitida para este usuario:
     // activamos la primera pestaña a la que sí tenga acceso.
     primeraVisible[1].click();
   }
 
+  aplicarVisibilidadSeccionesOrdenes_();
   ocultarControlesSoloLectura();
+}
+
+// Dentro de la pestaña Órdenes, oculta cada una de las tres secciones
+// (Agrícola/principal, Soldadura, Automotriz) si el usuario no tiene ni
+// siquiera "visualizar" en el permiso de esa sección en particular -- la
+// pestaña en sí ya se mostró arriba si puede ver AL MENOS una. Las filas que
+// SÍ puede ver ya le llegan filtradas desde el servidor (ver
+// getReportesTaller en server/handlers.js), así que ocultar el bloque
+// completo cuando no aplica es solo para no dejar un título/tabla vacíos y
+// confusos.
+function aplicarVisibilidadSeccionesOrdenes_(){
+  const SECCIONES_ORDENES_WRAP = [
+    ['principal', ordPrincipalWrap],
+    ['soldadura', ordSoldaduraWrap],
+    ['automotriz', ordAutomotrizWrap],
+  ];
+  SECCIONES_ORDENES_WRAP.forEach(function(item){
+    const seccion = item[0], wrap = item[1];
+    if(!wrap) return;
+    wrap.style.display = puedeVerPestana(permisoDeSeccionOrden_(seccion)) ? '' : 'none';
+  });
 }
 
 // Si el usuario actual tiene huertas restringidas en Órdenes (ver
@@ -3481,7 +3508,14 @@ function ocultarControlesSoloLectura(){
       document.querySelectorAll(sel).forEach(function(el){ el.style.display = 'none'; });
     });
   }
-  if(!puedeCapturarPestana('ordenes')){
+  // Solo se oculta TODO esto cuando el usuario no tiene "capturar" en NINGUNA
+  // de las tres secciones de Órdenes (puro visualizador). Cuando sí tiene
+  // capturar en alguna pero no en otra (ej. solo Agrícola, no Soldadura), el
+  // toolbar compartido (#ord-accion-editar/#ord-accion-eliminar) y los
+  // modales de "Ver"/"Editar orden" se habilitan o no SEGÚN LA ORDEN
+  // seleccionada/abierta en ese momento -- ver aplicarSeleccionOrden_,
+  // abrirModal y abrirModalEditarOrdenConDatosFrescos_ más abajo.
+  if(!puedeCapturarPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'])){
     ocultar([
       '#pview-ordenes .row-save',
       '#pview-ordenes [onclick^="abrirModalEditarOrden"]',
@@ -3755,6 +3789,16 @@ function seccionDeOrden_(r){
   if(!!r.EsSoldadura) return 'soldadura';
   if(!!r.EsAutomotriz) return 'automotriz';
   return 'principal';
+}
+
+// A qué permiso de Panel corresponde cada sección de Órdenes (mismo
+// criterio que permisoDeSeccionOrden_ en server/handlers.js) -- 'ordenes'
+// sigue siendo el de Agrícola/principal, para no migrar a nadie; Soldadura
+// y Automotriz tienen cada uno el suyo, independiente.
+function permisoDeSeccionOrden_(seccion){
+  if(seccion === 'soldadura') return 'ordenes_soldadura';
+  if(seccion === 'automotriz') return 'ordenes_automotriz';
+  return 'ordenes';
 }
 
 // Sufijo de ids <-> nombre de sección (ver seccionDeOrden_) para los TRES
@@ -4365,11 +4409,22 @@ function aplicarSeleccionOrden_(){
   document.querySelectorAll('#table-body tr[data-orden], #table-body-soldadura tr[data-orden], #table-body-automotriz tr[data-orden]').forEach(tr => {
     tr.classList.toggle('fila-seleccionada', tr.dataset.orden === ordenSeleccionada);
   });
-  ['ord-accion-guardar', 'ord-accion-ver', 'ord-accion-editar', 'ord-accion-eliminar'].forEach(id => {
-    document.getElementById(id).disabled = !ordenSeleccionada;
+
+  // "Ver" solo necesita "visualizar" (si la fila está en ALL_RECORDS es
+  // porque el servidor ya determinó que la puede ver). "Guardar"/"Editar"/
+  // "Eliminar" necesitan "capturar" en la SECCIÓN de ESA orden en
+  // particular -- un usuario puede tener capturar en Agrícola pero solo
+  // visualizar en Soldadura, por ejemplo, así que no basta con el permiso
+  // global de la pestaña (ver permisoDeSeccionOrden_/seccionDeOrden_).
+  const registro = ordenSeleccionada ? ALL_RECORDS.find(r => r.Orden === ordenSeleccionada) : null;
+  const puedeCapturarEstaOrden = !!registro && puedeCapturarPestana(permisoDeSeccionOrden_(seccionDeOrden_(registro)));
+
+  document.getElementById('ord-accion-ver').disabled = !ordenSeleccionada;
+  ['ord-accion-guardar', 'ord-accion-editar', 'ord-accion-eliminar'].forEach(id => {
+    document.getElementById(id).disabled = !ordenSeleccionada || !puedeCapturarEstaOrden;
   });
   document.getElementById('ord-accion-label').textContent = ordenSeleccionada
-    ? 'Orden seleccionada: ' + ordenSeleccionada
+    ? 'Orden seleccionada: ' + ordenSeleccionada + (puedeCapturarEstaOrden ? '' : ' (solo lectura en esta sección)')
     : 'Selecciona una orden (clic en la fila) para habilitar acciones';
 }
 
@@ -4873,12 +4928,19 @@ function abrirModal(orden){
     evEl.textContent = 'Sin evidencia todavía';
   }
 
+  // "Ver" se puede abrir con solo "visualizar" en la sección de esta orden,
+  // pero agregar evidencia/foto desde aquí es una acción de captura -- si el
+  // usuario no tiene "capturar" en la sección de ESTA orden en particular
+  // (puede tenerlo en otra, ej. solo en Agrícola pero no en Soldadura), se
+  // ocultan esos botones igual que si fuera de solo lectura.
+  const puedeCapturarEstaOrden_ = puedeCapturarPestana(permisoDeSeccionOrden_(seccionDeOrden_(r)));
+
   document.getElementById('modal-evidence-preview').innerHTML = '';
-  document.getElementById('modal-media-actions').style.display = 'flex';
+  document.getElementById('modal-media-actions').style.display = puedeCapturarEstaOrden_ ? 'flex' : 'none';
   document.getElementById('modal-status').textContent = '';
 
   document.getElementById('modal-foto-rep-preview').innerHTML = '';
-  document.getElementById('modal-media-rep-actions').style.display = 'flex';
+  document.getElementById('modal-media-rep-actions').style.display = puedeCapturarEstaOrden_ ? 'flex' : 'none';
   document.getElementById('modal-foto-rep-status').textContent = '';
 
   document.getElementById('modal-overlay').classList.add('open');
@@ -5364,6 +5426,9 @@ document.getElementById('btn-export-encargados-pdf-automotriz').addEventListener
 
 // --- Pestañas: Órdenes / Diesel / Movimientos / Maquinaria / Catálogo / Mantenimiento / Usuarios ---
 const ptabOrdenes = document.getElementById('ptab-ordenes');
+const ordPrincipalWrap = document.getElementById('ord-principal-wrap');
+const ordSoldaduraWrap = document.getElementById('ord-soldadura-wrap');
+const ordAutomotrizWrap = document.getElementById('ord-automotriz-wrap');
 const ptabDiesel = document.getElementById('ptab-diesel');
 const ptabCombustibleAutomotriz = document.getElementById('ptab-combustible-automotriz');
 const ptabCombustibleGeneral = document.getElementById('ptab-combustible-general');
@@ -8178,6 +8243,29 @@ function abrirModalEditarOrdenConDatosFrescos_(orden){
   const statusEl = document.getElementById('oed-modal-status');
   statusEl.textContent = '';
   statusEl.className = 'maq-modal-status';
+
+  // Si el usuario no tiene "capturar" en la SECCIÓN de esta orden en
+  // particular (puede tenerlo en otra, ej. solo en Agrícola pero no en
+  // Soldadura), el modal se abre en modo solo lectura: se deshabilitan
+  // todos sus campos y se oculta "Guardar". El servidor vuelve a validar
+  // esto de forma independiente (ver editarOrden en server/handlers.js), así
+  // que esto es solo para que la interfaz no prometa un guardado que de
+  // todos modos se rechazaría.
+  const puedeEditarEstaOrden_ = puedeCapturarPestana(permisoDeSeccionOrden_(seccionDeOrden_(r)));
+  document.querySelectorAll('#oed-modal-overlay input, #oed-modal-overlay textarea, #oed-modal-overlay select').forEach(function(el){
+    el.disabled = !puedeEditarEstaOrden_;
+  });
+  document.getElementById('oed-btn-save').style.display = puedeEditarEstaOrden_ ? '' : 'none';
+
+  // Aunque sí pueda editar esta orden, las casillas de Soldadura/Automotriz
+  // la podrían MOVER a una sección donde no tiene "capturar" -- se
+  // deshabilitan aparte para no dejarlo marcar un destino que el servidor
+  // de todos modos rechazaría (ver editarOrden en server/handlers.js).
+  if(puedeEditarEstaOrden_){
+    document.getElementById('oed-f-soldadura').disabled = !puedeCapturarPestana('ordenes_soldadura');
+    document.getElementById('oed-f-automotriz').disabled = !puedeCapturarPestana('ordenes_automotriz');
+  }
+
   oedModalOverlay.classList.add('open');
 }
 
@@ -8341,8 +8429,28 @@ function abrirModalNuevaOrden(){
   document.getElementById('orn-f-nombre').value = PANEL_USUARIO || '';
   document.getElementById('orn-f-fecha').value = dateTimeInputValue(new Date());
   document.getElementById('orn-f-foto').value = '';
-  document.getElementById('orn-f-soldadura').checked = false;
-  document.getElementById('orn-f-automotriz').checked = false;
+
+  // Si el usuario no tiene "capturar" en alguna de las secciones, no debe
+  // poder crear una orden ahí -- se deshabilita esa casilla (el servidor
+  // vuelve a validar esto de forma independiente, ver crearOrdenPanel en
+  // server/handlers.js). Si además no tiene capturar en Agrícola/principal
+  // (la sección que queda si ninguna casilla está marcada), se precarga y
+  // bloquea la primera sección a la que sí tenga acceso, para no dejarlo
+  // con una combinación que de todos modos se rechazaría al guardar.
+  const chkSoldadura = document.getElementById('orn-f-soldadura');
+  const chkAutomotriz = document.getElementById('orn-f-automotriz');
+  const puedeAgricola_ = puedeCapturarPestana('ordenes');
+  const puedeSoldadura_ = puedeCapturarPestana('ordenes_soldadura');
+  const puedeAutomotriz_ = puedeCapturarPestana('ordenes_automotriz');
+  chkSoldadura.checked = false;
+  chkAutomotriz.checked = false;
+  chkSoldadura.disabled = !puedeSoldadura_;
+  chkAutomotriz.disabled = !puedeAutomotriz_;
+  if(!puedeAgricola_){
+    if(puedeSoldadura_){ chkSoldadura.checked = true; chkSoldadura.disabled = true; }
+    else if(puedeAutomotriz_){ chkAutomotriz.checked = true; chkAutomotriz.disabled = true; }
+  }
+
   const statusEl = document.getElementById('orn-modal-status');
   statusEl.textContent = '';
   statusEl.className = 'maq-modal-status';

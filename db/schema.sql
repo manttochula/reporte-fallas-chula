@@ -1581,6 +1581,31 @@ WHERE panel_permisos IS NOT NULL
   AND JSON_VALID(panel_permisos)
   AND JSON_EXTRACT(panel_permisos, '$.servicios_automotrices') IS NULL;
 
+-- Permisos independientes por sección de la pestaña Órdenes: hasta ahora
+-- "ordenes" controlaba las tres tablas (Agrícola, Soldadura y Automotriz) a
+-- la vez. A partir de aquí "ordenes" sigue siendo el de Agrícola/principal,
+-- y se agregan "ordenes_soldadura"/"ordenes_automotriz" para poder darle a
+-- cada usuario un nivel distinto en cada sección (ej. solo visualizar en
+-- Soldadura pero capturar en Agrícola). A quien ya tenía "ordenes"
+-- configurado se le COPIA ese mismo nivel a los dos permisos nuevos (no se
+-- le da "capturar" a fuerzas, como en los backfills anteriores) para que
+-- nadie pierda ni gane acceso de golpe: sigue viendo/editando las tres
+-- secciones igual que antes, hasta que alguien le ajuste cada una por su
+-- cuenta desde Usuarios.
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.ordenes_soldadura', JSON_EXTRACT(panel_permisos, '$.ordenes'))
+WHERE panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes') IS NOT NULL
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes_soldadura') IS NULL;
+
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.ordenes_automotriz', JSON_EXTRACT(panel_permisos, '$.ordenes'))
+WHERE panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes') IS NOT NULL
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes_automotriz') IS NULL;
+
 -- ------------------------------------------------------------
 -- Catálogos simples que antes vivían "quemados" en el código del Panel
 -- (el arreglo HUERTAS, los botones CAMPO/COSECHA/..., el texto libre de

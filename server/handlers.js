@@ -1815,17 +1815,45 @@ async function guardarCargasGasolinaLote(code, nombreUsuario, cargas) {
 // (recarga de página, sesión ya guardada en localStorage) y validarUsuario
 // (login recién hecho), para no repetir el mismo JSON.parse en los dos
 // lados.
-function datosReportarUsuario_(usuario) {
-  let huertasReportar = [];
+// Arreglo de huertas (ver huertas_adicionales en db/schema.sql) tal cual
+// viene guardado, limpio de vacíos/espacios.
+function parseHuertasJson_(crudo) {
   try {
-    const lista = usuario.huertas_reportar ? JSON.parse(usuario.huertas_reportar) : [];
-    if (Array.isArray(lista)) huertasReportar = lista.map((h) => (h || '').toString().trim()).filter(Boolean);
+    const lista = crudo ? JSON.parse(crudo) : [];
+    return Array.isArray(lista) ? lista.map((h) => (h || '').toString().trim()).filter(Boolean) : [];
   } catch (err) {
-    huertasReportar = [];
+    return [];
   }
+}
+
+// Todas las huertas en las que esta persona "está asignada" de verdad: su
+// huerta única de siempre (usuarios.huerta) más, opcionalmente, las
+// adicionales que le haya dado el admin (usuarios.huertas_adicionales, ver
+// db/schema.sql) — sin duplicados, con la huerta única primero. Si no tiene
+// huerta única pero sí adicionales (caso raro), igual se usan esas. Esta es
+// la lista que de verdad importa para: qué equipo ve en Reportar/Diesel
+// (recomputarUnidadesFiltradas en el cliente), de qué huertas ve "llegadas
+// pendientes" y desde cuál de ellas puede registrar una salida en
+// Movimientos (ver getMovimientosDeUsuario/confirmarLlegadaMovimiento/
+// submitMovimientoSalida más abajo).
+function huertasEfectivasDeFila_(usuario) {
+  const huertaUnica = (usuario && usuario.huerta) ? usuario.huerta.toString().trim() : '';
+  const adicionales = parseHuertasJson_(usuario && usuario.huertas_adicionales);
+  const todas = huertaUnica ? [huertaUnica, ...adicionales] : adicionales;
+  const vistas = new Set();
+  return todas.filter((h) => {
+    const key = h.toUpperCase();
+    if (vistas.has(key)) return false;
+    vistas.add(key);
+    return true;
+  });
+}
+
+function datosReportarUsuario_(usuario) {
   return {
     huerta: usuario.huerta || '',
-    huertasReportar,
+    huertas: huertasEfectivasDeFila_(usuario),
+    huertasReportar: parseHuertasJson_(usuario.huertas_reportar),
     veCasillaSoldadura: !!usuario.ve_casilla_soldadura,
     veCasillaAutomotriz: !!usuario.ve_casilla_automotriz,
   };
@@ -1834,7 +1862,7 @@ function datosReportarUsuario_(usuario) {
 async function getHuertaPorUsuario(nombre) {
   if (!nombre) return datosReportarUsuario_({});
   const [rows] = await pool.query(
-    'SELECT huerta, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    'SELECT huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
     [nombre]
   );
   return datosReportarUsuario_(rows.length ? rows[0] : {});
@@ -1922,12 +1950,13 @@ function limpiarPanelPermisos_(panelPermisos) {
 
 async function getUsuarios(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'usuarios', 'visualizar');
-  const [rows] = await pool.query('SELECT nombre, huerta, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos FROM usuarios ORDER BY nombre');
+  const [rows] = await pool.query('SELECT nombre, huerta, huertas_adicionales, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos FROM usuarios ORDER BY nombre');
   return rows
     .filter((r) => r.nombre)
     .map((r) => ({
       Nombre: r.nombre,
       Huerta: r.huerta || '',
+      HuertasAdicionales: parseHuertasJson_(r.huertas_adicionales),
       TieneClave: !!(r.password_hash && r.password_hash.trim()),
       Modulos: (r.modulos || '').split(',').map((m) => m.trim()).filter(Boolean),
       PanelPermisos: (() => {
@@ -1978,7 +2007,14 @@ async function getUsuarios(code, nombreUsuario) {
 // DZ_CUADROS en Panel.html) que esta persona NO debe ver en la pestaña
 // Diesel del Panel. Vacío/ausente guarda NULL — los ve todos, igual que
 // siempre.
-async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos) {
+// `huertasAdicionales` (opcional): arreglo de huertas EXTRA a la huerta
+// única de `huerta` (ver huertas_adicionales en db/schema.sql y
+// huertasEfectivasDeFila_ arriba). Vacío/ausente guarda NULL — sigue
+// teniendo una sola huerta, igual que siempre. Si tiene 2+ huertas en
+// total (la única + estas), cambia qué equipo ve en Reportar/Diesel, de
+// qué huertas ve llegadas pendientes en Movimientos y desde cuál puede
+// registrar una salida.
+async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales) {
   await requierePermisoPanel_(code, nombreUsuario, 'usuarios', 'capturar');
   if (!nombre) return { success: false, error: 'Falta el nombre.' };
   const modulosStr = Array.isArray(modulos) ? modulos.join(',') : (modulos || '').toString();
@@ -1998,26 +2034,30 @@ async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, mod
     ? dieselCuadrosOcultos.map((c) => (c || '').toString().trim()).filter(Boolean)
     : [];
   const dieselCuadrosOcultosStr = dieselCuadrosOcultosLimpio.length > 0 ? JSON.stringify(dieselCuadrosOcultosLimpio) : null;
+  const huertasAdicionalesLimpio = Array.isArray(huertasAdicionales)
+    ? huertasAdicionales.map((h) => (h || '').toString().trim()).filter(Boolean)
+    : [];
+  const huertasAdicionalesStr = huertasAdicionalesLimpio.length > 0 ? JSON.stringify(huertasAdicionalesLimpio) : null;
   try {
     const [existe] = await pool.query('SELECT id, password_hash FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
     if (existe.length === 0) {
       if (!password) return { success: false, error: 'Asigna una contraseña al crear un usuario nuevo.' };
       const hash = await bcrypt.hash(String(password), 10);
       await pool.query(
-        'INSERT INTO usuarios (nombre, huerta, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [nombre, huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr]
+        'INSERT INTO usuarios (nombre, huerta, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos, huertas_adicionales) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [nombre, huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr]
       );
     } else {
       if (password) {
         const hash = await bcrypt.hash(String(password), 10);
         await pool.query(
-          'UPDATE usuarios SET huerta = ?, password_hash = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ? WHERE id = ?',
-          [huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, existe[0].id]
+          'UPDATE usuarios SET huerta = ?, password_hash = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ?, huertas_adicionales = ? WHERE id = ?',
+          [huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, existe[0].id]
         );
       } else {
         await pool.query(
-          'UPDATE usuarios SET huerta = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ? WHERE id = ?',
-          [huerta || '', modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, existe[0].id]
+          'UPDATE usuarios SET huerta = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ?, huertas_adicionales = ? WHERE id = ?',
+          [huerta || '', modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, existe[0].id]
         );
       }
     }
@@ -2067,11 +2107,22 @@ async function submitMovimientoSalida(data) {
       return { success: false, error: 'Selecciona la unidad y la huerta de destino.' };
     }
 
-    const [urows] = await pool.query('SELECT huerta FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
-    const huertaOrigen = (urows[0] && urows[0].huerta) || '';
-    if (!huertaOrigen) return { success: false, error: 'Tu usuario no tiene una huerta asignada. Pídele al Panel que te la configure.' };
+    const [urows] = await pool.query('SELECT huerta, huertas_adicionales FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
+    const huertasUsuario = huertasEfectivasDeFila_(urows[0] || {});
+    if (!huertasUsuario.length) return { success: false, error: 'Tu usuario no tiene una huerta asignada. Pídele al Panel que te la configure.' };
+
+    let huertaOrigen = '';
+    if (huertasUsuario.length > 1) {
+      // Con 2+ huertas asignadas, debe elegir explícitamente desde cuál sale.
+      const origenPedido = (data.huertaOrigen || '').toString().trim();
+      if (!origenPedido) return { success: false, error: 'Selecciona la huerta de origen.' };
+      huertaOrigen = huertasUsuario.find((h) => h.toLowerCase() === origenPedido.toLowerCase()) || '';
+      if (!huertaOrigen) return { success: false, error: 'La huerta de origen elegida no es una de tus huertas asignadas.' };
+    } else {
+      huertaOrigen = huertasUsuario[0];
+    }
     if (huertaOrigen.trim().toLowerCase() === data.huertaDestino.trim().toLowerCase()) {
-      return { success: false, error: 'La huerta de destino debe ser diferente a tu huerta.' };
+      return { success: false, error: 'La huerta de destino debe ser diferente a tu huerta de origen.' };
     }
 
     // Si el equipo ya tiene una ubicación registrada por un movimiento
@@ -2112,18 +2163,24 @@ async function submitMovimientoSalida(data) {
 // Para la pantalla del módulo Movimientos: lo que le falta confirmar a la
 // huerta del usuario (llegadas pendientes) y sus propias salidas recientes.
 async function getMovimientosDeUsuario(nombre) {
-  if (!nombre) return { huerta: '', pendientesLlegada: [], misSalidas: [] };
-  const [urows] = await pool.query('SELECT huerta FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
+  if (!nombre) return { huerta: '', huertas: [], pendientesLlegada: [], misSalidas: [] };
+  const [urows] = await pool.query('SELECT huerta, huertas_adicionales FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
   const huerta = (urows[0] && urows[0].huerta) || '';
-  const [pendientes] = await pool.query(
-    MOVIMIENTO_SELECT + " WHERE estado = 'pendiente' AND LOWER(TRIM(huerta_destino)) = LOWER(TRIM(?)) ORDER BY id DESC",
-    [huerta]
-  );
+  const huertas = huertasEfectivasDeFila_(urows[0] || {});
+  let pendientes = [];
+  if (huertas.length) {
+    const huertasLower = huertas.map((h) => h.toLowerCase());
+    const placeholders = huertasLower.map(() => '?').join(',');
+    [pendientes] = await pool.query(
+      MOVIMIENTO_SELECT + ` WHERE estado = 'pendiente' AND LOWER(TRIM(huerta_destino)) IN (${placeholders}) ORDER BY id DESC`,
+      huertasLower
+    );
+  }
   const [misSalidas] = await pool.query(
     MOVIMIENTO_SELECT + ' WHERE LOWER(TRIM(usuario_salida)) = LOWER(TRIM(?)) ORDER BY id DESC LIMIT 20',
     [nombre]
   );
-  return { huerta, pendientesLlegada: normalizaFilas(pendientes), misSalidas: normalizaFilas(misSalidas) };
+  return { huerta, huertas, pendientesLlegada: normalizaFilas(pendientes), misSalidas: normalizaFilas(misSalidas) };
 }
 
 async function confirmarLlegadaMovimiento(folio, nombre, comentario, foto) {
@@ -2134,9 +2191,9 @@ async function confirmarLlegadaMovimiento(folio, nombre, comentario, foto) {
     const mov = rows[0];
     if (mov.estado === 'confirmado') return { success: false, error: 'Este movimiento ya había sido confirmado.' };
 
-    const [urows] = await pool.query('SELECT huerta FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
-    const huertaUsuario = ((urows[0] && urows[0].huerta) || '').trim().toLowerCase();
-    if (huertaUsuario !== (mov.huerta_destino || '').trim().toLowerCase()) {
+    const [urows] = await pool.query('SELECT huerta, huertas_adicionales FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
+    const huertasUsuario = huertasEfectivasDeFila_(urows[0] || {}).map((h) => h.toLowerCase());
+    if (!huertasUsuario.includes((mov.huerta_destino || '').trim().toLowerCase())) {
       return { success: false, error: 'Solo alguien de ' + mov.huerta_destino + ' puede confirmar esta llegada.' };
     }
 

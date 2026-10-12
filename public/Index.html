@@ -763,6 +763,12 @@
           <div class="unit-dropdown" id="unit-dropdown-mov"></div>
         </div>
       </div>
+      <div class="field" id="campo-huerta-origen-mov" style="display:none;">
+        <label>Huerta de origen <span class="req">*</span></label>
+        <select id="f-huerta-origen-mov">
+          <option value="" disabled selected>Selecciona tu huerta de origen</option>
+        </select>
+      </div>
       <div class="field">
         <label>Huerta destino <span class="req">*</span></label>
         <select id="f-huerta-destino-mov">
@@ -1177,7 +1183,8 @@ window.addEventListener('appinstalled', function(){
 // ============================================================
 
 let tipoFalla = 'Correctivo';
-let huertaUsuarioActual = ''; // huerta asignada al usuario logueado; se usa para la carga de diesel
+let huertaUsuarioActual = ''; // huerta única/"principal" del usuario logueado (compatibilidad)
+let huertasUsuarioActual = []; // huerta(s) efectivas del usuario (principal + adicionales, ver huertasEfectivasDeFila_ en el servidor); filtra equipo en Reportar/Diesel y de qué huertas ve Movimientos
 
 // --- Ubicación actual de cada unidad, según Movimientos de Maquinaria ---
 // Mapa { CodigoUnidad -> Huerta } solo para las unidades que ya tienen al
@@ -1194,24 +1201,29 @@ let ubicacionesUnidades = {};
 let unidadesDieselPermitidas = new Set();
 
 function recomputarUnidadesFiltradas(){
-  const h = (huertaUsuarioActual || '').trim().toUpperCase();
-  if(!h){
+  // Lista efectiva de huertas contra la que se filtra: las adicionales si
+  // ya llegaron, o la huerta única como respaldo mientras tanto.
+  const lista = (huertasUsuarioActual && huertasUsuarioActual.length)
+    ? huertasUsuarioActual.map(function(x){ return (x || '').trim().toUpperCase(); }).filter(Boolean)
+    : ((huertaUsuarioActual || '').trim() ? [(huertaUsuarioActual || '').trim().toUpperCase()] : []);
+
+  if(!lista.length){
     UNIDADES = UNIDADES_TODAS;
   } else {
     UNIDADES = UNIDADES_TODAS.filter(function(u){
       const asignada = ubicacionesUnidades[u.v];
-      return !asignada || asignada.trim().toUpperCase() === h;
+      return !asignada || lista.indexOf(asignada.trim().toUpperCase()) !== -1;
     });
   }
   IMPLEMENTOS = UNIDADES.filter(function(u){ return u.l.trim().toUpperCase().startsWith('IA'); });
 
   const baseDiesel = UNIDADES_TODAS.filter(function(u){ return unidadesDieselPermitidas.has(u.v); });
-  if(!h){
+  if(!lista.length){
     UNIDADES_DIESEL = baseDiesel;
   } else {
     UNIDADES_DIESEL = baseDiesel.filter(function(u){
       const asignada = ubicacionesUnidades[u.v];
-      return !asignada || asignada.trim().toUpperCase() === h;
+      return !asignada || lista.indexOf(asignada.trim().toUpperCase()) !== -1;
     });
   }
 }
@@ -1297,10 +1309,16 @@ function aplicarHuerta(datos){
   datos = datos || {};
   var huerta = datos.huerta || '';
   huertaUsuarioActual = huerta;
+  huertasUsuarioActual = Array.isArray(datos.huertas) ? datos.huertas : (huerta ? [huerta] : []);
   recomputarUnidadesFiltradas();
+  poblarHuertaOrigenMov();
   poblarHuertaDestinoMov();
   var badgeMov = document.getElementById('mov-huerta-badge');
-  if(badgeMov) badgeMov.textContent = huertaUsuarioActual ? ('Tu huerta: ' + huertaUsuarioActual) : 'Sin huerta asignada';
+  if(badgeMov){
+    badgeMov.textContent = huertasUsuarioActual.length > 1
+      ? ('Tus huertas: ' + huertasUsuarioActual.join(', '))
+      : (huertaUsuarioActual ? ('Tu huerta: ' + huertaUsuarioActual) : 'Sin huerta asignada');
+  }
   aplicarHuertasReportar(datos.huertasReportar, huerta);
   aplicarCasillasOpcionales(datos.veCasillaSoldadura, datos.veCasillaAutomotriz);
 }
@@ -1873,12 +1891,54 @@ document.getElementById('btn-submit-diesel').onclick = () => {
 
 const HUERTAS = ['ALMA LUCIA','AURORA','BRILLANTE','GUADALUPE','LA CRUZ','MATA CAZUELA','MATA DE GALLO','NIDO DE AGUILA','ORGANITO','PASO LIMON','RANCHO NUEVO','SAN CENOVIO','SAN JOACHIN','SANTA EULALIA','TALLER'];
 
+// Huerta de origen que aplica para "Registrar salida": si la persona tiene
+// 2+ huertas asignadas, es la que eligió en #f-huerta-origen-mov; si solo
+// tiene una, es esa de siempre (sin necesidad de elegir nada).
+function huertaOrigenSeleccionadaMov(){
+  if(huertasUsuarioActual && huertasUsuarioActual.length > 1){
+    var selOrigen = document.getElementById('f-huerta-origen-mov');
+    return selOrigen ? (selOrigen.value || '') : '';
+  }
+  return huertaUsuarioActual || '';
+}
+
+// Solo se muestra/pobla cuando la persona tiene 2+ huertas asignadas (ver
+// huertasUsuarioActual en aplicarHuerta); con una sola, el campo queda
+// oculto y la huerta de origen es implícita, igual que siempre.
+function poblarHuertaOrigenMov(){
+  var wrap = document.getElementById('campo-huerta-origen-mov');
+  var sel = document.getElementById('f-huerta-origen-mov');
+  if(!wrap || !sel) return;
+  if(!huertasUsuarioActual || huertasUsuarioActual.length <= 1){
+    wrap.style.display = 'none';
+    sel.innerHTML = '<option value="" disabled selected>Selecciona tu huerta de origen</option>';
+    return;
+  }
+  wrap.style.display = '';
+  var actual = sel.value;
+  sel.innerHTML = '<option value="" disabled selected>Selecciona tu huerta de origen</option>';
+  huertasUsuarioActual.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h; opt.textContent = h;
+    sel.appendChild(opt);
+  });
+  var restaurado = false;
+  for(var i=0; i<sel.options.length; i++){
+    if(sel.options[i].value === actual){ sel.selectedIndex = i; restaurado = true; break; }
+  }
+  if(!restaurado && huertasUsuarioActual.length) sel.value = huertasUsuarioActual[0];
+}
+(function(){
+  var selOrigenMov = document.getElementById('f-huerta-origen-mov');
+  if(selOrigenMov) selOrigenMov.addEventListener('change', poblarHuertaDestinoMov);
+})();
+
 function poblarHuertaDestinoMov(){
   var sel = document.getElementById('f-huerta-destino-mov');
   if(!sel) return;
   var actual = sel.value;
   sel.innerHTML = '<option value="" disabled selected>Selecciona la huerta destino</option>';
-  var propia = (huertaUsuarioActual || '').trim().toUpperCase();
+  var propia = (huertaOrigenSeleccionadaMov() || '').trim().toUpperCase();
   HUERTAS.forEach(function(h){
     if(propia && h.trim().toUpperCase() === propia) return;
     var opt = document.createElement('option');
@@ -2136,6 +2196,26 @@ function cargarMovimientosTab(){
       res = res || {};
       renderPendientesMov(res.pendientesLlegada);
       renderSalidasMov(res.misSalidas);
+      // Si el servidor devuelve una lista de huertas distinta a la que ya
+      // teníamos aplicada (porque el Panel acaba de ajustarle las huertas
+      // adicionales a esta persona), se refresca todo lo que depende de
+      // ella sin esperar a que vuelva a iniciar sesión.
+      var huertasNuevas = Array.isArray(res.huertas) ? res.huertas : (res.huerta ? [res.huerta] : []);
+      var cambiaron = huertasNuevas.length !== huertasUsuarioActual.length ||
+        huertasNuevas.some(function(h, i){ return (h || '').toUpperCase() !== (huertasUsuarioActual[i] || '').toUpperCase(); });
+      if(cambiaron){
+        huertaUsuarioActual = res.huerta || '';
+        huertasUsuarioActual = huertasNuevas;
+        recomputarUnidadesFiltradas();
+        poblarHuertaOrigenMov();
+        poblarHuertaDestinoMov();
+        var badgeMov = document.getElementById('mov-huerta-badge');
+        if(badgeMov){
+          badgeMov.textContent = huertasUsuarioActual.length > 1
+            ? ('Tus huertas: ' + huertasUsuarioActual.join(', '))
+            : (huertaUsuarioActual ? ('Tu huerta: ' + huertaUsuarioActual) : 'Sin huerta asignada');
+        }
+      }
     })
     .withFailureHandler(function(){
       document.getElementById('mov-pendientes-list').innerHTML = '<div class="empty">No se pudieron cargar los movimientos.</div>';
@@ -2154,6 +2234,8 @@ function limpiarFormularioMovimientoSalida_(){
   unitSearchInputMov.value = '';
   unidadSeleccionadaMov = null;
   unitSelectWrapMov.classList.remove('selected');
+  var selOrigenLimpiar = document.getElementById('f-huerta-origen-mov');
+  if(selOrigenLimpiar) selOrigenLimpiar.selectedIndex = 0;
   document.getElementById('f-huerta-destino-mov').selectedIndex = 0;
   document.getElementById('f-comentario-mov').value = '';
   fotoSalidaMovDataUrl = null;
@@ -2170,6 +2252,10 @@ document.getElementById('btn-submit-salida-mov').onclick = () => {
   const comentario = document.getElementById('f-comentario-mov').value.trim();
   const nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
   const statusEl = document.getElementById('status-salida-mov');
+  // Solo hay que elegir origen cuando tiene 2+ huertas asignadas; con una
+  // sola, el campo está oculto y el origen es implícito (ver aplicarHuerta).
+  const requiereOrigen = huertasUsuarioActual && huertasUsuarioActual.length > 1;
+  const huertaOrigen = huertaOrigenSeleccionadaMov();
 
   function showMovStatus(msg, ok){
     statusEl.textContent = msg;
@@ -2179,8 +2265,8 @@ document.getElementById('btn-submit-salida-mov').onclick = () => {
     statusEl.className = 'status show ' + clase;
   }
 
-  if(!unidadSeleccionadaMov || !huertaDestino){
-    showMovStatus('Faltan campos obligatorios (*): selecciona la unidad y la huerta destino.', false);
+  if(!unidadSeleccionadaMov || !huertaDestino || (requiereOrigen && !huertaOrigen)){
+    showMovStatus('Faltan campos obligatorios (*): selecciona la unidad' + (requiereOrigen ? ', tu huerta de origen' : '') + ' y la huerta destino.', false);
     return;
   }
 
@@ -2192,6 +2278,7 @@ document.getElementById('btn-submit-salida-mov').onclick = () => {
     nombre: nombre,
     unidad: unidadSeleccionadaMov.v,
     unidadLabel: unidadSeleccionadaMov.l,
+    huertaOrigen: huertaOrigen,
     huertaDestino: huertaDestino,
     comentario: comentario,
     foto: fotoSalidaMovDataUrl

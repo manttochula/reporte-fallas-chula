@@ -264,6 +264,12 @@
             <div class="unit-dropdown" id="unit-dropdown"></div>
           </div>
         </div>
+        <div class="field" id="campo-huerta-origen" style="display:none;">
+          <label>Huerta de origen <span class="req">*</span></label>
+          <select id="f-huerta-origen">
+            <option value="" disabled selected>Selecciona tu huerta de origen</option>
+          </select>
+        </div>
         <div class="field">
           <label>Huerta destino <span class="req">*</span></label>
           <select id="f-huerta-destino">
@@ -361,18 +367,21 @@ const UNIDADES_TODAS = [{"v": "9315", "l": "AF-001-5065E JD"}, {"v": "9605", "l"
 
 let UNIDADES = UNIDADES_TODAS;
 let nombreUsuario = '';
-let huertaUsuario = '';
+let huertaUsuario = ''; // huerta única/"principal" del usuario logueado (compatibilidad)
+let huertasUsuario = []; // huerta(s) efectivas (principal + adicionales, ver huertasEfectivasDeFila_ en el servidor)
 let ubicacionesUnidades = {};
 let unidadSeleccionada = null; // { v, l }
 
 function recomputarUnidadesFiltradas(){
-  const h = (huertaUsuario || '').trim().toUpperCase();
-  if(!h){
+  const lista = (huertasUsuario && huertasUsuario.length)
+    ? huertasUsuario.map(function(x){ return (x || '').trim().toUpperCase(); }).filter(Boolean)
+    : ((huertaUsuario || '').trim() ? [(huertaUsuario || '').trim().toUpperCase()] : []);
+  if(!lista.length){
     UNIDADES = UNIDADES_TODAS;
   } else {
     UNIDADES = UNIDADES_TODAS.filter(function(u){
       const asignada = ubicacionesUnidades[u.v];
-      return !asignada || asignada.trim().toUpperCase() === h;
+      return !asignada || lista.indexOf(asignada.trim().toUpperCase()) !== -1;
     });
   }
 }
@@ -388,9 +397,50 @@ function cargarUbicacionesUnidades(){
     .getUbicacionesUnidades();
 }
 
+// Huerta de origen que aplica para "Registrar salida": si tiene 2+
+// huertas asignadas, es la que eligió en #f-huerta-origen; si solo tiene
+// una, es esa de siempre (sin necesidad de elegir nada).
+function huertaOrigenSeleccionada(){
+  if(huertasUsuario && huertasUsuario.length > 1){
+    var selOrigen = document.getElementById('f-huerta-origen');
+    return selOrigen ? (selOrigen.value || '') : '';
+  }
+  return huertaUsuario || '';
+}
+
+// Solo se muestra/pobla con 2+ huertas asignadas; con una sola, el campo
+// queda oculto y la huerta de origen es implícita, igual que siempre.
+function poblarHuertaOrigen(){
+  var wrap = document.getElementById('campo-huerta-origen');
+  var sel = document.getElementById('f-huerta-origen');
+  if(!wrap || !sel) return;
+  if(!huertasUsuario || huertasUsuario.length <= 1){
+    wrap.style.display = 'none';
+    sel.innerHTML = '<option value="" disabled selected>Selecciona tu huerta de origen</option>';
+    return;
+  }
+  wrap.style.display = '';
+  var actual = sel.value;
+  sel.innerHTML = '<option value="" disabled selected>Selecciona tu huerta de origen</option>';
+  huertasUsuario.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h; opt.textContent = h;
+    sel.appendChild(opt);
+  });
+  var restaurado = false;
+  for(var i=0; i<sel.options.length; i++){
+    if(sel.options[i].value === actual){ sel.selectedIndex = i; restaurado = true; break; }
+  }
+  if(!restaurado && huertasUsuario.length) sel.value = huertasUsuario[0];
+}
+(function(){
+  var selOrigen = document.getElementById('f-huerta-origen');
+  if(selOrigen) selOrigen.addEventListener('change', poblarHuertaDestino);
+})();
+
 function poblarHuertaDestino(){
   var sel = document.getElementById('f-huerta-destino');
-  var propia = (huertaUsuario || '').trim().toUpperCase();
+  var propia = (huertaOrigenSeleccionada() || '').trim().toUpperCase();
   sel.innerHTML = '<option value="" disabled selected>Selecciona la huerta destino</option>';
   HUERTAS.forEach(function(h){
     if(h.trim().toUpperCase() === propia) return;
@@ -499,13 +549,18 @@ function mostrarLogin(){
     .getNombresUsuarios('Movimientos');
 }
 
-function iniciarApp(nombre, huerta){
+function iniciarApp(nombre, datos){
+  datos = datos || {};
   localStorage.setItem('mov_nombre', nombre);
   nombreUsuario = nombre;
-  huertaUsuario = huerta || '';
+  huertaUsuario = datos.huerta || '';
+  huertasUsuario = Array.isArray(datos.huertas) ? datos.huertas : (huertaUsuario ? [huertaUsuario] : []);
   document.getElementById('login-overlay').hidden = true;
   document.getElementById('view-main').style.display = 'block';
-  document.getElementById('huerta-badge').textContent = huertaUsuario ? ('Tu huerta: ' + huertaUsuario) : 'Sin huerta asignada';
+  document.getElementById('huerta-badge').textContent = huertasUsuario.length > 1
+    ? ('Tus huertas: ' + huertasUsuario.join(', '))
+    : (huertaUsuario ? ('Tu huerta: ' + huertaUsuario) : 'Sin huerta asignada');
+  poblarHuertaOrigen();
   poblarHuertaDestino();
   recomputarUnidadesFiltradas();
   cargarUbicacionesUnidades();
@@ -529,7 +584,7 @@ function intentarLogin(){
       btn.disabled = false;
       btn.textContent = 'Entrar';
       if(res && res.success){
-        iniciarApp(nombre, res.huerta);
+        iniciarApp(nombre, res);
       } else {
         loginStatus.textContent = (res && res.error) || 'No se pudo iniciar sesión.';
         loginStatus.classList.add('show');
@@ -551,7 +606,7 @@ function asegurarUsuario(){
     return;
   }
   google.script.run
-    .withSuccessHandler(function(huerta){ iniciarApp(nombre, huerta); })
+    .withSuccessHandler(function(datos){ iniciarApp(nombre, datos); })
     .withFailureHandler(function(){ mostrarLogin(); })
     .getHuertaPorUsuario(nombre);
 }
@@ -617,10 +672,19 @@ document.getElementById('btn-submit-salida').addEventListener('click', function(
   var btn = document.getElementById('btn-submit-salida');
   var huertaDestino = document.getElementById('f-huerta-destino').value;
   var comentario = document.getElementById('f-comentario').value.trim();
+  // Solo hay que elegir origen cuando tiene 2+ huertas asignadas; con una
+  // sola, el campo está oculto y el origen es implícito (ver iniciarApp).
+  var requiereOrigen = huertasUsuario && huertasUsuario.length > 1;
+  var huertaOrigen = huertaOrigenSeleccionada();
   status.classList.remove('show', 'ok', 'err');
 
   if(!unidadSeleccionada){
     status.textContent = 'Selecciona una unidad de la lista.';
+    status.classList.add('show', 'err');
+    return;
+  }
+  if(requiereOrigen && !huertaOrigen){
+    status.textContent = 'Selecciona tu huerta de origen.';
     status.classList.add('show', 'err');
     return;
   }
@@ -641,6 +705,8 @@ document.getElementById('btn-submit-salida').addEventListener('click', function(
         unidadSeleccionada = null;
         unitSearchInput.value = '';
         unitSelectWrap.classList.remove('selected');
+        var selOrigenLimpiar = document.getElementById('f-huerta-origen');
+        if(selOrigenLimpiar) selOrigenLimpiar.selectedIndex = 0;
         document.getElementById('f-huerta-destino').value = '';
         document.getElementById('f-comentario').value = '';
         fotoSalidaDataUrl = null;
@@ -666,6 +732,7 @@ document.getElementById('btn-submit-salida').addEventListener('click', function(
       nombre: nombreUsuario,
       unidad: unidadSeleccionada.v,
       unidadLabel: unidadSeleccionada.l,
+      huertaOrigen: huertaOrigen,
       huertaDestino: huertaDestino,
       comentario: comentario || null,
       foto: fotoSalidaDataUrl,
@@ -677,9 +744,16 @@ function cargarMovimientos(){
   google.script.run
     .withSuccessHandler(function(res){
       res = res || {};
-      if(res.huerta && res.huerta !== huertaUsuario){
-        huertaUsuario = res.huerta;
-        document.getElementById('huerta-badge').textContent = huertaUsuario ? ('Tu huerta: ' + huertaUsuario) : 'Sin huerta asignada';
+      var huertasNuevas = Array.isArray(res.huertas) ? res.huertas : (res.huerta ? [res.huerta] : []);
+      var cambiaron = huertasNuevas.length !== huertasUsuario.length ||
+        huertasNuevas.some(function(h, i){ return (h || '').toUpperCase() !== (huertasUsuario[i] || '').toUpperCase(); });
+      if(cambiaron){
+        huertaUsuario = res.huerta || '';
+        huertasUsuario = huertasNuevas;
+        document.getElementById('huerta-badge').textContent = huertasUsuario.length > 1
+          ? ('Tus huertas: ' + huertasUsuario.join(', '))
+          : (huertaUsuario ? ('Tu huerta: ' + huertaUsuario) : 'Sin huerta asignada');
+        poblarHuertaOrigen();
         poblarHuertaDestino();
         recomputarUnidadesFiltradas();
       }

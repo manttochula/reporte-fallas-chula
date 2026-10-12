@@ -3112,6 +3112,11 @@
           <div class="usr-huertas-grid" id="usr-diesel-cuadros-grid"></div>
         </div>
         <select id="usr-huerta"><option value="">Sin huerta asignada</option></select>
+        <div class="usr-permisos-panel" id="usr-huertas-adicionales-wrap">
+          <div class="usr-permisos-title">Huertas adicionales (vacío = solo la huerta de arriba)</div>
+          <div class="mnt-subtext" style="margin:-4px 0 8px;">Marca aquí las huertas EXTRA a la de arriba si esta persona trabaja equipo de más de una huerta. Con 2 o más huertas en total, en Reportar y Diesel ve el equipo de todas ellas, en Movimientos ve las llegadas pendientes de todas y, al registrar una salida, elige desde cuál de sus huertas sale.</div>
+          <div class="usr-huertas-grid" id="usr-huertas-adicionales-grid"></div>
+        </div>
         <input type="text" id="usr-password" placeholder="Contraseña (vacío = no cambiar)">
         <button class="usr-save-btn" id="usr-save">Guardar asignación</button>
       </div>
@@ -5612,6 +5617,7 @@ function poblarTodosLosSelectsHuerta(){
   poblarSelectSimple_('ins-f-huerta', HUERTAS, true);
   poblarUsrHuertasGrid_('usr-huertas-grid');
   poblarUsrHuertasGrid_('usr-huertas-reportar-grid');
+  poblarUsrHuertasGrid_('usr-huertas-adicionales-grid');
 }
 poblarTodosLosSelectsHuerta();
 
@@ -9110,6 +9116,13 @@ function renderUsuarios(usuarios){
       huertasRepSpan.title = 'En Reportar puede elegir entre estas huertas, en vez de tener una sola fija.';
       left.appendChild(huertasRepSpan);
     }
+    if((u.HuertasAdicionales || []).length > 0){
+      const huertasAdicSpan = document.createElement('span');
+      huertasAdicSpan.className = 'huerta-restr-pill';
+      huertasAdicSpan.textContent = 'Huertas adicionales: ' + u.HuertasAdicionales.join(', ');
+      huertasAdicSpan.title = 'Además de su huerta de arriba, también ve equipo, llegadas pendientes y puede registrar salidas desde estas huertas.';
+      left.appendChild(huertasAdicSpan);
+    }
     if(u.VeCasillaSoldadura){
       const soldSpan = document.createElement('span');
       soldSpan.className = 'huerta-restr-pill';
@@ -9144,6 +9157,10 @@ function renderUsuarios(usuarios){
       const huertasReportarSel = new Set(u.HuertasReportar || []);
       document.querySelectorAll('#usr-huertas-reportar-grid input[type=checkbox]').forEach(function(cb){
         cb.checked = huertasReportarSel.has(cb.value);
+      });
+      const huertasAdicionalesSel = new Set(u.HuertasAdicionales || []);
+      document.querySelectorAll('#usr-huertas-adicionales-grid input[type=checkbox]').forEach(function(cb){
+        cb.checked = huertasAdicionalesSel.has(cb.value);
       });
       document.getElementById('usr-f-ve-soldadura').checked = !!u.VeCasillaSoldadura;
       document.getElementById('usr-f-ve-automotriz').checked = !!u.VeCasillaAutomotriz;
@@ -9206,6 +9223,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
   const veCasillaSoldadura = document.getElementById('usr-f-ve-soldadura').checked;
   const veCasillaAutomotriz = document.getElementById('usr-f-ve-automotriz').checked;
   const dieselCuadrosOcultos = Array.from(document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]:not(:checked)')).map(function(cb){ return cb.value; });
+  const huertasAdicionales = Array.from(document.querySelectorAll('#usr-huertas-adicionales-grid input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
 
   if(!nombre){
     statusEl.textContent = 'Escribe el nombre de la persona.';
@@ -9250,6 +9268,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       document.getElementById('usr-f-ve-soldadura').checked = false;
       document.getElementById('usr-f-ve-automotriz').checked = false;
       document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]').forEach(function(cb){ cb.checked = true; });
+      document.querySelectorAll('#usr-huertas-adicionales-grid input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
       cargarUsuarios();
     })
     .withFailureHandler(function(){
@@ -9258,7 +9277,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
       statusEl.className = 'usr-status err';
     })
-    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos);
+    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales);
 });
 
 // --- Rendimiento aceptable por equipo (dentro de la pestaña Diesel) ---

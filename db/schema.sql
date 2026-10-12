@@ -1607,6 +1607,32 @@ WHERE panel_permisos IS NOT NULL
   AND JSON_EXTRACT(panel_permisos, '$.ordenes_automotriz') IS NULL;
 
 -- ------------------------------------------------------------
+-- Huertas EXTRA por usuario, además de su huerta única de siempre
+-- (columna `huerta`) — ver huertasEfectivasDeFila_/datosReportarUsuario_/
+-- getMovimientosDeUsuario/confirmarLlegadaMovimiento/submitMovimientoSalida
+-- en server/handlers.js. Guarda un JSON tipo ["LA CRUZ","AURORA"]. NULL o
+-- un arreglo vacío significa "sigue teniendo solo su huerta de siempre",
+-- igual que antes de este cambio — por eso esto no afecta a nadie que no
+-- se configure explícitamente desde Usuarios. A diferencia de
+-- huertas_reportar (que solo afecta el desplegable del formulario
+-- Reportar), si esta persona queda con 2 o más huertas en total (la única
+-- + estas), eso también cambia: qué equipo ve en los selectores de
+-- Reportar y Diesel (antes filtrado solo por su huerta única), de qué
+-- huertas ve "llegadas pendientes" en Movimientos (antes solo la suya), y
+-- que al "Registrar salida" en Movimientos tenga que elegir desde cuál de
+-- sus huertas sale (antes era siempre la única).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'usuarios' AND column_name = 'huertas_adicionales'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE usuarios ADD COLUMN huertas_adicionales TEXT DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
 -- Catálogos simples que antes vivían "quemados" en el código del Panel
 -- (el arreglo HUERTAS, los botones CAMPO/COSECHA/..., el texto libre de
 -- "Tipo de unidad"): ahora se pueden dar de alta/editar/borrar desde la

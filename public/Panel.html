@@ -1206,8 +1206,8 @@
             <span class="ord-accion-label" id="ord-accion-label">Selecciona una orden (clic en la fila) para habilitar acciones</span>
             <button type="button" class="row-save" id="ord-accion-guardar" disabled>Guardar</button>
             <button type="button" class="row-view" id="ord-accion-ver" disabled>Ver</button>
-            <button type="button" class="row-view" id="ord-accion-editar" disabled>Editar</button>
-            <button type="button" class="row-view" id="ord-accion-eliminar" disabled>Eliminar</button>
+            <button type="button" class="row-view ord-btn-editar" id="ord-accion-editar" disabled>Editar</button>
+            <button type="button" class="row-view ord-btn-eliminar" id="ord-accion-eliminar" disabled>Eliminar</button>
             <span class="ord-accion-status" id="ord-accion-status"></span>
           </div>
         </div>
@@ -1263,6 +1263,16 @@
                 <div class="ord-columnas-panel-foot"><button type="button" id="ord-ordenar-soldadura-restablecer">Restablecer</button></div>
               </div>
             </div>
+          </div>
+        </div>
+        <div class="ord-summary-row" style="margin-bottom:8px;">
+          <div class="ord-accion-toolbar" id="ord-accion-toolbar-soldadura">
+            <span class="ord-accion-label" id="ord-accion-label-soldadura">Selecciona una orden (clic en la fila) para habilitar acciones</span>
+            <button type="button" class="row-save" id="ord-accion-guardar-soldadura" disabled>Guardar</button>
+            <button type="button" class="row-view" id="ord-accion-ver-soldadura" disabled>Ver</button>
+            <button type="button" class="row-view ord-btn-editar" id="ord-accion-editar-soldadura" disabled>Editar</button>
+            <button type="button" class="row-view ord-btn-eliminar" id="ord-accion-eliminar-soldadura" disabled>Eliminar</button>
+            <span class="ord-accion-status" id="ord-accion-status-soldadura"></span>
           </div>
         </div>
         <div class="toolbar" style="margin-top:8px;">
@@ -1347,6 +1357,16 @@
                 <div class="ord-columnas-panel-foot"><button type="button" id="ord-ordenar-automotriz-restablecer">Restablecer</button></div>
               </div>
             </div>
+          </div>
+        </div>
+        <div class="ord-summary-row" style="margin-bottom:8px;">
+          <div class="ord-accion-toolbar" id="ord-accion-toolbar-automotriz">
+            <span class="ord-accion-label" id="ord-accion-label-automotriz">Selecciona una orden (clic en la fila) para habilitar acciones</span>
+            <button type="button" class="row-save" id="ord-accion-guardar-automotriz" disabled>Guardar</button>
+            <button type="button" class="row-view" id="ord-accion-ver-automotriz" disabled>Ver</button>
+            <button type="button" class="row-view ord-btn-editar" id="ord-accion-editar-automotriz" disabled>Editar</button>
+            <button type="button" class="row-view ord-btn-eliminar" id="ord-accion-eliminar-automotriz" disabled>Eliminar</button>
+            <span class="ord-accion-status" id="ord-accion-status-automotriz"></span>
           </div>
         </div>
         <div class="toolbar" style="margin-top:8px;">
@@ -3531,8 +3551,8 @@ function ocultarControlesSoloLectura(){
       '#pview-ordenes .row-save',
       '#pview-ordenes [onclick^="abrirModalEditarOrden"]',
       '#pview-ordenes [onclick^="eliminarOrdenClick"]',
-      '#ord-accion-editar',
-      '#ord-accion-eliminar',
+      '.ord-btn-editar',
+      '.ord-btn-eliminar',
       '.orn-btn-nueva-orden',
       '#orn-btn-save',
       '#oed-btn-save',
@@ -3820,6 +3840,17 @@ function permisoDeSeccionOrden_(seccion){
 // departamento, estatus y rango de fechas, con su propio FILTRO_ESTADO_POR_SECCION
 // y su propia huerta/localStorage).
 const ORD_FILTRO_SUFIJO_A_SECCION = { '': 'principal', '-soldadura': 'soldadura', '-automotriz': 'automotriz' };
+
+// Inverso del mapa anterior: de qué sección a qué sufijo de ids usa su barra
+// de acciones (Guardar/Ver/Editar/Eliminar) -- cada sección tiene su propia
+// barra (ver ord-accion-toolbar[-soldadura/-automotriz] en el HTML), porque
+// la de la tabla principal se oculta junto con ord-principal-seccion-wrap
+// cuando el usuario no tiene acceso a Agrícola (ver aplicarVisibilidadSeccionesOrdenes_).
+const ORD_SECCION_A_SUFIJO = { principal: '', soldadura: '-soldadura', automotriz: '-automotriz' };
+function sufijoDeOrden_(orden){
+  const r = ALL_RECORDS.find(x => x.Orden === orden);
+  return ORD_SECCION_A_SUFIJO[r ? seccionDeOrden_(r) : 'principal'];
+}
 
 // Filtro de la pestaña Órdenes — hay un juego de controles por sección
 // (ver ORD_FILTRO_SUFIJO_A_SECCION) y cada uno filtra solo las órdenes de
@@ -4371,8 +4402,9 @@ function renderTablaAutomotriz(){
 
 function guardarFila(orden){
   const fa = document.getElementById('fa-' + orden).value;
-  const btn = document.getElementById('ord-accion-guardar');
-  const statusEl = document.getElementById('ord-accion-status');
+  const suf = sufijoDeOrden_(orden);
+  const btn = document.getElementById('ord-accion-guardar' + suf);
+  const statusEl = document.getElementById('ord-accion-status' + suf);
   const nombre = PANEL_USUARIO || '';
 
   btn.disabled = true;
@@ -4429,14 +4461,23 @@ function aplicarSeleccionOrden_(){
   // global de la pestaña (ver permisoDeSeccionOrden_/seccionDeOrden_).
   const registro = ordenSeleccionada ? ALL_RECORDS.find(r => r.Orden === ordenSeleccionada) : null;
   const puedeCapturarEstaOrden = !!registro && puedeCapturarPestana(permisoDeSeccionOrden_(seccionDeOrden_(registro)));
-
-  document.getElementById('ord-accion-ver').disabled = !ordenSeleccionada;
-  ['ord-accion-guardar', 'ord-accion-editar', 'ord-accion-eliminar'].forEach(id => {
-    document.getElementById(id).disabled = !ordenSeleccionada || !puedeCapturarEstaOrden;
-  });
-  document.getElementById('ord-accion-label').textContent = ordenSeleccionada
+  const etiqueta = ordenSeleccionada
     ? 'Orden seleccionada: ' + ordenSeleccionada + (puedeCapturarEstaOrden ? '' : ' (solo lectura en esta sección)')
     : 'Selecciona una orden (clic en la fila) para habilitar acciones';
+
+  // Cada sección (principal/Soldadura/Automotriz) tiene su propia barra de
+  // acciones -- ver ORD_SECCION_A_SUFIJO -- porque la de la tabla principal
+  // se oculta junto con esa sección cuando el usuario no tiene acceso a
+  // Agrícola. Se actualizan las tres (la que no exista en el DOM se omite).
+  Object.values(ORD_SECCION_A_SUFIJO).forEach(suf => {
+    const verBtn = document.getElementById('ord-accion-ver' + suf);
+    if(!verBtn) return;
+    verBtn.disabled = !ordenSeleccionada;
+    ['ord-accion-guardar' + suf, 'ord-accion-editar' + suf, 'ord-accion-eliminar' + suf].forEach(id => {
+      document.getElementById(id).disabled = !ordenSeleccionada || !puedeCapturarEstaOrden;
+    });
+    document.getElementById('ord-accion-label' + suf).textContent = etiqueta;
+  });
 }
 
 function seleccionarFilaOrden_(e){
@@ -4447,18 +4488,28 @@ function seleccionarFilaOrden_(e){
   if(!tr) return;
   const orden = tr.dataset.orden;
   ordenSeleccionada = (ordenSeleccionada === orden) ? null : orden;
-  document.getElementById('ord-accion-status').textContent = '';
-  document.getElementById('ord-accion-status').className = 'ord-accion-status';
+  Object.values(ORD_SECCION_A_SUFIJO).forEach(suf => {
+    const statusEl = document.getElementById('ord-accion-status' + suf);
+    if(!statusEl) return;
+    statusEl.textContent = '';
+    statusEl.className = 'ord-accion-status';
+  });
   aplicarSeleccionOrden_();
 }
 document.getElementById('table-body').addEventListener('click', seleccionarFilaOrden_);
 document.getElementById('table-body-soldadura').addEventListener('click', seleccionarFilaOrden_);
 document.getElementById('table-body-automotriz').addEventListener('click', seleccionarFilaOrden_);
 
-document.getElementById('ord-accion-guardar').addEventListener('click', () => { if(ordenSeleccionada) guardarFila(ordenSeleccionada); });
-document.getElementById('ord-accion-ver').addEventListener('click', () => { if(ordenSeleccionada) abrirModal(ordenSeleccionada); });
-document.getElementById('ord-accion-editar').addEventListener('click', () => { if(ordenSeleccionada) abrirModalEditarOrden(ordenSeleccionada); });
-document.getElementById('ord-accion-eliminar').addEventListener('click', () => { if(ordenSeleccionada) eliminarOrdenClick(ordenSeleccionada); });
+Object.values(ORD_SECCION_A_SUFIJO).forEach(suf => {
+  const gBtn = document.getElementById('ord-accion-guardar' + suf);
+  const vBtn = document.getElementById('ord-accion-ver' + suf);
+  const eBtn = document.getElementById('ord-accion-editar' + suf);
+  const dBtn = document.getElementById('ord-accion-eliminar' + suf);
+  if(gBtn) gBtn.addEventListener('click', () => { if(ordenSeleccionada) guardarFila(ordenSeleccionada); });
+  if(vBtn) vBtn.addEventListener('click', () => { if(ordenSeleccionada) abrirModal(ordenSeleccionada); });
+  if(eBtn) eBtn.addEventListener('click', () => { if(ordenSeleccionada) abrirModalEditarOrden(ordenSeleccionada); });
+  if(dBtn) dBtn.addEventListener('click', () => { if(ordenSeleccionada) eliminarOrdenClick(ordenSeleccionada); });
+});
 
 document.querySelectorAll('thead th[data-key]').forEach(th => {
   th.addEventListener('click', () => {

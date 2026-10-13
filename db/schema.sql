@@ -2006,6 +2006,37 @@ PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
 
+-- ------------------------------------------------------------
+-- Odómetro del equipo al salir y al llegar, en un movimiento (ver
+-- submitMovimientoSalida/confirmarLlegadaMovimiento/crearMovimientoPanel/
+-- editarMovimiento en server/handlers.js). Ambos opcionales y NULL por
+-- defecto — no todo equipo tiene odómetro (implementos, por ejemplo), así
+-- que nunca es obligatorio capturarlo. Mismo tipo que `lectura` en diesel
+-- (DECIMAL(12,2), kilómetros). Con los dos capturados se puede calcular
+-- cuánto recorrió el equipo en ese traslado (KmRecorridos), igual que
+-- HorasLabor se calcula en Diesel a partir de dos lecturas consecutivas.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'movimientos_maquinaria' AND column_name = 'odometro_salida'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE movimientos_maquinaria ADD COLUMN odometro_salida DECIMAL(12,2) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'movimientos_maquinaria' AND column_name = 'odometro_llegada'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE movimientos_maquinaria ADD COLUMN odometro_llegada DECIMAL(12,2) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- Primer listado real de operadores (flotilla de vehículos/automotriz),
 -- importado del Excel que mandó Carlos. INSERT IGNORE: si ya existe un
 -- operador con ese nombre (porque alguien ya lo dio de alta a mano, o por

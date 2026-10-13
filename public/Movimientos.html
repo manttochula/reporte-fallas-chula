@@ -277,6 +277,10 @@
           </select>
         </div>
         <div class="field">
+          <label>Odómetro (opcional)</label>
+          <input type="number" inputmode="decimal" step="0.1" id="f-odometro" placeholder="Kilometraje actual, si el equipo tiene">
+        </div>
+        <div class="field">
           <label>Foto del equipo (opcional)</label>
           <div class="media-actions" id="media-actions-salida">
             <div class="media-btn" id="btn-take-photo-salida">
@@ -676,6 +680,7 @@ document.getElementById('btn-submit-salida').addEventListener('click', function(
   // sola, el campo está oculto y el origen es implícito (ver iniciarApp).
   var requiereOrigen = huertasUsuario && huertasUsuario.length > 1;
   var huertaOrigen = huertaOrigenSeleccionada();
+  var odometroTexto = document.getElementById('f-odometro').value.trim();
   status.classList.remove('show', 'ok', 'err');
 
   if(!unidadSeleccionada){
@@ -708,6 +713,7 @@ document.getElementById('btn-submit-salida').addEventListener('click', function(
         var selOrigenLimpiar = document.getElementById('f-huerta-origen');
         if(selOrigenLimpiar) selOrigenLimpiar.selectedIndex = 0;
         document.getElementById('f-huerta-destino').value = '';
+        document.getElementById('f-odometro').value = '';
         document.getElementById('f-comentario').value = '';
         fotoSalidaDataUrl = null;
         photoBoxSalida.classList.remove('has-photo');
@@ -734,6 +740,7 @@ document.getElementById('btn-submit-salida').addEventListener('click', function(
       unidadLabel: unidadSeleccionada.l,
       huertaOrigen: huertaOrigen,
       huertaDestino: huertaDestino,
+      odometroSalida: odometroTexto === '' ? null : odometroTexto,
       comentario: comentario || null,
       foto: fotoSalidaDataUrl,
     });
@@ -780,6 +787,13 @@ function renderPendientes(lista){
       '<div class="mov-meta">Desde: ' + escapeHtml(m.HuertaOrigen) + ' &middot; Reportó: ' + escapeHtml(m.UsuarioSalida) + '<br>Salió: ' + escapeHtml(formatFecha(m.FechaSalida)) + '</div>' +
       (m.ComentarioSalida ? '<div class="mov-comentario">"' + escapeHtml(m.ComentarioSalida) + '"</div>' : '') +
       renderFotoMovThumb(m.FotoSalidaURL, 'Foto de salida') +
+      (m.OdometroSalida !== null && m.OdometroSalida !== undefined && m.OdometroSalida !== ''
+        ? '<div class="mov-meta">Odómetro de salida: ' + escapeHtml(String(m.OdometroSalida)) + ' km</div>'
+        : '') +
+      '<div class="field" style="margin:8px 0;">' +
+        '<label style="font-size:12px;">Odómetro al llegar (opcional)</label>' +
+        '<input type="number" inputmode="decimal" step="0.1" class="odometro-llegada" placeholder="Ej. 125430">' +
+      '</div>' +
       '<textarea class="comentario-llegada" placeholder="Comentario de llegada (opcional)"></textarea>' +
       '<div class="mov-foto-llegada-wrap" style="margin-bottom:8px;">' +
         '<div class="media-btn mov-foto-btn" style="display:inline-flex;width:auto;padding:8px 12px;">' +
@@ -807,6 +821,8 @@ function renderPendientes(lista){
     var btn = card.querySelector('.confirm-btn');
     btn.addEventListener('click', function(){
       var comentario = card.querySelector('.comentario-llegada').value.trim();
+      var odometroLlegadaTexto = card.querySelector('.odometro-llegada').value.trim();
+      var odometroLlegada = odometroLlegadaTexto === '' ? null : odometroLlegadaTexto;
       btn.disabled = true;
       btn.textContent = 'Confirmando...';
       google.script.run
@@ -826,7 +842,7 @@ function renderPendientes(lista){
           btn.textContent = 'Confirmar llegada';
           alert('Error de conexión. Intenta de nuevo.');
         })
-        .confirmarLlegadaMovimiento(folio, nombreUsuario, comentario || null, fotosLlegadaMov[folio] || null);
+        .confirmarLlegadaMovimiento(folio, nombreUsuario, comentario || null, fotosLlegadaMov[folio] || null, odometroLlegada);
     });
   });
 }
@@ -843,7 +859,9 @@ function renderSalidas(lista){
       '<div class="mov-top"><span class="folio">' + escapeHtml(m.Folio) + '</span><span class="status-pill ' + (esConfirmado ? 'confirmado' : 'pendiente') + '">' + (esConfirmado ? 'Confirmado' : 'Pendiente') + '</span></div>' +
       '<div class="mov-unit">' + escapeHtml(m.Unidad) + '</div>' +
       '<div class="mov-meta">Hacia: ' + escapeHtml(m.HuertaDestino) + ' &middot; Salió: ' + escapeHtml(formatFecha(m.FechaSalida)) +
-      (esConfirmado ? ('<br>Recibió: ' + escapeHtml(m.UsuarioLlegada) + ' &middot; Llegó: ' + escapeHtml(formatFecha(m.FechaLlegada))) : '') +
+      (m.OdometroSalida !== null && m.OdometroSalida !== undefined && m.OdometroSalida !== '' ? ' &middot; Odómetro: ' + escapeHtml(String(m.OdometroSalida)) + ' km' : '') +
+      (esConfirmado ? ('<br>Recibió: ' + escapeHtml(m.UsuarioLlegada) + ' &middot; Llegó: ' + escapeHtml(formatFecha(m.FechaLlegada)) +
+        (m.OdometroLlegada !== null && m.OdometroLlegada !== undefined && m.OdometroLlegada !== '' ? ' &middot; Odómetro: ' + escapeHtml(String(m.OdometroLlegada)) + ' km' : '')) : '') +
       '</div>' +
       renderFotoMovThumb(m.FotoSalidaURL, 'Foto de salida') +
       renderFotoMovThumb(m.FotoLlegadaURL, 'Foto de llegada') +

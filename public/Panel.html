@@ -1964,12 +1964,14 @@
           <div class="maq-field"><label>Fecha salida *</label><input type="datetime-local" id="mv-f-fecha-salida"></div>
         </div>
         <div class="maq-field"><label>Comentario salida</label><input type="text" id="mv-f-comentario-salida"></div>
+        <div class="maq-field"><label>Odómetro salida (opcional)</label><input type="number" step="0.01" id="mv-f-odometro-salida"></div>
         <div class="maq-field" id="mv-f-foto-salida-wrap" style="display:none;"></div>
         <div class="maq-field-row">
           <div class="maq-field"><label>Usuario llegada</label><input type="text" id="mv-f-usuario-llegada"></div>
           <div class="maq-field"><label>Fecha llegada</label><input type="datetime-local" id="mv-f-fecha-llegada"></div>
         </div>
         <div class="maq-field"><label>Comentario llegada</label><input type="text" id="mv-f-comentario-llegada"></div>
+        <div class="maq-field"><label>Odómetro llegada (opcional)</label><input type="number" step="0.01" id="mv-f-odometro-llegada"></div>
         <div class="maq-field" id="mv-f-foto-llegada-wrap" style="display:none;"></div>
         <div class="maq-field"><label>Estatus *</label>
           <select id="mv-f-estado">
@@ -6616,16 +6618,18 @@ document.getElementById('mv-export').addEventListener('click', function(){
     {header:'Usuario salida', key:'usuarioSalida', width:18},
     {header:'Fecha salida', key:'fechaSalida', width:16},
     {header:'Comentario salida', key:'comentarioSalida', width:30, wrap:true},
+    {header:'Odómetro salida', key:'odometroSalida', width:14},
     {header:'Usuario llegada', key:'usuarioLlegada', width:18},
     {header:'Fecha llegada', key:'fechaLlegada', width:16},
     {header:'Comentario llegada', key:'comentarioLlegada', width:30, wrap:true},
+    {header:'Odómetro llegada', key:'odometroLlegada', width:14},
     {header:'Estado', key:'estado', width:14},
   ];
   const filas = records.map(function(r){
     return {
       folio: r.Folio, unidad: r.Unidad, huertaOrigen: r.HuertaOrigen, huertaDestino: r.HuertaDestino,
-      usuarioSalida: r.UsuarioSalida, fechaSalida: r.FechaSalida, comentarioSalida: r.ComentarioSalida,
-      usuarioLlegada: r.UsuarioLlegada, fechaLlegada: r.FechaLlegada, comentarioLlegada: r.ComentarioLlegada, estado: r.Estado,
+      usuarioSalida: r.UsuarioSalida, fechaSalida: r.FechaSalida, comentarioSalida: r.ComentarioSalida, odometroSalida: r.OdometroSalida,
+      usuarioLlegada: r.UsuarioLlegada, fechaLlegada: r.FechaLlegada, comentarioLlegada: r.ComentarioLlegada, odometroLlegada: r.OdometroLlegada, estado: r.Estado,
     };
   });
   descargarComoExcel_('Movimientos de maquinaria', 'Generado el ' + new Date().toLocaleString('es-MX'),
@@ -8002,6 +8006,7 @@ function abrirModalMovimiento(mov){
     document.getElementById('mv-f-usuario-salida').value = mov.UsuarioSalida || '';
     document.getElementById('mv-f-fecha-salida').value = dateTimeInputValue(mov.FechaSalida);
     document.getElementById('mv-f-comentario-salida').value = mov.ComentarioSalida || '';
+    document.getElementById('mv-f-odometro-salida').value = (mov.OdometroSalida === null || mov.OdometroSalida === undefined) ? '' : mov.OdometroSalida;
     const fotoSalidaWrap = document.getElementById('mv-f-foto-salida-wrap');
     if(mov.FotoSalidaURL){
       fotoSalidaWrap.innerHTML = '<a class="link-btn" href="' + mov.FotoSalidaURL + '" target="_blank" rel="noopener" style="color:var(--amber);font-size:13px;">🖼️ Ver foto de salida</a>';
@@ -8012,6 +8017,7 @@ function abrirModalMovimiento(mov){
     document.getElementById('mv-f-usuario-llegada').value = mov.UsuarioLlegada || '';
     document.getElementById('mv-f-fecha-llegada').value = dateTimeInputValue(mov.FechaLlegada);
     document.getElementById('mv-f-comentario-llegada').value = mov.ComentarioLlegada || '';
+    document.getElementById('mv-f-odometro-llegada').value = (mov.OdometroLlegada === null || mov.OdometroLlegada === undefined) ? '' : mov.OdometroLlegada;
     const fotoLlegadaWrap = document.getElementById('mv-f-foto-llegada-wrap');
     if(mov.FotoLlegadaURL){
       fotoLlegadaWrap.innerHTML = '<a class="link-btn" href="' + mov.FotoLlegadaURL + '" target="_blank" rel="noopener" style="color:var(--amber);font-size:13px;">🖼️ Ver foto de llegada</a>';
@@ -8041,10 +8047,12 @@ function abrirModalMovimiento(mov){
     document.getElementById('mv-f-usuario-salida').value = PANEL_USUARIO || '';
     document.getElementById('mv-f-fecha-salida').value = dateTimeInputValue(new Date().toISOString());
     document.getElementById('mv-f-comentario-salida').value = '';
+    document.getElementById('mv-f-odometro-salida').value = '';
     document.getElementById('mv-f-foto-salida-wrap').style.display = 'none';
     document.getElementById('mv-f-usuario-llegada').value = '';
     document.getElementById('mv-f-fecha-llegada').value = '';
     document.getElementById('mv-f-comentario-llegada').value = '';
+    document.getElementById('mv-f-odometro-llegada').value = '';
     document.getElementById('mv-f-foto-llegada-wrap').style.display = 'none';
     document.getElementById('mv-f-estado').value = 'pendiente';
     document.getElementById('mv-f-audit-wrap').style.display = 'none';
@@ -8077,9 +8085,11 @@ document.getElementById('mv-btn-save').addEventListener('click', function(){
   const usuarioSalida = document.getElementById('mv-f-usuario-salida').value.trim();
   const fechaSalida = document.getElementById('mv-f-fecha-salida').value;
   const comentarioSalida = document.getElementById('mv-f-comentario-salida').value.trim();
+  const odometroSalida = document.getElementById('mv-f-odometro-salida').value.trim();
   const usuarioLlegada = document.getElementById('mv-f-usuario-llegada').value.trim();
   const fechaLlegada = document.getElementById('mv-f-fecha-llegada').value;
   const comentarioLlegada = document.getElementById('mv-f-comentario-llegada').value.trim();
+  const odometroLlegada = document.getElementById('mv-f-odometro-llegada').value.trim();
   const estado = document.getElementById('mv-f-estado').value;
   const statusEl = document.getElementById('mv-modal-status');
   const btn = document.getElementById('mv-btn-save');
@@ -8108,9 +8118,11 @@ document.getElementById('mv-btn-save').addEventListener('click', function(){
     usuarioSalida: usuarioSalida,
     fechaSalida: fechaSalida,
     comentarioSalida: comentarioSalida,
+    odometroSalida: odometroSalida === '' ? null : odometroSalida,
     usuarioLlegada: usuarioLlegada,
     fechaLlegada: fechaLlegada,
     comentarioLlegada: comentarioLlegada,
+    odometroLlegada: odometroLlegada === '' ? null : odometroLlegada,
     estado: estado
   };
 

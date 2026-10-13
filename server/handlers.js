@@ -306,9 +306,11 @@ const MOVIMIENTO_SELECT = `
     usuario_salida      AS UsuarioSalida,
     fecha_salida        AS FechaSalida,
     comentario_salida   AS ComentarioSalida,
+    odometro_salida     AS OdometroSalida,
     usuario_llegada     AS UsuarioLlegada,
     fecha_llegada       AS FechaLlegada,
     comentario_llegada  AS ComentarioLlegada,
+    odometro_llegada    AS OdometroLlegada,
     estado              AS Estado,
     foto_salida_url     AS FotoSalidaURL,
     foto_llegada_url    AS FotoLlegadaURL,
@@ -1815,6 +1817,15 @@ async function guardarCargasGasolinaLote(code, nombreUsuario, cargas) {
 // (recarga de página, sesión ya guardada en localStorage) y validarUsuario
 // (login recién hecho), para no repetir el mismo JSON.parse en los dos
 // lados.
+// Convierte un valor opcional de formulario (puede venir vacío, undefined
+// o no numérico) a número o null — usado por los campos de odómetro de
+// Movimientos (ver odometro_salida/odometro_llegada en db/schema.sql).
+function numeroOpcional_(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
 // Arreglo de huertas (ver huertas_adicionales en db/schema.sql) tal cual
 // viene guardado, limpio de vacíos/espacios.
 function parseHuertasJson_(crudo) {
@@ -2147,12 +2158,16 @@ async function submitMovimientoSalida(data) {
     let fotoSalidaUrl = '';
     if (data.foto) fotoSalidaUrl = await guardarArchivo_(data.foto);
 
+    // Odómetro al salir (opcional — no todo equipo tiene, ver
+    // db/schema.sql junto a odometro_salida/odometro_llegada).
+    const odometroSalidaValido = numeroOpcional_(data.odometroSalida);
+
     const folio = await siguienteFolio_(pool, 'movimiento', 'MOV', 5);
     await pool.query(
       `INSERT INTO movimientos_maquinaria
-        (folio, codigo_unidad, unidad, huerta_origen, huerta_destino, usuario_salida, fecha_salida, comentario_salida, estado, foto_salida_url)
-       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, 'pendiente', ?)`,
-      [folio, data.unidad, data.unidadLabel || '', huertaOrigen, data.huertaDestino, nombre, data.comentario || null, fotoSalidaUrl || null]
+        (folio, codigo_unidad, unidad, huerta_origen, huerta_destino, usuario_salida, fecha_salida, comentario_salida, odometro_salida, estado, foto_salida_url)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, 'pendiente', ?)`,
+      [folio, data.unidad, data.unidadLabel || '', huertaOrigen, data.huertaDestino, nombre, data.comentario || null, odometroSalidaValido, fotoSalidaUrl || null]
     );
     return { success: true, folio, fotoUrl: fotoSalidaUrl };
   } catch (err) {
@@ -2183,7 +2198,7 @@ async function getMovimientosDeUsuario(nombre) {
   return { huerta, huertas, pendientesLlegada: normalizaFilas(pendientes), misSalidas: normalizaFilas(misSalidas) };
 }
 
-async function confirmarLlegadaMovimiento(folio, nombre, comentario, foto) {
+async function confirmarLlegadaMovimiento(folio, nombre, comentario, foto, odometroLlegada) {
   try {
     if (!folio || !nombre) return { success: false, error: 'Faltan datos para confirmar la llegada.' };
     const [rows] = await pool.query('SELECT * FROM movimientos_maquinaria WHERE folio = ?', [folio]);
@@ -2200,9 +2215,12 @@ async function confirmarLlegadaMovimiento(folio, nombre, comentario, foto) {
     let fotoLlegadaUrl = '';
     if (foto) fotoLlegadaUrl = await guardarArchivo_(foto);
 
+    // Odómetro al llegar (opcional, igual que al salir).
+    const odometroLlegadaValido = numeroOpcional_(odometroLlegada);
+
     await pool.query(
-      "UPDATE movimientos_maquinaria SET estado = 'confirmado', usuario_llegada = ?, fecha_llegada = NOW(), comentario_llegada = ?, foto_llegada_url = ? WHERE folio = ?",
-      [nombre, comentario || null, fotoLlegadaUrl || null, folio]
+      "UPDATE movimientos_maquinaria SET estado = 'confirmado', usuario_llegada = ?, fecha_llegada = NOW(), comentario_llegada = ?, foto_llegada_url = ?, odometro_llegada = ? WHERE folio = ?",
+      [nombre, comentario || null, fotoLlegadaUrl || null, odometroLlegadaValido, folio]
     );
 
     await sincronizarUbicacionOrdenesAbiertas_(mov.codigo_unidad, mov.huerta_destino, 'el movimiento ' + folio, nombre);
@@ -2242,9 +2260,11 @@ async function crearMovimientoPanel(code, nombreUsuario, data) {
     const usuarioSalida = (data.usuarioSalida || '').toString().trim();
     const fechaSalida = normalizarFechaLocal_(data.fechaSalida);
     const comentarioSalida = (data.comentarioSalida || '').toString().trim() || null;
+    const odometroSalida = numeroOpcional_(data.odometroSalida);
     const usuarioLlegada = (data.usuarioLlegada || '').toString().trim() || null;
     const fechaLlegada = normalizarFechaLocal_(data.fechaLlegada);
     const comentarioLlegada = (data.comentarioLlegada || '').toString().trim() || null;
+    const odometroLlegada = numeroOpcional_(data.odometroLlegada);
     const estado = (data.estado || 'pendiente').toString().trim();
 
     if (!codigoUnidad) return { success: false, error: 'Selecciona la unidad.' };
@@ -2266,11 +2286,11 @@ async function crearMovimientoPanel(code, nombreUsuario, data) {
     const folio = await siguienteFolio_(pool, 'movimiento', 'MOV', 5);
     const [result] = await pool.query(
       `INSERT INTO movimientos_maquinaria
-        (folio, codigo_unidad, unidad, huerta_origen, huerta_destino, usuario_salida, fecha_salida, comentario_salida,
-         usuario_llegada, fecha_llegada, comentario_llegada, estado)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [folio, codigoUnidad, unidadFinal, huertaOrigen, huertaDestino, usuarioSalida, fechaSalida, comentarioSalida,
-        usuarioLlegada, fechaLlegada, comentarioLlegada, estado]
+        (folio, codigo_unidad, unidad, huerta_origen, huerta_destino, usuario_salida, fecha_salida, comentario_salida, odometro_salida,
+         usuario_llegada, fecha_llegada, comentario_llegada, odometro_llegada, estado)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [folio, codigoUnidad, unidadFinal, huertaOrigen, huertaDestino, usuarioSalida, fechaSalida, comentarioSalida, odometroSalida,
+        usuarioLlegada, fechaLlegada, comentarioLlegada, odometroLlegada, estado]
     );
 
     if (estado === 'confirmado') {
@@ -2303,9 +2323,11 @@ async function editarMovimiento(code, nombreUsuario, id, data) {
     const usuarioSalida = (data.usuarioSalida || '').toString().trim();
     const fechaSalida = normalizarFechaLocal_(data.fechaSalida);
     const comentarioSalida = (data.comentarioSalida || '').toString().trim() || null;
+    const odometroSalida = numeroOpcional_(data.odometroSalida);
     const usuarioLlegada = (data.usuarioLlegada || '').toString().trim() || null;
     const fechaLlegada = normalizarFechaLocal_(data.fechaLlegada);
     const comentarioLlegada = (data.comentarioLlegada || '').toString().trim() || null;
+    const odometroLlegada = numeroOpcional_(data.odometroLlegada);
     const estado = (data.estado || '').toString().trim();
 
     if (!huertaOrigen || !huertaDestino) return { success: false, error: 'Selecciona la huerta de origen y destino.' };
@@ -2320,10 +2342,10 @@ async function editarMovimiento(code, nombreUsuario, id, data) {
 
     await pool.query(
       `UPDATE movimientos_maquinaria SET huerta_origen = ?, huerta_destino = ?, usuario_salida = ?, fecha_salida = ?,
-        comentario_salida = ?, usuario_llegada = ?, fecha_llegada = ?, comentario_llegada = ?, estado = ?,
+        comentario_salida = ?, odometro_salida = ?, usuario_llegada = ?, fecha_llegada = ?, comentario_llegada = ?, odometro_llegada = ?, estado = ?,
         modificado_por = ?, modificado_en = NOW()
        WHERE id = ?`,
-      [huertaOrigen, huertaDestino, usuarioSalida, fechaSalida, comentarioSalida, usuarioLlegada, fechaLlegada, comentarioLlegada, estado, modificadoPor, idNum]
+      [huertaOrigen, huertaDestino, usuarioSalida, fechaSalida, comentarioSalida, odometroSalida, usuarioLlegada, fechaLlegada, comentarioLlegada, odometroLlegada, estado, modificadoPor, idNum]
     );
 
     if (estado === 'confirmado') {

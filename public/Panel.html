@@ -1149,8 +1149,9 @@
         <div class="ord-pend-atencion-titulo" id="ord-pend-atencion-titulo">📋 Reportadas en los últimos 5 días, sin fecha de atención</div>
         <div class="ord-pend-atencion-lista" id="ord-pend-atencion-lista"></div>
       </div>
+      <div id="ord-principal-seccion-wrap">
       <div class="toolbar">
-        <button type="button" class="btn-amber" id="orn-btn-abrir">+ Nueva orden</button>
+        <button type="button" class="btn-amber orn-btn-nueva-orden" id="orn-btn-abrir">+ Nueva orden</button>
         <input type="text" id="f-search" placeholder="Buscar por orden, unidad, huerta o descripción...">
         <select id="f-huerta"><option value="">Todas las huertas</option></select>
         <select id="f-departamento"><option value="">Todos los departamentos</option></select>
@@ -1236,6 +1237,7 @@
           </table>
         </div>
       </div>
+      </div>
 
       <div class="dz-resumen" id="ord-soldadura-wrap">
         <div class="ord-soldadura-sticky-head ord-sticky-head-flex">
@@ -1264,6 +1266,7 @@
           </div>
         </div>
         <div class="toolbar" style="margin-top:8px;">
+          <button type="button" class="btn-amber orn-btn-nueva-orden" id="orn-btn-abrir-soldadura">+ Nueva orden</button>
           <input type="text" id="f-search-soldadura" placeholder="Buscar por orden, unidad, huerta o descripción...">
           <select id="f-huerta-soldadura"><option value="">Todas las huertas</option></select>
           <select id="f-departamento-soldadura"><option value="">Todos los departamentos</option></select>
@@ -1347,6 +1350,7 @@
           </div>
         </div>
         <div class="toolbar" style="margin-top:8px;">
+          <button type="button" class="btn-amber orn-btn-nueva-orden" id="orn-btn-abrir-automotriz">+ Nueva orden</button>
           <input type="text" id="f-search-automotriz" placeholder="Buscar por orden, unidad, operador o descripción...">
           <select id="f-huerta-automotriz"><option value="">Todas las huertas</option></select>
           <select id="f-departamento-automotriz"><option value="">Todos los departamentos</option></select>
@@ -3529,7 +3533,7 @@ function ocultarControlesSoloLectura(){
       '#pview-ordenes [onclick^="eliminarOrdenClick"]',
       '#ord-accion-editar',
       '#ord-accion-eliminar',
-      '#orn-btn-abrir',
+      '.orn-btn-nueva-orden',
       '#orn-btn-save',
       '#oed-btn-save',
       '#modal-save',
@@ -5433,7 +5437,7 @@ document.getElementById('btn-export-encargados-pdf-automotriz').addEventListener
 
 // --- Pestañas: Órdenes / Diesel / Movimientos / Maquinaria / Catálogo / Mantenimiento / Usuarios ---
 const ptabOrdenes = document.getElementById('ptab-ordenes');
-const ordPrincipalWrap = document.getElementById('ord-principal-wrap');
+const ordPrincipalWrap = document.getElementById('ord-principal-seccion-wrap');
 const ordSoldaduraWrap = document.getElementById('ord-soldadura-wrap');
 const ordAutomotrizWrap = document.getElementById('ord-automotriz-wrap');
 const ptabDiesel = document.getElementById('ptab-diesel');
@@ -8436,7 +8440,7 @@ document.addEventListener('click', function(e){
   }
 });
 
-function abrirModalNuevaOrden(){
+function abrirModalNuevaOrden(seccionPreferida){
   if(ALL_MAQUINARIA.length === 0){ cargarMaquinaria(); }
   poblarSelectHuertaOrdenNueva();
   ornUnidadSeleccionada = null;
@@ -8453,8 +8457,12 @@ function abrirModalNuevaOrden(){
   // vuelve a validar esto de forma independiente, ver crearOrdenPanel en
   // server/handlers.js). Si además no tiene capturar en Agrícola/principal
   // (la sección que queda si ninguna casilla está marcada), se precarga y
-  // bloquea la primera sección a la que sí tenga acceso, para no dejarlo
-  // con una combinación que de todos modos se rechazaría al guardar.
+  // bloquea la sección correspondiente: la del botón "+ Nueva orden" que se
+  // haya usado (seccionPreferida, cuando se abrió desde dentro de Soldadura
+  // o Automotriz -- ver orn-btn-abrir-soldadura/orn-btn-abrir-automotriz más
+  // abajo) si el usuario sí puede capturar ahí, o si no la primera sección a
+  // la que sí tenga acceso -- para no dejarlo con una combinación que de
+  // todos modos se rechazaría al guardar.
   const chkSoldadura = document.getElementById('orn-f-soldadura');
   const chkAutomotriz = document.getElementById('orn-f-automotriz');
   const puedeAgricola_ = puedeCapturarPestana('ordenes');
@@ -8465,7 +8473,9 @@ function abrirModalNuevaOrden(){
   chkSoldadura.disabled = !puedeSoldadura_;
   chkAutomotriz.disabled = !puedeAutomotriz_;
   if(!puedeAgricola_){
-    if(puedeSoldadura_){ chkSoldadura.checked = true; chkSoldadura.disabled = true; }
+    if(seccionPreferida === 'soldadura' && puedeSoldadura_){ chkSoldadura.checked = true; chkSoldadura.disabled = true; }
+    else if(seccionPreferida === 'automotriz' && puedeAutomotriz_){ chkAutomotriz.checked = true; chkAutomotriz.disabled = true; }
+    else if(puedeSoldadura_){ chkSoldadura.checked = true; chkSoldadura.disabled = true; }
     else if(puedeAutomotriz_){ chkAutomotriz.checked = true; chkAutomotriz.disabled = true; }
   }
 
@@ -8479,7 +8489,9 @@ function cerrarModalNuevaOrden(){
   ornModalOverlay.classList.remove('open');
 }
 
-document.getElementById('orn-btn-abrir').addEventListener('click', abrirModalNuevaOrden);
+document.getElementById('orn-btn-abrir').addEventListener('click', function(){ abrirModalNuevaOrden(); });
+document.getElementById('orn-btn-abrir-soldadura').addEventListener('click', function(){ abrirModalNuevaOrden('soldadura'); });
+document.getElementById('orn-btn-abrir-automotriz').addEventListener('click', function(){ abrirModalNuevaOrden('automotriz'); });
 document.getElementById('orn-modal-close').addEventListener('click', cerrarModalNuevaOrden);
 ornModalOverlay.addEventListener('click', function(e){
   if(e.target === ornModalOverlay) cerrarModalNuevaOrden();

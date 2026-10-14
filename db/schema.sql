@@ -2118,6 +2118,25 @@ PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
 
+-- categoria (catálogo "Tipos de unidad"): 'agricola' o 'automotriz', NULL si
+-- todavía no se clasifica. Se usa para decidir sola, sin pedirle nada a
+-- quien reporta desde el celular, si un reporte nuevo es de Agrícola o de
+-- Automotriz (ver clasificarReporteAutomatico_ en server/handlers.js) —
+-- comparando el texto de maquinaria.tipo_unidad contra el nombre de cada
+-- tipo de unidad de este catálogo. Un equipo sin tipo de unidad capturado,
+-- o cuyo tipo de unidad todavía no tiene categoría asignada aquí, cae en
+-- Agrícola/principal (el comportamiento de siempre), no se queda sin orden.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'tipos_unidad' AND column_name = 'categoria'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE tipos_unidad ADD COLUMN categoria VARCHAR(20) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- Primer listado real de operadores (flotilla de vehículos/automotriz),
 -- importado del Excel que mandó Carlos. INSERT IGNORE: si ya existe un
 -- operador con ese nombre (porque alguien ya lo dio de alta a mano, o por

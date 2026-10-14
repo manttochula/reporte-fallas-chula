@@ -395,6 +395,103 @@ function normalizaFilas(rows) {
 // Reportes de falla
 // ---------------------------------------------------------------
 
+// Clasificación automática de la sección de Órdenes para un reporte NUEVO
+// capturado desde el celular (Index.html, submitReporte abajo). Reemplaza
+// las antiguas casillas manuales "Es trabajo de Soldadura"/"Es trabajo
+// Automotriz" del formulario de Reportar -- ahora el servidor decide solo,
+// sin pedirle nada extra a quien reporta ("automático y silencioso", como
+// lo pidió Carlos). No aplica a crearOrdenPanel (el Panel sigue dejando
+// elegir la sección a mano, eso no cambia).
+//
+// Orden de prioridad (cada paso solo se evalúa si el anterior no aplicó):
+//   1) Reparaciones con terceros: SIEMPRE que el equipo esté habilitado en
+//      el Catálogo ("Admite reparación con terceros"), sin importar la
+//      descripción ni el tipo de unidad -- "siempre que el equipo sea
+//      elegible", tal cual lo pidió Carlos. Por encima incluso de
+//      Soldadura/Automotriz/Llantas.
+//   2) Soldadura: si la descripción menciona palabras relacionadas (ver
+//      PALABRAS_SOLDADURA_ abajo).
+//   3) Automotriz: si el "Tipo de unidad" del equipo (Catálogo) tiene
+//      categoría "automotriz" (columna tipos_unidad.categoria, asignada a
+//      mano por Carlos en Catálogo → Tipos de unidad).
+//   4) Llantas y Ponches: si la descripción menciona palabras relacionadas
+//      (ver PALABRAS_LLANTAS_ abajo).
+//   5) Agrícola/principal: si ninguna de las anteriores aplicó -- incluye
+//      equipos sin tipo de unidad capturado, o con un tipo de unidad que
+//      todavía no tiene categoría asignada en el Catálogo (nunca se quedan
+//      sin poder reportar, solo caen en la sección de siempre).
+// Mismo orden relativo que ya usaba seccionDeFila_ para Soldadura/
+// Automotriz/Llantas/principal -- lo único nuevo es que Terceros ahora va
+// primero en vez de entre Llantas y principal, por ser "siempre que el
+// equipo sea elegible" en vez de depender de la descripción.
+const PALABRAS_SOLDADURA_ = ['soldar', 'soldadura', 'soldado', 'soldada', 'soldador'];
+const PALABRAS_LLANTAS_ = [
+  'llanta', 'llantas', 'ponche', 'ponchada', 'ponchado', 'ponchadura',
+  'rin', 'rines', 'neumatico', 'neumaticos', 'camara de aire', 'birlo', 'birlos',
+];
+
+function normalizarTextoBusqueda_(s) {
+  return (s || '')
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+function descripcionContienePalabra_(descripcion, listaPalabras) {
+  const texto = normalizarTextoBusqueda_(descripcion);
+  if (!texto) return false;
+  return listaPalabras.some((p) => texto.indexOf(normalizarTextoBusqueda_(p)) !== -1);
+}
+
+// Busca la categoría ('agricola'/'automotriz') del tipo de unidad de un
+// equipo, comparando por nombre contra el catálogo "Tipos de unidad" (no
+// hay llave foránea entre maquinaria.tipo_unidad y tipos_unidad -- es texto
+// libre que debería coincidir con un nombre del catálogo, igual que ya
+// pasa con el desplegable "Tipo de unidad" del modal de Catálogo). Regresa
+// null si el equipo no tiene tipo de unidad, o si ese tipo de unidad no
+// está en el catálogo, o si está pero sin categoría asignada todavía.
+async function categoriaTipoUnidad_(tipoUnidadTexto) {
+  const texto = (tipoUnidadTexto || '').toString().trim();
+  if (!texto) return null;
+  const [rows] = await pool.query(
+    'SELECT categoria FROM tipos_unidad WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    [texto]
+  );
+  return rows.length > 0 ? (rows[0].categoria || null) : null;
+}
+
+async function clasificarReporteAutomatico_(codigoUnidad, descripcion) {
+  const codigo = (codigoUnidad || '').toString().trim();
+  let tipoUnidad = '';
+  let admiteTerceros = false;
+  if (codigo) {
+    const [rows] = await pool.query(
+      'SELECT tipo_unidad, admite_terceros FROM maquinaria WHERE codigo_unidad = ?',
+      [codigo]
+    );
+    if (rows.length > 0) {
+      tipoUnidad = rows[0].tipo_unidad || '';
+      admiteTerceros = !!Number(rows[0].admite_terceros);
+    }
+  }
+
+  if (admiteTerceros) {
+    return { esSoldadura: 0, esAutomotriz: 0, esLlantas: 0, esTerceros: 1 };
+  }
+  if (descripcionContienePalabra_(descripcion, PALABRAS_SOLDADURA_)) {
+    return { esSoldadura: 1, esAutomotriz: 0, esLlantas: 0, esTerceros: 0 };
+  }
+  const categoria = await categoriaTipoUnidad_(tipoUnidad);
+  if (categoria === 'automotriz') {
+    return { esSoldadura: 0, esAutomotriz: 1, esLlantas: 0, esTerceros: 0 };
+  }
+  if (descripcionContienePalabra_(descripcion, PALABRAS_LLANTAS_)) {
+    return { esSoldadura: 0, esAutomotriz: 0, esLlantas: 1, esTerceros: 0 };
+  }
+  return { esSoldadura: 0, esAutomotriz: 0, esLlantas: 0, esTerceros: 0 };
+}
+
 async function submitReporte(data) {
   data = data || {};
   try {
@@ -404,13 +501,12 @@ async function submitReporte(data) {
     if (data.descripcionAudio) descripcionAudioUrl = await guardarArchivo_(data.descripcionAudio);
 
     const orden = await siguienteFolio_(pool, 'orden', 'OF', 5);
-    const esSoldadura = data.esSoldadura ? 1 : 0;
-    const esAutomotriz = data.esAutomotriz ? 1 : 0;
+    const clasificacion = await clasificarReporteAutomatico_(data.unidad, data.descripcion);
     await pool.query(
       `INSERT INTO reportes
-        (orden, codigo_unidad, unidad, huerta, descripcion, nombre, fecha, foto_url, descripcion_audio_url, es_soldadura, es_automotriz)
-       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?)`,
-      [orden, data.unidad || '', data.unidadLabel || '', data.huerta || '', data.descripcion || '', data.nombre || '', fotoUrl || null, descripcionAudioUrl || null, esSoldadura, esAutomotriz]
+        (orden, codigo_unidad, unidad, huerta, descripcion, nombre, fecha, foto_url, descripcion_audio_url, es_soldadura, es_automotriz, es_llantas, es_terceros)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?)`,
+      [orden, data.unidad || '', data.unidadLabel || '', data.huerta || '', data.descripcion || '', data.nombre || '', fotoUrl || null, descripcionAudioUrl || null, clasificacion.esSoldadura, clasificacion.esAutomotriz, clasificacion.esLlantas, clasificacion.esTerceros]
     );
 
     return { success: true, orden, fotoUrl, descripcionAudioUrl };
@@ -4849,8 +4945,41 @@ async function getDepartamentosCatalogo(code, nombreUsuario) { return catalogoDe
 async function guardarDepartamento(code, nombreUsuario, id, data) { return catalogoDepartamentos_.guardar(code, nombreUsuario, id, data); }
 async function eliminarDepartamento(code, nombreUsuario, id) { return catalogoDepartamentos_.eliminar(code, nombreUsuario, id); }
 
-async function getTiposUnidad(code, nombreUsuario) { return catalogoTiposUnidad_.get(code, nombreUsuario); }
-async function guardarTipoUnidad(code, nombreUsuario, id, data) { return catalogoTiposUnidad_.guardar(code, nombreUsuario, id, data); }
+// Tipos de unidad ya NO es un catálogo simple puro — además de nombre,
+// lleva una Categoría ('agricola' | 'automotriz' | sin asignar) que usa
+// clasificarReporteAutomatico_ (ver arriba) para decidir solo, sin
+// preguntarle nada a quien reporta desde el celular, si un reporte nuevo
+// de un equipo con ese tipo de unidad es Agrícola o Automotriz — así que
+// get/guardar tienen su propia implementación en vez de usar
+// fabricaCatalogoSimple_ (eliminar sí la sigue usando, no cambia).
+async function getTiposUnidad(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
+  const [rows] = await pool.query('SELECT id AS Id, nombre AS Nombre, categoria AS Categoria FROM tipos_unidad ORDER BY nombre');
+  return rows.map((r) => ({ Id: r.Id, Nombre: r.Nombre, Categoria: r.Categoria || '' }));
+}
+
+async function guardarTipoUnidad(code, nombreUsuario, id, data) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'capturar');
+  data = data || {};
+  try {
+    const nombre = (data.nombre || '').toString().trim();
+    if (!nombre) return { success: false, error: 'Escribe el nombre de el tipo de unidad.' };
+    const categoriaTxt = (data.categoria || '').toString().trim().toLowerCase();
+    const categoria = (categoriaTxt === 'agricola' || categoriaTxt === 'automotriz') ? categoriaTxt : null;
+    if (id) {
+      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=? WHERE id=?', [nombre, categoria, id]);
+      return { success: true, id: Number(id) };
+    }
+    const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria) VALUES (?, ?)', [nombre, categoria]);
+    return { success: true, id: result.insertId };
+  } catch (err) {
+    if (err && err.code === 'ER_DUP_ENTRY') {
+      return { success: false, error: 'Ya existe el tipo de unidad con ese nombre.' };
+    }
+    return { success: false, error: err.toString() };
+  }
+}
+
 async function eliminarTipoUnidad(code, nombreUsuario, id) { return catalogoTiposUnidad_.eliminar(code, nombreUsuario, id); }
 
 // Operadores ya NO es un catálogo simple puro — además de nombre, trae

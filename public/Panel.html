@@ -2597,6 +2597,15 @@
             </select>
           </div>
         </div>
+        <div class="maq-field" id="catsimple-f-categoria-wrap" style="display:none;">
+          <label>Categoría</label>
+          <select id="catsimple-f-categoria">
+            <option value="">Sin clasificar</option>
+            <option value="agricola">Agrícola</option>
+            <option value="automotriz">Automotriz</option>
+          </select>
+          <small style="color:var(--text-dim);">Con esto el sistema decide solo, al capturar un reporte desde el celular, si va a Órdenes Agrícola o a Órdenes Automotriz.</small>
+        </div>
         <div class="maq-modal-actions">
           <button class="maq-delete-btn" id="catsimple-btn-delete" style="display:none;">Eliminar</button>
           <button class="maq-save-btn" id="catsimple-btn-save">Guardar</button>
@@ -15487,7 +15496,7 @@ function cargarModelos(){
 const CATALOGOS_SIMPLES = [
   { key: 'huertas', singular: 'la huerta', getFn: 'getHuertasCatalogo', guardarFn: 'guardarHuerta', eliminarFn: 'eliminarHuerta', tieneEmpresaProveedor: true },
   { key: 'departamentos', singular: 'el departamento', getFn: 'getDepartamentosCatalogo', guardarFn: 'guardarDepartamento', eliminarFn: 'eliminarDepartamento' },
-  { key: 'tiposunidad', singular: 'el tipo de unidad', getFn: 'getTiposUnidad', guardarFn: 'guardarTipoUnidad', eliminarFn: 'eliminarTipoUnidad' },
+  { key: 'tiposunidad', singular: 'el tipo de unidad', getFn: 'getTiposUnidad', guardarFn: 'guardarTipoUnidad', eliminarFn: 'eliminarTipoUnidad', tieneCategoriaExtra: true },
   { key: 'operadores', singular: 'el operador', getFn: 'getOperadoresCatalogo', guardarFn: 'guardarOperador', eliminarFn: 'eliminarOperador', tieneOperadorExtra: true },
   { key: 'tipospreventivo', singular: 'el tipo de preventivo', getFn: 'getTiposPreventivo', guardarFn: 'guardarTipoPreventivo', eliminarFn: 'eliminarTipoPreventivo', compartida: true },
   { key: 'marcas', singular: 'la marca', getFn: 'getMarcas', guardarFn: 'guardarMarca', eliminarFn: 'eliminarMarca', compartida: true },
@@ -15560,6 +15569,9 @@ function renderCatalogoSimple(key){
       if(r.Telefono) partes.push(r.Telefono);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
+    if(cfg.tieneCategoriaExtra && r.Categoria){
+      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(r.Categoria === 'agricola' ? 'Agrícola' : 'Automotriz') + ')</span>';
+    }
     return '<li data-id="' + r.Id + '"><span>' + escapeHtml(r.Nombre) + extra + '</span><button type="button" class="cat-catalogo-editar" title="Editar">✎ Editar</button></li>';
   }).join('');
   Array.from(ul.children).forEach(function(li){
@@ -15622,6 +15634,13 @@ function abrirModalCatalogoSimple(key, registro){
   } else {
     operadorWrap.style.display = 'none';
   }
+  const categoriaWrap = document.getElementById('catsimple-f-categoria-wrap');
+  if(cfg.tieneCategoriaExtra){
+    categoriaWrap.style.display = '';
+    document.getElementById('catsimple-f-categoria').value = (registro && registro.Categoria) || '';
+  } else {
+    categoriaWrap.style.display = 'none';
+  }
   const statusEl = document.getElementById('catsimple-modal-status');
   statusEl.textContent = ''; statusEl.className = 'maq-modal-status';
   document.getElementById('catsimple-modal-overlay').classList.add('open');
@@ -15660,6 +15679,9 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
     data.direccion = document.getElementById('catsimple-f-direccion').value.trim();
     data.telefono = document.getElementById('catsimple-f-telefono').value.trim();
     data.flotilla = document.getElementById('catsimple-f-flotilla').value;
+  }
+  if(cfg.tieneCategoriaExtra){
+    data.categoria = document.getElementById('catsimple-f-categoria').value;
   }
   const btn = this;
   btn.disabled = true;

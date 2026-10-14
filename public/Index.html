@@ -683,14 +683,6 @@
         <label>Descripción de la falla <span class="req">*</span></label>
         <textarea id="f-desc" placeholder="Describe qué está pasando con la unidad..."></textarea>
       </div>
-      <div class="field field-check" id="f-soldadura-wrap" style="display:none;">
-        <input type="checkbox" id="f-soldadura">
-        <label for="f-soldadura">Es trabajo para el Área de Soldadura</label>
-      </div>
-      <div class="field field-check" id="f-automotriz-wrap" style="display:none;">
-        <input type="checkbox" id="f-automotriz">
-        <label for="f-automotriz">Es trabajo Automotriz (camioneta, camión, autobús, moto, etc.)</label>
-      </div>
       <div class="field">
         <label>Foto o video de la falla <span class="req">*</span></label>
         <div class="media-actions" id="media-actions">
@@ -1294,21 +1286,6 @@ function aplicarHuertasReportar(huertasReportar, huertaUnica){
   }
 }
 
-// Casillas "Es trabajo para el Área de Soldadura" / "Es trabajo
-// Automotriz": ocultas por defecto, solo se muestran a quien tenga
-// activado usuarios.ve_casilla_soldadura / ve_casilla_automotriz desde el
-// Panel (Usuarios). Si a alguien se le quita el permiso mientras ya tenía
-// una marcada (poco probable, pero por si acaso), se desmarca también para
-// no mandar un reporte con una casilla marcada que ya no debería verse.
-function aplicarCasillasOpcionales(veCasillaSoldadura, veCasillaAutomotriz){
-  var wrapSoldadura = document.getElementById('f-soldadura-wrap');
-  var wrapAutomotriz = document.getElementById('f-automotriz-wrap');
-  if(wrapSoldadura) wrapSoldadura.style.display = veCasillaSoldadura ? '' : 'none';
-  if(wrapAutomotriz) wrapAutomotriz.style.display = veCasillaAutomotriz ? '' : 'none';
-  if(!veCasillaSoldadura) document.getElementById('f-soldadura').checked = false;
-  if(!veCasillaAutomotriz) document.getElementById('f-automotriz').checked = false;
-}
-
 function aplicarHuerta(datos){
   datos = datos || {};
   var huerta = datos.huerta || '';
@@ -1324,7 +1301,6 @@ function aplicarHuerta(datos){
       : (huertaUsuarioActual ? ('Tu huerta: ' + huertaUsuarioActual) : 'Sin huerta asignada');
   }
   aplicarHuertasReportar(datos.huertasReportar, huerta);
-  aplicarCasillasOpcionales(datos.veCasillaSoldadura, datos.veCasillaAutomotriz);
 }
 
 // --- Buscador de "Usuario" en el login (escribe y te muestra las opciones
@@ -2438,8 +2414,6 @@ function limpiarFormularioReporte_(){
   unitSelectWrap.classList.remove('selected');
   document.getElementById('f-huerta').value = '';
   document.getElementById('f-desc').value = '';
-  document.getElementById('f-soldadura').checked = false;
-  document.getElementById('f-automotriz').checked = false;
   fotoDataUrl = null;
   fotoTipo = null;
   photoBox.classList.remove('has-photo');
@@ -2472,9 +2446,7 @@ document.getElementById('btn-submit').onclick = () => {
     descripcion: desc,
     nombre: nombre,
     foto: fotoDataUrl,
-    fotoTipo: fotoTipo,
-    esSoldadura: document.getElementById('f-soldadura').checked,
-    esAutomotriz: document.getElementById('f-automotriz').checked
+    fotoTipo: fotoTipo
   };
 
   google.script.run

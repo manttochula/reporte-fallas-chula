@@ -328,7 +328,7 @@
      encabezado no se queda pegado. Por eso aquí SÍ se les da una altura
      máxima con scroll vertical propio — el resto de las tablas del Panel
      (Diesel, Movimientos, Maquinaria, etc.) siguen sin este límite. */
-  .ord-tabla-sticky-scope .table-wrap, #ord-soldadura-wrap .table-wrap, #ord-automotriz-wrap .table-wrap{
+  .ord-tabla-sticky-scope .table-wrap, #ord-soldadura-wrap .table-wrap, #ord-automotriz-wrap .table-wrap, #ord-llantas-wrap .table-wrap, #ord-terceros-wrap .table-wrap{
     max-height: 62vh; overflow-y: auto;
   }
   .table-scroll-hint{
@@ -626,10 +626,10 @@
      y el título+resumen de Soldadura (.ord-soldadura-sticky-head) son fijos
      aparte, pegados a la PÁGINA (ver esas clases), ya que viven fuera de
      .table-wrap. */
-  #ord-table thead th, #ord-table-soldadura thead th, #ord-table-automotriz thead th{
+  #ord-table thead th, #ord-table-soldadura thead th, #ord-table-automotriz thead th, #ord-table-llantas thead th, #ord-table-terceros thead th{
     position: sticky; top: 0; z-index: 20 !important; background: var(--panel);
   }
-  .ord-soldadura-sticky-head, .ord-automotriz-sticky-head{
+  .ord-soldadura-sticky-head, .ord-automotriz-sticky-head, .ord-llantas-sticky-head, .ord-terceros-sticky-head{
     position: sticky; top: 0; z-index: 30; background: var(--panel);
     padding-top: 2px;
   }
@@ -1426,6 +1426,194 @@
           </table>
         </div>
       </div>
+
+      <div class="dz-resumen" id="ord-llantas-wrap">
+        <div class="ord-llantas-sticky-head ord-sticky-head-flex">
+          <div>
+            <div class="dz-resumen-header">Trabajos de Llantas y Ponches</div>
+            <div class="summary" id="ord-llantas-summary"></div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="ord-multisel" id="ord-columnas-llantas-multisel" style="min-width:150px;">
+              <button type="button" class="ord-multisel-btn" id="ord-columnas-llantas-btn">Columnas</button>
+              <div class="ord-multisel-panel ord-columnas-panel" id="ord-columnas-llantas-panel">
+                <div class="ord-columnas-panel-head"><span>Mostrar</span><span>Fijar</span></div>
+                <div id="ord-columnas-llantas-lista"></div>
+                <div class="ord-columnas-panel-foot"><button type="button" id="ord-columnas-llantas-restablecer">Restablecer</button></div>
+              </div>
+            </div>
+            <div class="ord-multisel" id="ord-ordenar-llantas-multisel" style="min-width:150px;">
+              <button type="button" class="ord-multisel-btn" id="ord-ordenar-llantas-btn">Ordenar</button>
+              <div class="ord-multisel-panel ord-columnas-panel ord-ordenar-panel" id="ord-ordenar-llantas-panel">
+                <div class="ord-columnas-panel-head"><span>Orden personalizado</span></div>
+                <div id="ord-ordenar-llantas-niveles"></div>
+                <div class="ord-ordenar-agregar-wrap"><button type="button" id="ord-ordenar-llantas-agregar">+ Agregar nivel</button></div>
+                <div class="ord-columnas-panel-foot"><button type="button" id="ord-ordenar-llantas-restablecer">Restablecer</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ord-summary-row" style="margin-bottom:8px;">
+          <div class="ord-accion-toolbar" id="ord-accion-toolbar-llantas">
+            <span class="ord-accion-label" id="ord-accion-label-llantas">Selecciona una orden (clic en la fila) para habilitar acciones</span>
+            <button type="button" class="row-save" id="ord-accion-guardar-llantas" disabled>Guardar</button>
+            <button type="button" class="row-view" id="ord-accion-ver-llantas" disabled>Ver</button>
+            <button type="button" class="row-view ord-btn-editar" id="ord-accion-editar-llantas" disabled>Editar</button>
+            <button type="button" class="row-view ord-btn-eliminar" id="ord-accion-eliminar-llantas" disabled>Eliminar</button>
+            <span class="ord-accion-status" id="ord-accion-status-llantas"></span>
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top:8px;">
+          <button type="button" class="btn-amber orn-btn-nueva-orden" id="orn-btn-abrir-llantas">+ Nueva orden</button>
+          <input type="text" id="f-search-llantas" placeholder="Buscar por orden, unidad, huerta o descripción...">
+          <select id="f-huerta-llantas"><option value="">Todas las huertas</option></select>
+          <select id="f-departamento-llantas"><option value="">Todos los departamentos</option></select>
+          <div class="ord-multisel" id="f-estado-llantas-multisel">
+            <button type="button" class="ord-multisel-btn" id="f-estado-llantas-btn">Todos los estatus</button>
+            <div class="ord-multisel-panel" id="f-estado-llantas-panel">
+              <label class="ord-multisel-opcion"><input type="checkbox" value="Pendiente"> Pendiente</label>
+              <label class="ord-multisel-opcion"><input type="checkbox" value="En proceso"> En proceso</label>
+              <label class="ord-multisel-opcion"><input type="checkbox" value="Completado"> Completado</label>
+            </div>
+          </div>
+          <span class="toolbar-date-group">
+            <label class="toolbar-date-label" for="f-fecha-desde-llantas">Reportadas desde</label>
+            <input type="date" id="f-fecha-desde-llantas">
+            <label class="toolbar-date-label" for="f-fecha-hasta-llantas">hasta</label>
+            <input type="date" id="f-fecha-hasta-llantas">
+            <button type="button" class="export-btn" id="btn-limpiar-fechas-llantas" title="Quitar el filtro de fechas">✕</button>
+          </span>
+          <span class="toolbar-date-group">
+            <label class="toolbar-date-label" for="f-fecha-atencion-desde-llantas">Atendidas desde</label>
+            <input type="date" id="f-fecha-atencion-desde-llantas">
+            <label class="toolbar-date-label" for="f-fecha-atencion-hasta-llantas">hasta</label>
+            <input type="date" id="f-fecha-atencion-hasta-llantas">
+            <button type="button" class="export-btn" id="btn-limpiar-fechas-atencion-llantas" title="Quitar el filtro de fecha de atención">✕</button>
+          </span>
+          <button class="export-btn" id="btn-export-llantas">Exportar a Excel</button>
+          <button class="export-btn" id="btn-export-pdf-llantas">Reporte en PDF</button>
+          <button class="export-btn" id="btn-export-encargados-excel-llantas" title="Órdenes 'En proceso' agrupadas por huerta, para mandar a un grupo con los encargados">Reporte para encargados (Excel)</button>
+          <button class="export-btn" id="btn-export-encargados-pdf-llantas" title="Órdenes 'En proceso' agrupadas por huerta, para mandar a un grupo con los encargados">Reporte para encargados (PDF)</button>
+        </div>
+        <div class="table-scroll-hint">↔ Desliza hacia la derecha (o Shift + rueda del mouse) para ver el resto de las columnas.</div>
+        <div class="table-wrap">
+          <table id="ord-table-llantas">
+            <thead>
+              <tr>
+                <th data-key="Orden" data-col="orden">Orden <span class="arrow"></span></th>
+                <th data-key="Unidad" data-col="unidad">Unidad <span class="arrow"></span></th>
+                <th data-key="Huerta" data-col="huerta">Huerta <span class="arrow"></span></th>
+                <th data-key="Descripcion" data-col="descripcion">Descripción <span class="arrow"></span></th>
+                <th data-key="Nombre" data-col="reporto">Reportó <span class="arrow"></span></th>
+                <th data-key="Fecha" data-col="fecha_reporte">Fecha reporte <span class="arrow"></span></th>
+                <th data-key="_estado" data-col="estatus">Estatus <span class="arrow"></span></th>
+                <th data-key="DiasAtencion" data-col="dias_atencion">Días atención <span class="arrow"></span></th>
+                <th data-key="FechaAtencion" data-col="fecha_atencion">Fecha atención <span class="arrow"></span></th>
+                <th data-key="FechaSalida" data-col="fecha_salida">Fecha salida <span class="arrow"></span></th>
+                <th data-key="AtendioPor" data-col="atendio">Atendió <span class="arrow"></span></th>
+                <th data-col="refaccionamiento">Refaccionamiento</th>
+                <th data-col="evidencia">Evidencia</th>
+                <th data-col="visto_bueno">Visto bueno</th>
+              </tr>
+            </thead>
+            <tbody id="table-body-llantas"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="dz-resumen" id="ord-terceros-wrap">
+        <div class="ord-terceros-sticky-head ord-sticky-head-flex">
+          <div>
+            <div class="dz-resumen-header">Reparaciones con terceros</div>
+            <div class="summary" id="ord-terceros-summary"></div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <div class="ord-multisel" id="ord-columnas-terceros-multisel" style="min-width:150px;">
+              <button type="button" class="ord-multisel-btn" id="ord-columnas-terceros-btn">Columnas</button>
+              <div class="ord-multisel-panel ord-columnas-panel" id="ord-columnas-terceros-panel">
+                <div class="ord-columnas-panel-head"><span>Mostrar</span><span>Fijar</span></div>
+                <div id="ord-columnas-terceros-lista"></div>
+                <div class="ord-columnas-panel-foot"><button type="button" id="ord-columnas-terceros-restablecer">Restablecer</button></div>
+              </div>
+            </div>
+            <div class="ord-multisel" id="ord-ordenar-terceros-multisel" style="min-width:150px;">
+              <button type="button" class="ord-multisel-btn" id="ord-ordenar-terceros-btn">Ordenar</button>
+              <div class="ord-multisel-panel ord-columnas-panel ord-ordenar-panel" id="ord-ordenar-terceros-panel">
+                <div class="ord-columnas-panel-head"><span>Orden personalizado</span></div>
+                <div id="ord-ordenar-terceros-niveles"></div>
+                <div class="ord-ordenar-agregar-wrap"><button type="button" id="ord-ordenar-terceros-agregar">+ Agregar nivel</button></div>
+                <div class="ord-columnas-panel-foot"><button type="button" id="ord-ordenar-terceros-restablecer">Restablecer</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ord-summary-row" style="margin-bottom:8px;">
+          <div class="ord-accion-toolbar" id="ord-accion-toolbar-terceros">
+            <span class="ord-accion-label" id="ord-accion-label-terceros">Selecciona una orden (clic en la fila) para habilitar acciones</span>
+            <button type="button" class="row-save" id="ord-accion-guardar-terceros" disabled>Guardar</button>
+            <button type="button" class="row-view" id="ord-accion-ver-terceros" disabled>Ver</button>
+            <button type="button" class="row-view ord-btn-editar" id="ord-accion-editar-terceros" disabled>Editar</button>
+            <button type="button" class="row-view ord-btn-eliminar" id="ord-accion-eliminar-terceros" disabled>Eliminar</button>
+            <span class="ord-accion-status" id="ord-accion-status-terceros"></span>
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top:8px;">
+          <button type="button" class="btn-amber orn-btn-nueva-orden" id="orn-btn-abrir-terceros">+ Nueva orden</button>
+          <input type="text" id="f-search-terceros" placeholder="Buscar por orden, unidad, huerta o descripción...">
+          <select id="f-huerta-terceros"><option value="">Todas las huertas</option></select>
+          <select id="f-departamento-terceros"><option value="">Todos los departamentos</option></select>
+          <div class="ord-multisel" id="f-estado-terceros-multisel">
+            <button type="button" class="ord-multisel-btn" id="f-estado-terceros-btn">Todos los estatus</button>
+            <div class="ord-multisel-panel" id="f-estado-terceros-panel">
+              <label class="ord-multisel-opcion"><input type="checkbox" value="Pendiente"> Pendiente</label>
+              <label class="ord-multisel-opcion"><input type="checkbox" value="En proceso"> En proceso</label>
+              <label class="ord-multisel-opcion"><input type="checkbox" value="Completado"> Completado</label>
+            </div>
+          </div>
+          <span class="toolbar-date-group">
+            <label class="toolbar-date-label" for="f-fecha-desde-terceros">Reportadas desde</label>
+            <input type="date" id="f-fecha-desde-terceros">
+            <label class="toolbar-date-label" for="f-fecha-hasta-terceros">hasta</label>
+            <input type="date" id="f-fecha-hasta-terceros">
+            <button type="button" class="export-btn" id="btn-limpiar-fechas-terceros" title="Quitar el filtro de fechas">✕</button>
+          </span>
+          <span class="toolbar-date-group">
+            <label class="toolbar-date-label" for="f-fecha-atencion-desde-terceros">Atendidas desde</label>
+            <input type="date" id="f-fecha-atencion-desde-terceros">
+            <label class="toolbar-date-label" for="f-fecha-atencion-hasta-terceros">hasta</label>
+            <input type="date" id="f-fecha-atencion-hasta-terceros">
+            <button type="button" class="export-btn" id="btn-limpiar-fechas-atencion-terceros" title="Quitar el filtro de fecha de atención">✕</button>
+          </span>
+          <button class="export-btn" id="btn-export-terceros">Exportar a Excel</button>
+          <button class="export-btn" id="btn-export-pdf-terceros">Reporte en PDF</button>
+          <button class="export-btn" id="btn-export-encargados-excel-terceros" title="Órdenes 'En proceso' agrupadas por huerta, para mandar a un grupo con los encargados">Reporte para encargados (Excel)</button>
+          <button class="export-btn" id="btn-export-encargados-pdf-terceros" title="Órdenes 'En proceso' agrupadas por huerta, para mandar a un grupo con los encargados">Reporte para encargados (PDF)</button>
+        </div>
+        <div class="table-scroll-hint">↔ Desliza hacia la derecha (o Shift + rueda del mouse) para ver el resto de las columnas.</div>
+        <div class="table-wrap">
+          <table id="ord-table-terceros">
+            <thead>
+              <tr>
+                <th data-key="Orden" data-col="orden">Orden <span class="arrow"></span></th>
+                <th data-key="Unidad" data-col="unidad">Unidad <span class="arrow"></span></th>
+                <th data-key="Huerta" data-col="huerta">Huerta <span class="arrow"></span></th>
+                <th data-key="Descripcion" data-col="descripcion">Descripción <span class="arrow"></span></th>
+                <th data-key="Nombre" data-col="reporto">Reportó <span class="arrow"></span></th>
+                <th data-key="Fecha" data-col="fecha_reporte">Fecha reporte <span class="arrow"></span></th>
+                <th data-key="_estado" data-col="estatus">Estatus <span class="arrow"></span></th>
+                <th data-key="DiasAtencion" data-col="dias_atencion">Días atención <span class="arrow"></span></th>
+                <th data-key="FechaAtencion" data-col="fecha_atencion">Fecha atención <span class="arrow"></span></th>
+                <th data-key="FechaSalida" data-col="fecha_salida">Fecha salida <span class="arrow"></span></th>
+                <th data-key="AtendioPor" data-col="atendio">Atendió <span class="arrow"></span></th>
+                <th data-col="refaccionamiento">Refaccionamiento</th>
+                <th data-col="evidencia">Evidencia</th>
+                <th data-col="visto_bueno">Visto bueno</th>
+              </tr>
+            </thead>
+            <tbody id="table-body-terceros"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div id="pview-diesel" style="display:none;">
@@ -2050,7 +2238,21 @@
           <label><input type="checkbox" id="oed-f-automotriz"> Es trabajo Automotriz (camioneta, camión, autobús, moto, etc.)</label>
           <span class="mnt-subtext">Marca esta orden como trabajo de Automotriz. Aparecerá en el apartado de Automotriz, debajo de la tabla de Órdenes, y dejará de listarse en la tabla principal (salvo que también esté marcada como Soldadura, en cuyo caso se queda en el apartado de Soldadura).</span>
         </div>
-        <div class="maq-field"><label>Atendió</label><input type="text" id="oed-f-atendio"></div>
+        <div class="maq-field">
+          <label><input type="checkbox" id="oed-f-llantas"> Es trabajo de Llantas y Ponches</label>
+          <span class="mnt-subtext">Marca esta orden como trabajo de Llantas y Ponches. Aparecerá en ese apartado, debajo de la tabla de Órdenes, y dejará de listarse en la tabla principal (salvo que también esté marcada como Soldadura o Automotriz).</span>
+        </div>
+        <div class="maq-field">
+          <label><input type="checkbox" id="oed-f-terceros"> Es Reparación con terceros</label>
+          <span class="mnt-subtext">Solo se puede marcar si el equipo está habilitado en el Catálogo ("Admite reparación con terceros"). Aparecerá en ese apartado, debajo de la tabla de Órdenes, y dejará de listarse en la tabla principal (salvo que también esté marcada como Soldadura, Automotriz o Llantas y Ponches).</span>
+          <span class="mnt-subtext" id="oed-f-terceros-hint" style="display:none;color:var(--danger);">Este equipo no está habilitado en el Catálogo para "Reparaciones con terceros" — edítalo ahí primero si hace falta.</span>
+        </div>
+        <div class="maq-field" id="oed-f-atendio-texto-wrap"><label>Atendió</label><input type="text" id="oed-f-atendio"></div>
+        <div class="maq-field" id="oed-f-atendio-proveedor-wrap" style="display:none;">
+          <label>Atendió (proveedor)</label>
+          <select id="oed-f-atendio-proveedor"></select>
+          <span class="mnt-subtext">Catálogo de proveedores de Refacciones → Proveedores. Si falta alguno, agrégalo ahí primero.</span>
+        </div>
         <div class="maq-field"><label>Trabajo realizado</label><textarea id="oed-f-trabajo" rows="3"></textarea></div>
         <div class="maq-field"><label>Nota de esta edición (opcional)</label><input type="text" id="oed-f-nota" placeholder="Ej. se corrigió la huerta porque el equipo ya está en Taller"></div>
         <div class="maq-field" id="oed-f-audit-wrap" style="display:none;"><span class="mnt-subtext" id="oed-f-audit"></span></div>
@@ -2094,6 +2296,13 @@
         <div class="maq-field">
           <label><input type="checkbox" id="orn-f-automotriz"> Es trabajo Automotriz (camioneta, camión, autobús, moto, etc.)</label>
         </div>
+        <div class="maq-field">
+          <label><input type="checkbox" id="orn-f-llantas"> Es trabajo de Llantas y Ponches</label>
+        </div>
+        <div class="maq-field" id="orn-f-terceros-wrap">
+          <label><input type="checkbox" id="orn-f-terceros"> Es Reparación con terceros</label>
+          <span class="mnt-subtext" id="orn-f-terceros-hint" style="display:none;">Esta unidad no está habilitada en el Catálogo para "Reparaciones con terceros".</span>
+        </div>
         <div class="maq-modal-actions">
           <button class="maq-save-btn" id="orn-btn-save">Guardar</button>
         </div>
@@ -2122,6 +2331,11 @@
         </div>
         <div class="maq-modal-status" id="refnec-interpretar-status"></div>
         <div class="refnec-lista" id="refnec-lista"></div>
+        <div class="maq-field" id="refnec-f-costo-wrap">
+          <label>Costo de la reparación (opcional)</label>
+          <input type="number" id="refnec-f-costo" min="0" step="0.01" placeholder="Ej. 1500.00">
+          <span class="mnt-subtext">Costo total de la reparación de esta orden. Se guarda junto con "Guardar lista", aparte de la lista de piezas — no es necesario llenar ambos.</span>
+        </div>
         <div class="maq-modal-actions">
           <button class="maq-save-btn" id="refnec-btn-guardar">Guardar lista</button>
         </div>
@@ -2236,6 +2450,7 @@
         </div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-usa-diesel"> Funciona con diesel (tractores y retros: aparece para capturar diesel en el Panel y en campo)</label></div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-usa-gasolina"> Aparece en Combustible Automotriz (autos y camionetas: aparece para capturar su combustible en el Panel)</label></div>
+        <div class="maq-field"><label><input type="checkbox" id="maq-f-admite-terceros"> Admite reparación con terceros (permite marcar esta unidad en la categoría "Reparaciones con terceros" de Órdenes)</label></div>
         <div class="maq-field"><label>Tipo de combustible (solo si aparece en Combustible Automotriz)</label>
           <select id="maq-f-combustible-tipo">
             <option value="gasolina">Gasolina</option>
@@ -2283,6 +2498,7 @@
               <th data-key="OperadorAsignado">Operador asignado <span class="arrow"></span></th>
               <th data-key="UsaDiesel">Usa diesel <span class="arrow"></span></th>
               <th data-key="UsaGasolina">Combustible automotriz <span class="arrow"></span></th>
+              <th data-key="AdmiteTerceros">Admite terceros <span class="arrow"></span></th>
             </tr>
           </thead>
           <tbody id="cat-table-body"></tbody>
@@ -3102,6 +3318,8 @@
             <div class="usr-permiso-row"><label>Órdenes — Agrícola</label><select id="usr-perm-ordenes" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Órdenes — Soldadura</label><select id="usr-perm-ordenes_soldadura" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Órdenes — Automotriz</label><select id="usr-perm-ordenes_automotriz" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Órdenes — Llantas y Ponches</label><select id="usr-perm-ordenes_llantas" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Órdenes — Reparaciones con terceros</label><select id="usr-perm-ordenes_terceros" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Diesel</label><select id="usr-perm-diesel" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Combustible Automotriz</label><select id="usr-perm-combustible_automotriz" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Movimientos</label><select id="usr-perm-movimientos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
@@ -3299,7 +3517,7 @@ let sortLevels = [{ key: 'Fecha', dir: -1 }];
 // su propio guardado en localStorage. Se inicializan de verdad más abajo
 // (configurarFiltroEstadoDropdown_), esto solo declara el objeto para que
 // filtrarOrdenes_ lo pueda usar sin importar el orden de carga del script.
-let FILTRO_ESTADO_POR_SECCION = { '': new Set(['Pendiente', 'En proceso']), '-soldadura': new Set(['Pendiente', 'En proceso']), '-automotriz': new Set(['Pendiente', 'En proceso']) };
+let FILTRO_ESTADO_POR_SECCION = { '': new Set(['Pendiente', 'En proceso']), '-soldadura': new Set(['Pendiente', 'En proceso']), '-automotriz': new Set(['Pendiente', 'En proceso']), '-llantas': new Set(['Pendiente', 'En proceso']), '-terceros': new Set(['Pendiente', 'En proceso']) };
 let modalOrden = null;
 let modalEvidenciaData = null;
 let modalFotoOriginalData = null;
@@ -3316,7 +3534,7 @@ let HUERTAS_Y_UBICACIONES = HUERTAS.concat(['TALLER', 'INVERNADERO']);
 // lista de respaldo; aplicarRestriccionHuertasOrdenesUI_() los vuelve a
 // poblar de verdad (y recorta según el usuario) en cuanto se conoce quién
 // inició sesión.
-const ORD_HUERTA_SELECT_IDS = ['f-huerta', 'f-huerta-soldadura', 'f-huerta-automotriz'];
+const ORD_HUERTA_SELECT_IDS = ['f-huerta', 'f-huerta-soldadura', 'f-huerta-automotriz', 'f-huerta-llantas', 'f-huerta-terceros'];
 const huertaSelect = document.getElementById('f-huerta');
 ORD_HUERTA_SELECT_IDS.forEach(function(id){
   const sel = document.getElementById(id);
@@ -3349,7 +3567,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -3420,7 +3638,7 @@ function aplicarPermisosPanelUI(){
     // La pestaña se muestra si el usuario puede ver CUALQUIERA de las tres
     // secciones -- cuál(es) de las tres tablas se muestran ya dentro de la
     // pestaña se resuelve aparte, en aplicarVisibilidadSeccionesOrdenes_.
-    [['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'], ptabOrdenes, pviewOrdenes],
+    [['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'], ptabOrdenes, pviewOrdenes],
     ['diesel', ptabDiesel, pviewDiesel],
     ['combustible_automotriz', ptabCombustibleAutomotriz, pviewCombustibleAutomotriz],
     // "Combustible General" (diesel + gasolina juntos) no es una pestaña con
@@ -3468,7 +3686,7 @@ function aplicarPermisosPanelUI(){
   if(aviso) aviso.remove();
   if(tabsWrap) tabsWrap.style.display = '';
 
-  if(!puedeVerPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'])){
+  if(!puedeVerPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'])){
     // La pestaña por defecto (Órdenes) no está permitida para este usuario:
     // activamos la primera pestaña a la que sí tenga acceso.
     primeraVisible[1].click();
@@ -3478,19 +3696,21 @@ function aplicarPermisosPanelUI(){
   ocultarControlesSoloLectura();
 }
 
-// Dentro de la pestaña Órdenes, oculta cada una de las tres secciones
-// (Agrícola/principal, Soldadura, Automotriz) si el usuario no tiene ni
-// siquiera "visualizar" en el permiso de esa sección en particular -- la
-// pestaña en sí ya se mostró arriba si puede ver AL MENOS una. Las filas que
-// SÍ puede ver ya le llegan filtradas desde el servidor (ver
-// getReportesTaller en server/handlers.js), así que ocultar el bloque
-// completo cuando no aplica es solo para no dejar un título/tabla vacíos y
-// confusos.
+// Dentro de la pestaña Órdenes, oculta cada una de las cinco secciones
+// (Agrícola/principal, Soldadura, Automotriz, Llantas y Ponches,
+// Reparaciones con terceros) si el usuario no tiene ni siquiera "visualizar"
+// en el permiso de esa sección en particular -- la pestaña en sí ya se
+// mostró arriba si puede ver AL MENOS una. Las filas que SÍ puede ver ya le
+// llegan filtradas desde el servidor (ver getReportesTaller en
+// server/handlers.js), así que ocultar el bloque completo cuando no aplica
+// es solo para no dejar un título/tabla vacíos y confusos.
 function aplicarVisibilidadSeccionesOrdenes_(){
   const SECCIONES_ORDENES_WRAP = [
     ['principal', ordPrincipalWrap],
     ['soldadura', ordSoldaduraWrap],
     ['automotriz', ordAutomotrizWrap],
+    ['llantas', ordLlantasWrap],
+    ['terceros', ordTercerosWrap],
   ];
   SECCIONES_ORDENES_WRAP.forEach(function(item){
     const seccion = item[0], wrap = item[1];
@@ -3546,7 +3766,7 @@ function ocultarControlesSoloLectura(){
   // modales de "Ver"/"Editar orden" se habilitan o no SEGÚN LA ORDEN
   // seleccionada/abierta en ese momento -- ver aplicarSeleccionOrden_,
   // abrirModal y abrirModalEditarOrdenConDatosFrescos_ más abajo.
-  if(!puedeCapturarPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'])){
+  if(!puedeCapturarPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'])){
     ocultar([
       '#pview-ordenes .row-save',
       '#pview-ordenes [onclick^="abrirModalEditarOrden"]',
@@ -3819,16 +4039,20 @@ function formatFechaAudit(v){
 function seccionDeOrden_(r){
   if(!!r.EsSoldadura) return 'soldadura';
   if(!!r.EsAutomotriz) return 'automotriz';
+  if(!!r.EsLlantas) return 'llantas';
+  if(!!r.EsTerceros) return 'terceros';
   return 'principal';
 }
 
 // A qué permiso de Panel corresponde cada sección de Órdenes (mismo
 // criterio que permisoDeSeccionOrden_ en server/handlers.js) -- 'ordenes'
-// sigue siendo el de Agrícola/principal, para no migrar a nadie; Soldadura
-// y Automotriz tienen cada uno el suyo, independiente.
+// sigue siendo el de Agrícola/principal, para no migrar a nadie; cada una de
+// las otras cuatro tiene el suyo, independiente.
 function permisoDeSeccionOrden_(seccion){
   if(seccion === 'soldadura') return 'ordenes_soldadura';
   if(seccion === 'automotriz') return 'ordenes_automotriz';
+  if(seccion === 'llantas') return 'ordenes_llantas';
+  if(seccion === 'terceros') return 'ordenes_terceros';
   return 'ordenes';
 }
 
@@ -3839,14 +4063,14 @@ function permisoDeSeccionOrden_(seccion){
 // sin afectar a los otros dos — cada uno tiene su propia búsqueda, huerta,
 // departamento, estatus y rango de fechas, con su propio FILTRO_ESTADO_POR_SECCION
 // y su propia huerta/localStorage).
-const ORD_FILTRO_SUFIJO_A_SECCION = { '': 'principal', '-soldadura': 'soldadura', '-automotriz': 'automotriz' };
+const ORD_FILTRO_SUFIJO_A_SECCION = { '': 'principal', '-soldadura': 'soldadura', '-automotriz': 'automotriz', '-llantas': 'llantas', '-terceros': 'terceros' };
 
 // Inverso del mapa anterior: de qué sección a qué sufijo de ids usa su barra
 // de acciones (Guardar/Ver/Editar/Eliminar) -- cada sección tiene su propia
 // barra (ver ord-accion-toolbar[-soldadura/-automotriz] en el HTML), porque
 // la de la tabla principal se oculta junto con ord-principal-seccion-wrap
 // cuando el usuario no tiene acceso a Agrícola (ver aplicarVisibilidadSeccionesOrdenes_).
-const ORD_SECCION_A_SUFIJO = { principal: '', soldadura: '-soldadura', automotriz: '-automotriz' };
+const ORD_SECCION_A_SUFIJO = { principal: '', soldadura: '-soldadura', automotriz: '-automotriz', llantas: '-llantas', terceros: '-terceros' };
 function sufijoDeOrden_(orden){
   const r = ALL_RECORDS.find(x => x.Orden === orden);
   return ORD_SECCION_A_SUFIJO[r ? seccionDeOrden_(r) : 'principal'];
@@ -3946,6 +4170,14 @@ function getFilteredSoldadura(){
 
 function getFilteredAutomotriz(){
   return filtrarOrdenes_('-automotriz');
+}
+
+function getFilteredLlantas(){
+  return filtrarOrdenes_('-llantas');
+}
+
+function getFilteredTerceros(){
+  return filtrarOrdenes_('-terceros');
 }
 
 // Convierte una fecha (string u objeto Date, sin hora relevante — viene de
@@ -4355,6 +4587,8 @@ function renderTable(){
   aplicarEstadoColumnasOrd();
   renderTablaSoldadura();
   renderTablaAutomotriz();
+  renderTablaLlantas();
+  renderTablaTerceros();
   aplicarSeleccionOrden_();
   ocultarControlesSoloLectura();
 }
@@ -4395,6 +4629,43 @@ function renderTablaAutomotriz(){
 
   if(records.length === 0){
     tbody.innerHTML = '<tr><td colspan="14"><div class="empty">No hay órdenes de Automotriz que coincidan.</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = records.map(filaOrdenHtml_).join('');
+}
+
+// Apartado de Llantas y Ponches: igual que Soldadura/Automotriz, su propia
+// barra de filtros (sufijo '-llantas'), sin restricción de qué equipos
+// pueden usarla (cualquier orden se puede marcar aquí).
+function renderTablaLlantas(){
+  const tbody = document.getElementById('table-body-llantas');
+  if(!tbody) return;
+  let records = ordenarOrdenes_(getFilteredLlantas());
+
+  const totalLlantas = ALL_RECORDS.filter(r => seccionDeOrden_(r) === 'llantas').length;
+  document.getElementById('ord-llantas-summary').textContent = records.length + ' de ' + totalLlantas + ' órdenes de Llantas y Ponches';
+
+  if(records.length === 0){
+    tbody.innerHTML = '<tr><td colspan="14"><div class="empty">No hay órdenes de Llantas y Ponches que coincidan.</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = records.map(filaOrdenHtml_).join('');
+}
+
+// Apartado de Reparaciones con terceros: igual patrón (sufijo '-terceros'),
+// pero solo puede recibir órdenes de equipos marcados en el Catálogo con
+// "Admite reparación con terceros" (ver chkTerceros en abrirModalNuevaOrden/
+// abrirModalEditarOrden, y la validación en el servidor).
+function renderTablaTerceros(){
+  const tbody = document.getElementById('table-body-terceros');
+  if(!tbody) return;
+  let records = ordenarOrdenes_(getFilteredTerceros());
+
+  const totalTerceros = ALL_RECORDS.filter(r => seccionDeOrden_(r) === 'terceros').length;
+  document.getElementById('ord-terceros-summary').textContent = records.length + ' de ' + totalTerceros + ' órdenes de Reparaciones con terceros';
+
+  if(records.length === 0){
+    tbody.innerHTML = '<tr><td colspan="14"><div class="empty">No hay órdenes de Reparaciones con terceros que coincidan.</div></td></tr>';
     return;
   }
   tbody.innerHTML = records.map(filaOrdenHtml_).join('');
@@ -4449,7 +4720,7 @@ function aplicarSeleccionOrden_(){
   const existe = !!ordenSeleccionada && ALL_RECORDS.some(r => r.Orden === ordenSeleccionada);
   if(!existe) ordenSeleccionada = null;
 
-  document.querySelectorAll('#table-body tr[data-orden], #table-body-soldadura tr[data-orden], #table-body-automotriz tr[data-orden]').forEach(tr => {
+  document.querySelectorAll('#table-body tr[data-orden], #table-body-soldadura tr[data-orden], #table-body-automotriz tr[data-orden], #table-body-llantas tr[data-orden], #table-body-terceros tr[data-orden]').forEach(tr => {
     tr.classList.toggle('fila-seleccionada', tr.dataset.orden === ordenSeleccionada);
   });
 
@@ -4499,6 +4770,8 @@ function seleccionarFilaOrden_(e){
 document.getElementById('table-body').addEventListener('click', seleccionarFilaOrden_);
 document.getElementById('table-body-soldadura').addEventListener('click', seleccionarFilaOrden_);
 document.getElementById('table-body-automotriz').addEventListener('click', seleccionarFilaOrden_);
+document.getElementById('table-body-llantas').addEventListener('click', seleccionarFilaOrden_);
+document.getElementById('table-body-terceros').addEventListener('click', seleccionarFilaOrden_);
 
 Object.values(ORD_SECCION_A_SUFIJO).forEach(suf => {
   const gBtn = document.getElementById('ord-accion-guardar' + suf);
@@ -4595,11 +4868,12 @@ function guardarEstadoColumnasOrd_(){
 // (midiendo su ancho real ya renderizado) para que varias columnas fijadas
 // se apilen correctamente una junto a otra.
 //
-// Las TRES tablas de Órdenes (principal, Soldadura y Automotriz) comparten
-// el mismo ORD_COL_ESTADO — igual que ya comparten sortLevels para
-// "Ordenar" — así que ocultar o fijar una columna desde cualquiera de los
-// tres botones "Columnas" se aplica a las tres de un jalón.
-const ORD_TABLAS_IDS = ['ord-table', 'ord-table-soldadura', 'ord-table-automotriz'];
+// Las CINCO tablas de Órdenes (principal, Soldadura, Automotriz, Llantas y
+// Ponches, y Reparaciones con terceros) comparten el mismo ORD_COL_ESTADO —
+// igual que ya comparten sortLevels para "Ordenar" — así que ocultar o fijar
+// una columna desde cualquiera de los cinco botones "Columnas" se aplica a
+// las cinco de un jalón.
+const ORD_TABLAS_IDS = ['ord-table', 'ord-table-soldadura', 'ord-table-automotriz', 'ord-table-llantas', 'ord-table-terceros'];
 
 function aplicarEstadoColumnasOrdEnTabla_(tableId){
   const table = document.getElementById(tableId);
@@ -4655,7 +4929,7 @@ function aplicarEstadoColumnasOrd(){
 // Automotriz esa columna en realidad muestra el Operador asignado (ver
 // filaOrdenHtml_), así que el panel de Automotriz la lista como "Operador"
 // para no confundir, aunque el id interno siga siendo 'huerta'.
-const ORD_COLUMNAS_SUFIJOS = ['', '-soldadura', '-automotriz'];
+const ORD_COLUMNAS_SUFIJOS = ['', '-soldadura', '-automotriz', '-llantas', '-terceros'];
 
 function etiquetaColumnaOrd_(col, sufijo){
   if(col.id === 'huerta' && sufijo === '-automotriz') return 'Operador';
@@ -4746,7 +5020,7 @@ window.addEventListener('resize', function(){
 // tabla principal. ORD_ORDENAR_IDS enumera los tres juegos de ids (mismo
 // patrón que en el HTML: 'ord-ordenar' + sufijo + '-btn'/'-panel'/etc.) y
 // configurarOrdenarDropdown_ les conecta exactamente la misma lógica.
-const ORD_ORDENAR_SUFIJOS = ['', '-soldadura', '-automotriz'];
+const ORD_ORDENAR_SUFIJOS = ['', '-soldadura', '-automotriz', '-llantas', '-terceros'];
 
 function renderNivelesOrdenar_(sufijo){
   const cont = document.getElementById('ord-ordenar' + sufijo + '-niveles');
@@ -5183,6 +5457,8 @@ document.getElementById('modal-save').onclick = () => {
 function tituloSeccionOrd_(sufijo){
   if(sufijo === '-soldadura') return 'Órdenes de Soldadura';
   if(sufijo === '-automotriz') return 'Órdenes de Automotriz';
+  if(sufijo === '-llantas') return 'Órdenes de Llantas y Ponches';
+  if(sufijo === '-terceros') return 'Órdenes de Reparaciones con terceros';
   return 'Órdenes de trabajo';
 }
 function nombreArchivoSeccionOrd_(sufijo){
@@ -5230,6 +5506,8 @@ function exportarOrdenesExcel_(sufijo){
 document.getElementById('btn-export').onclick = () => exportarOrdenesExcel_('');
 document.getElementById('btn-export-soldadura').onclick = () => exportarOrdenesExcel_('-soldadura');
 document.getElementById('btn-export-automotriz').onclick = () => exportarOrdenesExcel_('-automotriz');
+document.getElementById('btn-export-llantas').onclick = () => exportarOrdenesExcel_('-llantas');
+document.getElementById('btn-export-terceros').onclick = () => exportarOrdenesExcel_('-terceros');
 
 // Envoltorio en Promise del shim google.script.run, para poder usar
 // async/await (por ejemplo al pedir las piezas de varias órdenes en
@@ -5333,6 +5611,8 @@ async function exportarOrdenesPdf_(sufijo){
 document.getElementById('btn-export-pdf').onclick = () => exportarOrdenesPdf_('');
 document.getElementById('btn-export-pdf-soldadura').onclick = () => exportarOrdenesPdf_('-soldadura');
 document.getElementById('btn-export-pdf-automotriz').onclick = () => exportarOrdenesPdf_('-automotriz');
+document.getElementById('btn-export-pdf-llantas').onclick = () => exportarOrdenesPdf_('-llantas');
+document.getElementById('btn-export-pdf-terceros').onclick = () => exportarOrdenesPdf_('-terceros');
 
 function escapeHtml(s){
   const d = document.createElement('div');
@@ -5485,12 +5765,18 @@ document.getElementById('btn-export-encargados-excel-soldadura').addEventListene
 document.getElementById('btn-export-encargados-pdf-soldadura').addEventListener('click', function(){ exportarEncargadosPdf_('-soldadura'); });
 document.getElementById('btn-export-encargados-excel-automotriz').addEventListener('click', function(){ exportarEncargadosExcel_('-automotriz'); });
 document.getElementById('btn-export-encargados-pdf-automotriz').addEventListener('click', function(){ exportarEncargadosPdf_('-automotriz'); });
+document.getElementById('btn-export-encargados-excel-llantas').addEventListener('click', function(){ exportarEncargadosExcel_('-llantas'); });
+document.getElementById('btn-export-encargados-pdf-llantas').addEventListener('click', function(){ exportarEncargadosPdf_('-llantas'); });
+document.getElementById('btn-export-encargados-excel-terceros').addEventListener('click', function(){ exportarEncargadosExcel_('-terceros'); });
+document.getElementById('btn-export-encargados-pdf-terceros').addEventListener('click', function(){ exportarEncargadosPdf_('-terceros'); });
 
 // --- Pestañas: Órdenes / Diesel / Movimientos / Maquinaria / Catálogo / Mantenimiento / Usuarios ---
 const ptabOrdenes = document.getElementById('ptab-ordenes');
 const ordPrincipalWrap = document.getElementById('ord-principal-seccion-wrap');
 const ordSoldaduraWrap = document.getElementById('ord-soldadura-wrap');
 const ordAutomotrizWrap = document.getElementById('ord-automotriz-wrap');
+const ordLlantasWrap = document.getElementById('ord-llantas-wrap');
+const ordTercerosWrap = document.getElementById('ord-terceros-wrap');
 const ptabDiesel = document.getElementById('ptab-diesel');
 const ptabCombustibleAutomotriz = document.getElementById('ptab-combustible-automotriz');
 const ptabCombustibleGeneral = document.getElementById('ptab-combustible-general');
@@ -5722,6 +6008,8 @@ function poblarTodosLosSelectsDepartamento(){
   poblarSelectSimple_('f-departamento', DEPARTAMENTOS, true);
   poblarSelectSimple_('f-departamento-soldadura', DEPARTAMENTOS, true);
   poblarSelectSimple_('f-departamento-automotriz', DEPARTAMENTOS, true);
+  poblarSelectSimple_('f-departamento-llantas', DEPARTAMENTOS, true);
+  poblarSelectSimple_('f-departamento-terceros', DEPARTAMENTOS, true);
 }
 
 function cargarDepartamentosCatalogo(){
@@ -8227,6 +8515,30 @@ function poblarSelectHuertaOrden(){
   if(valorActual) sel.value = valorActual;
 }
 
+// Llena el select "Atendió (proveedor)" del modal de editar orden (solo se
+// usa en Llantas y Ponches / Reparaciones con terceros — ver
+// abrirModalEditarOrdenConDatosFrescos_) con el catálogo de proveedores de
+// Refacciones (ALL_PROVEEDORES). Si el valor que ya tenía guardado la orden
+// (texto libre, de antes de este selector) no coincide con ningún proveedor
+// del catálogo, se agrega como opción aparte marcada "(anterior)" para no
+// perder ese dato ni obligar a elegir uno nuevo antes de guardar otra cosa.
+function poblarSelectAtendioProveedorOrden_(valorActual){
+  const sel = document.getElementById('oed-f-atendio-proveedor');
+  const ordenado = ALL_PROVEEDORES.slice().sort(function(a,b){
+    return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
+  });
+  const coincide = valorActual && ordenado.some(function(p){ return (p.Nombre || '').toUpperCase() === valorActual.toUpperCase(); });
+  let html = '<option value="">Sin proveedor...</option>';
+  if(valorActual && !coincide){
+    html += '<option value="' + escapeHtml(valorActual) + '">' + escapeHtml(valorActual) + ' (anterior)</option>';
+  }
+  html += ordenado.map(function(p){
+    return '<option value="' + escapeHtml(p.Nombre) + '">' + escapeHtml(p.Nombre) + '</option>';
+  }).join('');
+  sel.innerHTML = html;
+  sel.value = valorActual || '';
+}
+
 function abrirModalEditarOrden(orden){
   // Antes de abrir el modal se refresca ALL_RECORDS con el servidor, para
   // partir siempre de la huerta/estatus más reciente y no de una copia que
@@ -8293,9 +8605,26 @@ function abrirModalEditarOrdenConDatosFrescos_(orden){
   document.getElementById('oed-f-visto-bueno').checked = r.VistoBueno === 'Si';
   document.getElementById('oed-f-soldadura').checked = !!r.EsSoldadura;
   document.getElementById('oed-f-automotriz').checked = !!r.EsAutomotriz;
-  document.getElementById('oed-f-atendio').value = r.AtendioPor || '';
+  document.getElementById('oed-f-llantas').checked = !!r.EsLlantas;
+  document.getElementById('oed-f-terceros').checked = !!r.EsTerceros;
   document.getElementById('oed-f-trabajo').value = r.TrabajoRealizado || '';
   document.getElementById('oed-f-nota').value = '';
+
+  // "Atendió": en Llantas y Ponches / Reparaciones con terceros se elige de
+  // los proveedores dados de alta (catálogo de Refacciones → Proveedores,
+  // ver poblarSelectAtendioProveedorOrden_), reutilizando el mismo texto
+  // libre (AtendioPor) que las demás secciones -- no es una columna nueva,
+  // solo cambia cómo se captura. En el resto de las secciones sigue siendo
+  // texto libre, como siempre.
+  const seccionOrdEdit_ = seccionDeOrden_(r);
+  const usaProveedorAtendio_ = (seccionOrdEdit_ === 'llantas' || seccionOrdEdit_ === 'terceros');
+  document.getElementById('oed-f-atendio-texto-wrap').style.display = usaProveedorAtendio_ ? 'none' : '';
+  document.getElementById('oed-f-atendio-proveedor-wrap').style.display = usaProveedorAtendio_ ? '' : 'none';
+  document.getElementById('oed-f-atendio').value = r.AtendioPor || '';
+  if(usaProveedorAtendio_){
+    if(!PROVEEDORES_CARGADOS){ cargarProveedores(function(){ poblarSelectAtendioProveedorOrden_(r.AtendioPor || ''); }); }
+    else { poblarSelectAtendioProveedorOrden_(r.AtendioPor || ''); }
+  }
 
   const auditWrap = document.getElementById('oed-f-audit-wrap');
   if(r.ModificadoPor){
@@ -8330,13 +8659,26 @@ function abrirModalEditarOrdenConDatosFrescos_(orden){
   });
   document.getElementById('oed-btn-save').style.display = puedeEditarEstaOrden_ ? '' : 'none';
 
-  // Aunque sí pueda editar esta orden, las casillas de Soldadura/Automotriz
-  // la podrían MOVER a una sección donde no tiene "capturar" -- se
-  // deshabilitan aparte para no dejarlo marcar un destino que el servidor
-  // de todos modos rechazaría (ver editarOrden en server/handlers.js).
+  // Aunque sí pueda editar esta orden, las casillas de sección (Soldadura/
+  // Automotriz/Llantas y Ponches/Reparaciones con terceros) la podrían MOVER
+  // a una sección donde no tiene "capturar" -- se deshabilitan aparte para
+  // no dejarlo marcar un destino que el servidor de todos modos rechazaría
+  // (ver editarOrden en server/handlers.js). "Reparaciones con terceros"
+  // además solo se puede marcar si el equipo está habilitado en el Catálogo
+  // (AdmiteTerceros) -- esa parte no depende de la sección actual de la
+  // orden ni puede cambiar desde este modal (la unidad no se puede editar
+  // aquí), así que basta con revisar r.AdmiteTerceros.
+  const oedChkTerceros_ = document.getElementById('oed-f-terceros');
+  const oedHintTerceros_ = document.getElementById('oed-f-terceros-hint');
   if(puedeEditarEstaOrden_){
     document.getElementById('oed-f-soldadura').disabled = !puedeCapturarPestana('ordenes_soldadura');
     document.getElementById('oed-f-automotriz').disabled = !puedeCapturarPestana('ordenes_automotriz');
+    document.getElementById('oed-f-llantas').disabled = !puedeCapturarPestana('ordenes_llantas');
+    const puedeTercerosEstaOrden_ = puedeCapturarPestana('ordenes_terceros') && !!r.AdmiteTerceros;
+    oedChkTerceros_.disabled = !puedeTercerosEstaOrden_;
+    oedHintTerceros_.style.display = (puedeCapturarPestana('ordenes_terceros') && !r.AdmiteTerceros) ? '' : 'none';
+  } else {
+    oedHintTerceros_.style.display = 'none';
   }
 
   oedModalOverlay.classList.add('open');
@@ -8365,7 +8707,15 @@ document.getElementById('oed-btn-save').addEventListener('click', function(){
   const vistoBueno = document.getElementById('oed-f-visto-bueno').checked;
   const esSoldadura = document.getElementById('oed-f-soldadura').checked;
   const esAutomotriz = document.getElementById('oed-f-automotriz').checked;
-  const atendioPor = document.getElementById('oed-f-atendio').value.trim();
+  const esLlantas = document.getElementById('oed-f-llantas').checked;
+  const esTerceros = document.getElementById('oed-f-terceros').checked;
+  // "Atendió" sale del selector de proveedor cuando está visible (Llantas y
+  // Ponches / Reparaciones con terceros) o del texto libre en el resto de
+  // las secciones -- ver abrirModalEditarOrdenConDatosFrescos_.
+  const usaProveedorAtendioGuardar_ = document.getElementById('oed-f-atendio-proveedor-wrap').style.display !== 'none';
+  const atendioPor = usaProveedorAtendioGuardar_
+    ? document.getElementById('oed-f-atendio-proveedor').value.trim()
+    : document.getElementById('oed-f-atendio').value.trim();
   const trabajoRealizado = document.getElementById('oed-f-trabajo').value.trim();
   const nota = document.getElementById('oed-f-nota').value.trim();
   const statusEl = document.getElementById('oed-modal-status');
@@ -8399,6 +8749,8 @@ document.getElementById('oed-btn-save').addEventListener('click', function(){
     vistoBueno: vistoBueno,
     esSoldadura: esSoldadura,
     esAutomotriz: esAutomotriz,
+    esLlantas: esLlantas,
+    esTerceros: esTerceros,
     atendioPor: atendioPor,
     trabajoRealizado: trabajoRealizado,
     nota: nota,
@@ -8469,8 +8821,38 @@ function renderOrnUnitOptions(filterText){
       document.getElementById('orn-f-unidad-search').value = opt.dataset.l;
       document.getElementById('orn-unit-select').classList.add('selected');
       dropdown.classList.remove('open');
+      actualizarDisponibilidadOrnTerceros_();
     };
   });
+}
+
+// ¿La unidad (por su código) está marcada en el Catálogo como "Admite
+// reparación con terceros"? Se consulta contra ALL_MAQUINARIA, que ya trae
+// AdmiteTerceros (ver MAQUINARIA_SELECT en server/handlers.js).
+function unidadAdmiteTerceros_(codigoUnidad){
+  if(!codigoUnidad) return false;
+  const m = ALL_MAQUINARIA.find(function(x){ return x.CodigoUnidad === codigoUnidad; });
+  return !!(m && m.AdmiteTerceros);
+}
+
+// Habilita/deshabilita la casilla "Es Reparación con terceros" del modal de
+// Nueva orden según la unidad elegida -- a diferencia de Soldadura/
+// Automotriz/Llantas y Ponches, esta casilla depende del equipo (ver
+// equipoAdmiteTerceros_ en server/handlers.js), así que no se puede fijar
+// de una vez al abrir el modal: se vuelve a evaluar cada vez que cambia la
+// unidad seleccionada (al elegirla de la lista o al borrar la búsqueda).
+function actualizarDisponibilidadOrnTerceros_(){
+  const chkTerceros = document.getElementById('orn-f-terceros');
+  const hint = document.getElementById('orn-f-terceros-hint');
+  const puedeTerceros_ = puedeCapturarPestana('ordenes_terceros');
+  const elegible = !!(ornUnidadSeleccionada && unidadAdmiteTerceros_(ornUnidadSeleccionada.v));
+  if(!puedeTerceros_ || !elegible){
+    chkTerceros.checked = false;
+    chkTerceros.disabled = true;
+  } else {
+    chkTerceros.disabled = false;
+  }
+  hint.style.display = (puedeTerceros_ && ornUnidadSeleccionada && !elegible) ? '' : 'none';
 }
 
 const ornUnitSearchInput = document.getElementById('orn-f-unidad-search');
@@ -8483,6 +8865,7 @@ ornUnitSearchInput.addEventListener('input', function(){
   document.getElementById('orn-unit-select').classList.remove('selected');
   document.getElementById('orn-unit-dropdown').classList.add('open');
   renderOrnUnitOptions(ornUnitSearchInput.value);
+  actualizarDisponibilidadOrnTerceros_();
 });
 document.addEventListener('click', function(e){
   const wrap = document.getElementById('orn-unit-select');
@@ -8509,26 +8892,47 @@ function abrirModalNuevaOrden(seccionPreferida){
   // server/handlers.js). Si además no tiene capturar en Agrícola/principal
   // (la sección que queda si ninguna casilla está marcada), se precarga y
   // bloquea la sección correspondiente: la del botón "+ Nueva orden" que se
-  // haya usado (seccionPreferida, cuando se abrió desde dentro de Soldadura
-  // o Automotriz -- ver orn-btn-abrir-soldadura/orn-btn-abrir-automotriz más
-  // abajo) si el usuario sí puede capturar ahí, o si no la primera sección a
-  // la que sí tenga acceso -- para no dejarlo con una combinación que de
-  // todos modos se rechazaría al guardar.
+  // haya usado (seccionPreferida, cuando se abrió desde dentro de Soldadura,
+  // Automotriz o Llantas y Ponches -- ver orn-btn-abrir-soldadura/
+  // orn-btn-abrir-automotriz/orn-btn-abrir-llantas más abajo) si el usuario
+  // sí puede capturar ahí, o si no la primera sección a la que sí tenga
+  // acceso -- para no dejarlo con una combinación que de todos modos se
+  // rechazaría al guardar. "Reparaciones con terceros" queda fuera de esta
+  // cascada porque además depende de la unidad elegida -- ver
+  // actualizarDisponibilidadOrnTerceros_ más abajo, que la deja siempre
+  // deshabilitada y sin marcar hasta que se elija una unidad elegible.
   const chkSoldadura = document.getElementById('orn-f-soldadura');
   const chkAutomotriz = document.getElementById('orn-f-automotriz');
+  const chkLlantas = document.getElementById('orn-f-llantas');
+  const chkTerceros = document.getElementById('orn-f-terceros');
   const puedeAgricola_ = puedeCapturarPestana('ordenes');
   const puedeSoldadura_ = puedeCapturarPestana('ordenes_soldadura');
   const puedeAutomotriz_ = puedeCapturarPestana('ordenes_automotriz');
+  const puedeLlantas_ = puedeCapturarPestana('ordenes_llantas');
   chkSoldadura.checked = false;
   chkAutomotriz.checked = false;
+  chkLlantas.checked = false;
+  chkTerceros.checked = false;
   chkSoldadura.disabled = !puedeSoldadura_;
   chkAutomotriz.disabled = !puedeAutomotriz_;
+  chkLlantas.disabled = !puedeLlantas_;
+  document.getElementById('orn-f-terceros-hint').style.display = 'none';
   if(!puedeAgricola_){
     if(seccionPreferida === 'soldadura' && puedeSoldadura_){ chkSoldadura.checked = true; chkSoldadura.disabled = true; }
     else if(seccionPreferida === 'automotriz' && puedeAutomotriz_){ chkAutomotriz.checked = true; chkAutomotriz.disabled = true; }
+    else if(seccionPreferida === 'llantas' && puedeLlantas_){ chkLlantas.checked = true; chkLlantas.disabled = true; }
     else if(puedeSoldadura_){ chkSoldadura.checked = true; chkSoldadura.disabled = true; }
     else if(puedeAutomotriz_){ chkAutomotriz.checked = true; chkAutomotriz.disabled = true; }
+    else if(puedeLlantas_){ chkLlantas.checked = true; chkLlantas.disabled = true; }
   }
+  // "Reparaciones con terceros" siempre arranca deshabilitada y sin marcar
+  // -- todavía no hay unidad elegida, así que no se sabe si es elegible (ver
+  // actualizarDisponibilidadOrnTerceros_, que la vuelve a evaluar en cuanto
+  // se elige una unidad). Aunque se haya abierto desde su propio botón "+
+  // Nueva orden" (seccionPreferida === 'terceros'), no se puede precargar
+  // marcada como con las demás secciones porque podría no aplicar a la
+  // unidad que se termine eligiendo.
+  actualizarDisponibilidadOrnTerceros_();
 
   const statusEl = document.getElementById('orn-modal-status');
   statusEl.textContent = '';
@@ -8543,6 +8947,8 @@ function cerrarModalNuevaOrden(){
 document.getElementById('orn-btn-abrir').addEventListener('click', function(){ abrirModalNuevaOrden(); });
 document.getElementById('orn-btn-abrir-soldadura').addEventListener('click', function(){ abrirModalNuevaOrden('soldadura'); });
 document.getElementById('orn-btn-abrir-automotriz').addEventListener('click', function(){ abrirModalNuevaOrden('automotriz'); });
+document.getElementById('orn-btn-abrir-llantas').addEventListener('click', function(){ abrirModalNuevaOrden('llantas'); });
+document.getElementById('orn-btn-abrir-terceros').addEventListener('click', function(){ abrirModalNuevaOrden('terceros'); });
 document.getElementById('orn-modal-close').addEventListener('click', cerrarModalNuevaOrden);
 ornModalOverlay.addEventListener('click', function(e){
   if(e.target === ornModalOverlay) cerrarModalNuevaOrden();
@@ -8568,6 +8974,8 @@ document.getElementById('orn-btn-save').addEventListener('click', async function
   const fecha = document.getElementById('orn-f-fecha').value;
   const esSoldadura = document.getElementById('orn-f-soldadura').checked;
   const esAutomotriz = document.getElementById('orn-f-automotriz').checked;
+  const esLlantas = document.getElementById('orn-f-llantas').checked;
+  const esTerceros = document.getElementById('orn-f-terceros').checked;
   const statusEl = document.getElementById('orn-modal-status');
   const btn = document.getElementById('orn-btn-save');
 
@@ -8609,6 +9017,8 @@ document.getElementById('orn-btn-save').addEventListener('click', async function
     foto: fotoDataUrl,
     esSoldadura: esSoldadura,
     esAutomotriz: esAutomotriz,
+    esLlantas: esLlantas,
+    esTerceros: esTerceros,
   };
 
   google.script.run
@@ -8670,6 +9080,12 @@ function abrirModalRefaccionesNecesarias(orden){
   document.getElementById('refnec-modal-orden').textContent = orden;
   document.getElementById('refnec-f-texto').value = '';
   document.getElementById('refnec-sugeridas-wrap').style.display = 'none';
+  // Costo de la reparación: viene de reportes.costo_reparacion (ver
+  // REPORTE_SELECT en server/handlers.js) -- se guarda aparte de la lista de
+  // piezas, junto con "Guardar lista" (ver refnec-btn-guardar más abajo).
+  const registroCosto_ = ALL_RECORDS.find(function(x){ return x.Orden === orden; });
+  const costoActual_ = registroCosto_ ? registroCosto_.CostoReparacion : null;
+  document.getElementById('refnec-f-costo').value = (costoActual_ === null || costoActual_ === undefined || costoActual_ === '') ? '' : costoActual_;
   const interpStatus = document.getElementById('refnec-interpretar-status');
   interpStatus.textContent = ''; interpStatus.className = 'maq-modal-status';
   const statusEl = document.getElementById('refnec-modal-status');
@@ -9047,7 +9463,7 @@ function sugerirCategoriaPorTexto_(texto){
   if(candidatas.length === 1) sel.value = candidatas[0].Id;
 }
 
-document.getElementById('refnec-btn-guardar').addEventListener('click', function(){
+document.getElementById('refnec-btn-guardar').addEventListener('click', async function(){
   const orden = REFNEC_ORDEN_ACTUAL;
   if(!orden) return;
   const btn = this;
@@ -9056,30 +9472,45 @@ document.getElementById('refnec-btn-guardar').addEventListener('click', function
     return { refaccionId: it.refaccionId || null, texto: it.texto, cantidad: it.cantidad || 1, origen: it.origen || 'manual',
       entregado: !!it.entregado, entregadoPor: it.entregadoPor || '', entregadoEn: it.entregadoEn || null };
   });
+  // Costo de la reparación (opcional, aparte de la lista de piezas -- ver
+  // guardarCostoReparacion en server/handlers.js). Vacío = lo borra (null).
+  const costoTexto = document.getElementById('refnec-f-costo').value.trim();
+  if(costoTexto !== '' && (Number.isNaN(Number(costoTexto)) || Number(costoTexto) < 0)){
+    statusEl.textContent = 'El costo de la reparación debe ser un número de 0 o más.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  const costoReparacion = costoTexto === '' ? null : Number(costoTexto);
 
   btn.disabled = true; btn.textContent = 'Guardando...';
   statusEl.textContent = ''; statusEl.className = 'maq-modal-status';
 
-  google.script.run
-    .withSuccessHandler(function(result){
+  try {
+    const result = await llamarApi_('guardarRefaccionesNecesarias', ACCESS_CODE, PANEL_USUARIO, orden, items);
+    if(!result || !result.success){
       btn.disabled = false; btn.textContent = 'Guardar lista';
-      if(!result || !result.success){
-        statusEl.textContent = (result && result.error) || 'No se pudo guardar.';
-        statusEl.className = 'maq-modal-status show err';
-        return;
-      }
-      statusEl.textContent = 'Guardado correctamente.';
-      statusEl.className = 'maq-modal-status show ok';
-      REFNEC_HAY_CAMBIOS_SIN_GUARDAR = false;
-      document.getElementById('btn-refresh').click();
-      setTimeout(cerrarModalRefaccionesNecesarias, 600);
-    })
-    .withFailureHandler(function(){
-      btn.disabled = false; btn.textContent = 'Guardar lista';
-      statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
+      statusEl.textContent = (result && result.error) || 'No se pudo guardar.';
       statusEl.className = 'maq-modal-status show err';
-    })
-    .guardarRefaccionesNecesarias(ACCESS_CODE, PANEL_USUARIO, orden, items);
+      return;
+    }
+    const resultCosto = await llamarApi_('guardarCostoReparacion', ACCESS_CODE, PANEL_USUARIO, orden, costoReparacion);
+    if(!resultCosto || !resultCosto.success){
+      btn.disabled = false; btn.textContent = 'Guardar lista';
+      statusEl.textContent = (resultCosto && resultCosto.error) || 'Se guardó la lista de piezas, pero no se pudo guardar el costo de la reparación.';
+      statusEl.className = 'maq-modal-status show err';
+      return;
+    }
+    btn.disabled = false; btn.textContent = 'Guardar lista';
+    statusEl.textContent = 'Guardado correctamente.';
+    statusEl.className = 'maq-modal-status show ok';
+    REFNEC_HAY_CAMBIOS_SIN_GUARDAR = false;
+    document.getElementById('btn-refresh').click();
+    setTimeout(cerrarModalRefaccionesNecesarias, 600);
+  } catch(e){
+    btn.disabled = false; btn.textContent = 'Guardar lista';
+    statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
+    statusEl.className = 'maq-modal-status show err';
+  }
 });
 
 function eliminarOrdenClick(orden){
@@ -11821,6 +12252,7 @@ function limpiarModalMaquinaria(){
   maqOperadorCombo.limpiar();
   document.getElementById('maq-f-usa-diesel').checked = false;
   document.getElementById('maq-f-usa-gasolina').checked = false;
+  document.getElementById('maq-f-admite-terceros').checked = false;
   document.getElementById('maq-f-combustible-tipo').value = 'gasolina';
   document.getElementById('maq-f-observaciones').value = '';
   const statusEl = document.getElementById('maq-modal-status');
@@ -11864,6 +12296,7 @@ function abrirModalMaquinaria(registro){
     maqOperadorCombo.setValor(registro.OperadorAsignado || '');
     document.getElementById('maq-f-usa-diesel').checked = !!registro.UsaDiesel;
     document.getElementById('maq-f-usa-gasolina').checked = !!registro.UsaGasolina;
+    document.getElementById('maq-f-admite-terceros').checked = !!registro.AdmiteTerceros;
     document.getElementById('maq-f-combustible-tipo').value = registro.CombustibleAutomotrizTipo === 'diesel' ? 'diesel' : 'gasolina';
     document.getElementById('maq-f-observaciones').value = (registro.Estatus === 'En mantenimiento') ? '' : (registro.Observaciones || '');
     document.getElementById('maq-btn-delete').style.display = '';
@@ -11974,6 +12407,7 @@ document.getElementById('maq-btn-save').addEventListener('click', function(){
     operadorAsignado: document.getElementById('maq-f-operador').value,
     usaDiesel: document.getElementById('maq-f-usa-diesel').checked,
     usaGasolina: document.getElementById('maq-f-usa-gasolina').checked,
+    admiteTerceros: document.getElementById('maq-f-admite-terceros').checked,
     combustibleAutomotrizTipo: document.getElementById('maq-f-combustible-tipo').value,
     observaciones: document.getElementById('maq-f-observaciones').value.trim()
   };
@@ -12106,7 +12540,7 @@ function renderCatalogo(){
   const tbody = document.getElementById('cat-table-body');
   if(!tbody) return;
   if(ALL_MAQUINARIA.length === 0){
-    tbody.innerHTML = '<tr><td colspan="12"><div class="empty">Cargando...</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14"><div class="empty">Cargando...</div></td></tr>';
     return;
   }
   let records = getCatalogoFiltrado();
@@ -12127,7 +12561,7 @@ function renderCatalogo(){
   if(activeTh){ activeTh.textContent = catSortDir === 1 ? '▲' : '▼'; }
 
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="13"><div class="empty">No hay equipo que coincida.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14"><div class="empty">No hay equipo que coincida.</div></td></tr>';
     return;
   }
 
@@ -12147,6 +12581,7 @@ function renderCatalogo(){
       <td>${escapeHtml(r.OperadorAsignado || '—')}</td>
       <td>${r.UsaDiesel ? 'Sí' : '—'}</td>
       <td>${r.UsaGasolina ? (r.CombustibleAutomotrizTipo === 'diesel' ? 'Diesel' : 'Gasolina') : '—'}</td>
+      <td>${r.AdmiteTerceros ? 'Sí' : '—'}</td>
     </tr>
     `;
   }).join('');
@@ -15593,7 +16028,7 @@ document.getElementById('ref-rep-export').addEventListener('click', function(){
 // --- Proveedores (catálogo de contacto, dentro de la pestaña Refacciones) ---
 let ALL_PROVEEDORES = [];
 
-function cargarProveedores(){
+function cargarProveedores(callback){
   const tbody = document.getElementById('prov-table-body');
   tbody.innerHTML = '<tr><td colspan="6"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
@@ -15602,6 +16037,7 @@ function cargarProveedores(){
       ALL_PROVEEDORES = records || [];
       renderProveedores();
       poblarSelectProveedoresRef();
+      if(typeof callback === 'function') callback();
     })
     .withFailureHandler(function(){
       tbody.innerHTML = '<tr><td colspan="6"><div class="empty">No se pudo cargar el catálogo de proveedores.</div></td></tr>';

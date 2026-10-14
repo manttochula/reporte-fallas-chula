@@ -346,6 +346,58 @@
     display:none;
   }
   .status.show{ display:block; }
+
+  /* --- Avance de huerta --- */
+  .avance-mapa-wrap{
+    position:relative;
+    width:100%;
+    border: 1.5px solid var(--line);
+    border-radius: 6px;
+    overflow:hidden;
+    background: var(--panel);
+    touch-action: none; /* evita que el navegador haga scroll/zoom al tocar el mapa para calibrar */
+  }
+  .avance-mapa-wrap img{ width:100%; display:block; }
+  .avance-mapa-wrap canvas{ position:absolute; top:0; left:0; width:100%; height:100%; }
+  .avance-aviso{
+    font-size: 13px;
+    color: var(--text-dim);
+    padding: 14px;
+    text-align:center;
+  }
+  .avance-paso{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    margin: 10px 0;
+  }
+  .avance-btn-secundario{
+    width:100%;
+    padding: 13px 0;
+    background: transparent;
+    color: var(--steel);
+    border: 1.5px solid var(--steel);
+    border-radius: 4px;
+    font-family:'Oswald', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    cursor:pointer;
+    margin-top: 10px;
+  }
+  .avance-btn-secundario:disabled{ opacity:0.5; cursor:default; }
+  .avance-chip{
+    display:inline-block;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: var(--panel-2);
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .avance-chip.activo{ background: var(--ok); color:#1C1E1F; }
   .status.ok{ background: rgba(95,163,106,0.12); color: var(--ok); border:1px solid rgba(95,163,106,0.3); }
   .status.err{ background: rgba(194,75,63,0.12); color: var(--danger); border:1px solid rgba(194,75,63,0.3); }
   .status.warn{ background: rgba(232,135,30,0.12); color: var(--amber); border:1px solid rgba(232,135,30,0.3); }
@@ -635,6 +687,7 @@
       <div class="tab" id="tab-diesel">Cargar Diesel</div>
       <div class="tab" id="tab-movimientos">Movimientos</div>
       <div class="tab" id="tab-misreportes">Mis Reportes</div>
+      <div class="tab" id="tab-avance">Avance Huerta</div>
     </div>
   </header>
 
@@ -800,6 +853,56 @@
 
     <div id="view-misreportes" style="display:none;">
       <div id="mr-list"><div class="loading">Cargando tus reportes...</div></div>
+    </div>
+
+    <div id="view-avance" style="display:none;">
+      <div class="field">
+        <label>Huerta <span class="req">*</span></label>
+        <select id="avance-f-huerta">
+          <option value="" disabled selected>Selecciona una huerta</option>
+        </select>
+      </div>
+
+      <div id="avance-sin-huerta" class="avance-aviso">Selecciona una huerta para ver su mapa de avance.</div>
+
+      <div id="avance-cargando" class="avance-aviso" style="display:none;">Cargando mapa...</div>
+
+      <div id="avance-sin-mapa" class="avance-aviso" style="display:none;">
+        Esta huerta todavía no tiene un mapa subido. Pide que lo suban desde el Panel (Catálogo → Huertas).
+      </div>
+
+      <div id="avance-con-mapa" style="display:none;">
+        <div class="avance-mapa-wrap" id="avance-mapa-wrap">
+          <img id="avance-mapa-img" src="" alt="Mapa de la huerta">
+          <canvas id="avance-mapa-canvas"></canvas>
+        </div>
+
+        <div id="avance-panel-calibracion" style="display:none;">
+          <div class="avance-paso">Este mapa todavía no está calibrado. Para calibrarlo, camina a 2 puntos bien separados y reconocibles de la huerta (por ejemplo dos esquinas), y en cada uno toca ese punto en la imagen de arriba y aprieta "Capturar ubicación aquí".</div>
+          <div class="avance-paso" id="avance-calib-estado">Punto A: toca su lugar en la imagen.</div>
+          <button type="button" class="avance-btn-secundario" id="avance-btn-capturar-a" disabled>Capturar mi ubicación en el Punto A</button>
+          <button type="button" class="avance-btn-secundario" id="avance-btn-capturar-b" disabled>Capturar mi ubicación en el Punto B</button>
+          <button type="button" class="submit-btn" id="avance-btn-guardar-calib" disabled style="margin-top:10px;">Guardar calibración</button>
+          <div class="status" id="avance-calib-status"></div>
+        </div>
+
+        <div id="avance-panel-rastreo" style="display:none;">
+          <div class="field">
+            <label>Qué trabajo es</label>
+            <input type="text" id="avance-f-trabajo" placeholder="Ej. cosecha, fumigación, poda...">
+          </div>
+          <div class="field">
+            <label>Porcentaje de avance (opcional)</label>
+            <input type="number" id="avance-f-porcentaje" min="0" max="100" placeholder="0-100">
+          </div>
+          <div class="avance-chip" id="avance-chip-estado">Sin registrar avance ahora</div>
+          <button type="button" class="submit-btn" id="avance-btn-iniciar">Iniciar avance</button>
+          <button type="button" class="avance-btn-secundario" id="avance-btn-terminar" style="display:none;">Terminar avance</button>
+          <div class="status" id="avance-rastreo-status"></div>
+          <div class="avance-paso">Mientras registras tu avance, deja la pantalla encendida y esta página abierta -- si el celular se bloquea o cambias de app, el rastreo se pausa.</div>
+          <div class="avance-paso" id="avance-link-calibrar-wrap" style="display:none;">¿La calibración quedó mal? <span id="avance-link-recalibrar" style="color:var(--steel); text-decoration:underline; cursor:pointer;">Volver a calibrar el mapa</span>.</div>
+        </div>
+      </div>
     </div>
   </main>
 </div>
@@ -1301,6 +1404,7 @@ function aplicarHuerta(datos){
       : (huertaUsuarioActual ? ('Tu huerta: ' + huertaUsuarioActual) : 'Sin huerta asignada');
   }
   aplicarHuertasReportar(datos.huertasReportar, huerta);
+  poblarSelectHuertaAvance();
 }
 
 // --- Buscador de "Usuario" en el login (escribe y te muestra las opciones
@@ -1436,14 +1540,16 @@ var tabForm = document.getElementById('tab-form');
 var tabDiesel = document.getElementById('tab-diesel');
 var tabMovimientos = document.getElementById('tab-movimientos');
 var tabMisReportes = document.getElementById('tab-misreportes');
+var tabAvance = document.getElementById('tab-avance');
 var viewForm = document.getElementById('view-form');
 var viewDiesel = document.getElementById('view-diesel');
 var viewMovimientos = document.getElementById('view-movimientos');
 var viewMisReportes = document.getElementById('view-misreportes');
+var viewAvance = document.getElementById('view-avance');
 
 function activarPestana(tabActivo, viewActivo){
-  [tabForm, tabDiesel, tabMovimientos, tabMisReportes].forEach(function(t){ t.classList.remove('active'); });
-  [viewForm, viewDiesel, viewMovimientos, viewMisReportes].forEach(function(v){ v.style.display = 'none'; });
+  [tabForm, tabDiesel, tabMovimientos, tabMisReportes, tabAvance].forEach(function(t){ t.classList.remove('active'); });
+  [viewForm, viewDiesel, viewMovimientos, viewMisReportes, viewAvance].forEach(function(v){ v.style.display = 'none'; });
   tabActivo.classList.add('active');
   viewActivo.style.display = 'block';
 }
@@ -1461,6 +1567,10 @@ tabMovimientos.addEventListener('click', function(){
 tabMisReportes.addEventListener('click', function(){
   activarPestana(tabMisReportes, viewMisReportes);
   cargarMisReportes();
+});
+tabAvance.addEventListener('click', function(){
+  activarPestana(tabAvance, viewAvance);
+  poblarSelectHuertaAvance();
 });
 
 function estadoMR(r){
@@ -2489,6 +2599,423 @@ document.getElementById('btn-submit').onclick = () => {
     })
     .submitReporte(record);
 };
+
+// ============================================================
+// Avance de huerta: el operador marca, en vivo sobre un mapa, el
+// recorrido que va haciendo dentro de la huerta. Ver el comentario largo
+// en db/schema.sql (junto a "avance_huerta") para el flujo completo.
+// ============================================================
+
+// Dado 1 par de puntos de calibración (cal1/cal2: {x, y, lat, lng}, con
+// x/y como fracción del ANCHO de la imagen para los 2 ejes) y una
+// coordenada GPS nueva, regresa en qué {x, y} de la imagen debería
+// pintarse -- usando una transformación de similitud (escala + rotación)
+// calculada a partir de la única pareja de puntos conocida. Aproxima
+// grados de latitud/longitud a metros en un plano local (suficientemente
+// preciso para el tamaño de una huerta). Regresa null si cal1 y cal2
+// quedaron prácticamente en el mismo lugar (no se puede calcular nada).
+// Esta misma función (probada aparte con casos conocidos antes de
+// pegarla aquí) se repite igual en Panel.html, para que el Panel pinte el
+// mismo mapa con el mismo criterio.
+function gpsAPosicionEnMapa_(cal1, cal2, lat, lng){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(cal1.lat * Math.PI / 180);
+  function aMetros(p){ return { e: (p.lng - cal1.lng) * metrosPorGradoLng, n: (p.lat - cal1.lat) * metrosPorGradoLat }; }
+  var m2 = aMetros(cal2);
+  var denom = m2.e * m2.e + m2.n * m2.n;
+  if(denom < 1e-9) return null;
+  var px2 = cal2.x - cal1.x;
+  var py2 = cal2.y - cal1.y;
+  var kRe = (px2 * m2.e - py2 * m2.n) / denom;
+  var kIm = (py2 * m2.e + px2 * m2.n) / denom;
+  var mP = aMetros({ lat: lat, lng: lng });
+  var px = kRe * mP.e + kIm * mP.n;
+  var py = kIm * mP.e - kRe * mP.n;
+  return { x: cal1.x + px, y: cal1.y + py };
+}
+
+function avanceEscalaFraccionPorMetro_(cal1, cal2){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(cal1.lat * Math.PI / 180);
+  var e = (cal2.lng - cal1.lng) * metrosPorGradoLng;
+  var n = (cal2.lat - cal1.lat) * metrosPorGradoLat;
+  var distMetros = Math.sqrt(e*e + n*n);
+  var distFraccion = Math.hypot(cal2.x - cal1.x, cal2.y - cal1.y);
+  return distMetros > 0 ? (distFraccion / distMetros) : 0;
+}
+
+function avanceDistanciaMetros_(p1, p2){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(p1.lat * Math.PI / 180);
+  var e = (p2.lng - p1.lng) * metrosPorGradoLng;
+  var n = (p2.lat - p1.lat) * metrosPorGradoLat;
+  return Math.sqrt(e*e + n*n);
+}
+
+var AVANCE_RADIO_PINTADO_METROS = 8; // "ancho de pincel" al pintar -- ajustable aquí
+var AVANCE_DISTANCIA_MINIMA_METROS = 3; // no se guarda un punto nuevo si no se alejó al menos esto del último guardado
+
+var AVANCE_MAPA_INFO = null; // {mapaUrl, calibrado, cal1, cal2} de getMapaHuerta
+var AVANCE_HUERTA_ACTUAL = '';
+var AVANCE_HISTORICO = []; // de getAvanceHuerta: [{avanceId, nombre, trabajo, porcentaje, puntos:[{lat,lng}]}]
+var AVANCE_SESION_ID = null;
+var AVANCE_WATCH_ID = null;
+var AVANCE_ULTIMO_PUNTO = null;
+var AVANCE_PUNTOS_SESION = [];
+var AVANCE_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y} | {x,y,lat,lng}
+
+function poblarSelectHuertaAvance(){
+  var sel = document.getElementById('avance-f-huerta');
+  if(!sel) return;
+  var listaBase = (huertasUsuarioActual && huertasUsuarioActual.length > 0) ? huertasUsuarioActual : HUERTAS_REPORTAR_TODAS;
+  var actual = sel.value;
+  sel.innerHTML = '<option value="" disabled selected>Selecciona una huerta</option>';
+  listaBase.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h; opt.textContent = h;
+    sel.appendChild(opt);
+  });
+  // No se intenta "recordar" una selección anterior vacía (eso siempre
+  // coincidiría con el placeholder y bloquearía el autoseleccionar de
+  // abajo) -- solo cuenta una selección anterior de verdad, o si solo hay
+  // 1 huerta disponible, esa.
+  var aAutoseleccionar = actual || (listaBase.length === 1 ? listaBase[0] : '');
+  if(aAutoseleccionar){
+    for(var i=0; i<sel.options.length; i++){
+      if(sel.options[i].value === aAutoseleccionar){ sel.selectedIndex = i; break; }
+    }
+  }
+}
+
+function avanceFraccionAPixelCanvas_(xFrac, yFrac){
+  var canvas = document.getElementById('avance-mapa-canvas');
+  return { x: xFrac * canvas.width, y: yFrac * canvas.width }; // SIEMPRE * canvas.width en los 2 ejes (ver comentario de x/y en schema.sql)
+}
+
+function avanceAjustarCanvas_(){
+  var img = document.getElementById('avance-mapa-img');
+  var canvas = document.getElementById('avance-mapa-canvas');
+  canvas.width = img.clientWidth;
+  canvas.height = img.clientHeight;
+}
+
+function avanceDibujarMarcaCalibracion_(etiqueta, xFrac, yFrac){
+  var canvas = document.getElementById('avance-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  var p = avanceFraccionAPixelCanvas_(xFrac, yFrac);
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 10, 0, 2*Math.PI);
+  ctx.fillStyle = 'rgba(232,135,30,0.9)';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#1C1E1F';
+  ctx.stroke();
+  ctx.fillStyle = '#1C1E1F';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(etiqueta, p.x, p.y + 4);
+}
+
+function avanceDibujarSegmento_(cal1, cal2, puntoAnterior, puntoNuevo, color){
+  var canvas = document.getElementById('avance-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  var posNueva = gpsAPosicionEnMapa_(cal1, cal2, puntoNuevo.lat, puntoNuevo.lng);
+  if(!posNueva) return;
+  var escala = avanceEscalaFraccionPorMetro_(cal1, cal2);
+  var radioPixeles = Math.max(2, AVANCE_RADIO_PINTADO_METROS * escala * canvas.width);
+  var pNueva = avanceFraccionAPixelCanvas_(posNueva.x, posNueva.y);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  if(puntoAnterior){
+    var posAnterior = gpsAPosicionEnMapa_(cal1, cal2, puntoAnterior.lat, puntoAnterior.lng);
+    if(posAnterior){
+      var pAnterior = avanceFraccionAPixelCanvas_(posAnterior.x, posAnterior.y);
+      ctx.lineWidth = radioPixeles * 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pAnterior.x, pAnterior.y);
+      ctx.lineTo(pNueva.x, pNueva.y);
+      ctx.stroke();
+    }
+  }
+  ctx.beginPath();
+  ctx.arc(pNueva.x, pNueva.y, radioPixeles, 0, 2*Math.PI);
+  ctx.fill();
+}
+
+function avanceDibujarTodoDeNuevo(){
+  var canvas = document.getElementById('avance-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
+    var cal1 = AVANCE_MAPA_INFO.cal1, cal2 = AVANCE_MAPA_INFO.cal2;
+    AVANCE_HISTORICO.forEach(function(sesion){
+      var anterior = null;
+      (sesion.puntos || []).forEach(function(p){
+        avanceDibujarSegmento_(cal1, cal2, anterior, p, 'rgba(76,141,174,0.45)');
+        anterior = p;
+      });
+    });
+    var anteriorActual = null;
+    AVANCE_PUNTOS_SESION.forEach(function(p){
+      avanceDibujarSegmento_(cal1, cal2, anteriorActual, p, 'rgba(232,135,30,0.6)');
+      anteriorActual = p;
+    });
+  }
+  if(AVANCE_CAL_PENDIENTE.a) avanceDibujarMarcaCalibracion_('A', AVANCE_CAL_PENDIENTE.a.x, AVANCE_CAL_PENDIENTE.a.y);
+  if(AVANCE_CAL_PENDIENTE.b) avanceDibujarMarcaCalibracion_('B', AVANCE_CAL_PENDIENTE.b.x, AVANCE_CAL_PENDIENTE.b.y);
+}
+
+function avanceCalibObjetivoActual_(){
+  if(!AVANCE_CAL_PENDIENTE.a || AVANCE_CAL_PENDIENTE.a.lat === undefined) return 'a';
+  if(!AVANCE_CAL_PENDIENTE.b || AVANCE_CAL_PENDIENTE.b.lat === undefined) return 'b';
+  return null;
+}
+
+function avanceActualizarUiCalibracion_(){
+  var estado = document.getElementById('avance-calib-estado');
+  var btnA = document.getElementById('avance-btn-capturar-a');
+  var btnB = document.getElementById('avance-btn-capturar-b');
+  var btnGuardar = document.getElementById('avance-btn-guardar-calib');
+  var objetivo = avanceCalibObjetivoActual_();
+  btnA.disabled = !(AVANCE_CAL_PENDIENTE.a && AVANCE_CAL_PENDIENTE.a.lat === undefined);
+  btnB.disabled = !(AVANCE_CAL_PENDIENTE.b && AVANCE_CAL_PENDIENTE.b.lat === undefined);
+  btnGuardar.disabled = objetivo !== null;
+  if(objetivo === 'a'){
+    estado.textContent = AVANCE_CAL_PENDIENTE.a ? 'Punto A: estando parado ahí, toca "Capturar ubicación".' : 'Punto A: toca su lugar en la imagen de arriba.';
+  } else if(objetivo === 'b'){
+    estado.textContent = AVANCE_CAL_PENDIENTE.b ? 'Punto B: estando parado ahí, toca "Capturar ubicación".' : 'Punto A listo. Ahora toca el lugar del Punto B en la imagen.';
+  } else {
+    estado.textContent = 'Los 2 puntos están listos. Toca "Guardar calibración".';
+  }
+}
+
+document.getElementById('avance-mapa-wrap').addEventListener('click', function(ev){
+  if(document.getElementById('avance-panel-calibracion').style.display === 'none') return;
+  var objetivo = avanceCalibObjetivoActual_();
+  if(!objetivo) return;
+  if(AVANCE_CAL_PENDIENTE[objetivo]) return; // ya se tocó ese punto -- hay que capturar su ubicación antes de poder tocar el siguiente
+  var rect = this.getBoundingClientRect();
+  var xFrac = (ev.clientX - rect.left) / rect.width;
+  var yFrac = (ev.clientY - rect.top) / rect.width;
+  AVANCE_CAL_PENDIENTE[objetivo] = { x: xFrac, y: yFrac };
+  avanceDibujarTodoDeNuevo();
+  avanceActualizarUiCalibracion_();
+});
+
+function avanceCapturarUbicacionCalibracion_(cual){
+  var statusEl = document.getElementById('avance-calib-status');
+  if(!navigator.geolocation){
+    statusEl.textContent = 'Este celular/navegador no tiene GPS disponible.'; statusEl.className = 'status show err';
+    return;
+  }
+  statusEl.textContent = 'Obteniendo tu ubicación...'; statusEl.className = 'status show';
+  navigator.geolocation.getCurrentPosition(function(pos){
+    AVANCE_CAL_PENDIENTE[cual].lat = pos.coords.latitude;
+    AVANCE_CAL_PENDIENTE[cual].lng = pos.coords.longitude;
+    statusEl.textContent = 'Ubicación capturada (precisión ~' + Math.round(pos.coords.accuracy) + 'm).';
+    statusEl.className = 'status show ok';
+    avanceActualizarUiCalibracion_();
+  }, function(err){
+    statusEl.textContent = 'No se pudo obtener tu ubicación: ' + ((err && err.message) || 'revisa que le hayas dado permiso de ubicación a esta página.');
+    statusEl.className = 'status show err';
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+document.getElementById('avance-btn-capturar-a').addEventListener('click', function(){ avanceCapturarUbicacionCalibracion_('a'); });
+document.getElementById('avance-btn-capturar-b').addEventListener('click', function(){ avanceCapturarUbicacionCalibracion_('b'); });
+
+document.getElementById('avance-btn-guardar-calib').addEventListener('click', function(){
+  var btn = this;
+  var statusEl = document.getElementById('avance-calib-status');
+  var huerta = AVANCE_HUERTA_ACTUAL;
+  var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
+  btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      if(!result || !result.success){
+        statusEl.textContent = (result && result.error) || 'No se pudo guardar la calibración.';
+        statusEl.className = 'status show err';
+        return;
+      }
+      statusEl.textContent = 'Calibración guardada. Ya puedes registrar avance.';
+      statusEl.className = 'status show ok';
+      cargarAvanceHuerta(huerta);
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      statusEl.textContent = 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.className = 'status show err';
+    })
+    .guardarCalibracionMapaHuerta(nombre, huerta, AVANCE_CAL_PENDIENTE.a, AVANCE_CAL_PENDIENTE.b);
+});
+
+document.getElementById('avance-link-recalibrar').addEventListener('click', function(){
+  avanceDetenerRastreoSiActivo_();
+  AVANCE_CAL_PENDIENTE = { a: null, b: null };
+  document.getElementById('avance-panel-rastreo').style.display = 'none';
+  document.getElementById('avance-link-calibrar-wrap').style.display = 'none';
+  document.getElementById('avance-panel-calibracion').style.display = '';
+  document.getElementById('avance-calib-status').textContent = '';
+  document.getElementById('avance-calib-status').className = 'status';
+  avanceDibujarTodoDeNuevo();
+  avanceActualizarUiCalibracion_();
+});
+
+function avanceCargarHistorico_(){
+  google.script.run
+    .withSuccessHandler(function(historico){
+      AVANCE_HISTORICO = historico || [];
+      avanceDibujarTodoDeNuevo();
+    })
+    .withFailureHandler(function(){ /* sin red: se queda sin pintar el histórico por ahora, no es grave */ })
+    .getAvanceHuerta(AVANCE_HUERTA_ACTUAL);
+}
+
+function cargarAvanceHuerta(huerta){
+  avanceDetenerRastreoSiActivo_();
+  AVANCE_HUERTA_ACTUAL = huerta;
+  AVANCE_MAPA_INFO = null;
+  AVANCE_HISTORICO = [];
+  AVANCE_PUNTOS_SESION = [];
+  AVANCE_CAL_PENDIENTE = { a: null, b: null };
+  document.getElementById('avance-sin-huerta').style.display = huerta ? 'none' : '';
+  document.getElementById('avance-cargando').style.display = 'none';
+  document.getElementById('avance-sin-mapa').style.display = 'none';
+  document.getElementById('avance-con-mapa').style.display = 'none';
+  if(!huerta) return;
+  document.getElementById('avance-cargando').style.display = '';
+  google.script.run
+    .withSuccessHandler(function(mapa){
+      document.getElementById('avance-cargando').style.display = 'none';
+      if(!mapa || !mapa.mapaUrl){
+        document.getElementById('avance-sin-mapa').style.display = '';
+        return;
+      }
+      AVANCE_MAPA_INFO = mapa;
+      document.getElementById('avance-con-mapa').style.display = '';
+      var img = document.getElementById('avance-mapa-img');
+      img.onload = function(){ avanceAjustarCanvas_(); avanceDibujarTodoDeNuevo(); };
+      img.src = mapa.mapaUrl;
+      if(mapa.calibrado){
+        document.getElementById('avance-panel-calibracion').style.display = 'none';
+        document.getElementById('avance-panel-rastreo').style.display = '';
+        document.getElementById('avance-link-calibrar-wrap').style.display = '';
+        avanceCargarHistorico_();
+      } else {
+        document.getElementById('avance-panel-calibracion').style.display = '';
+        document.getElementById('avance-panel-rastreo').style.display = 'none';
+        document.getElementById('avance-calib-status').textContent = '';
+        document.getElementById('avance-calib-status').className = 'status';
+        avanceActualizarUiCalibracion_();
+      }
+    })
+    .withFailureHandler(function(){
+      document.getElementById('avance-cargando').style.display = 'none';
+      document.getElementById('avance-sin-mapa').style.display = '';
+      document.getElementById('avance-sin-mapa').textContent = 'No se pudo cargar el mapa. Revisa tu conexión.';
+    })
+    .getMapaHuerta(huerta);
+}
+
+document.getElementById('avance-f-huerta').addEventListener('change', function(){
+  cargarAvanceHuerta(this.value);
+});
+
+function avanceDetenerRastreoSiActivo_(){
+  if(AVANCE_WATCH_ID !== null){
+    navigator.geolocation.clearWatch(AVANCE_WATCH_ID);
+    AVANCE_WATCH_ID = null;
+  }
+  if(AVANCE_SESION_ID){
+    var id = AVANCE_SESION_ID;
+    AVANCE_SESION_ID = null;
+    google.script.run.withSuccessHandler(function(){}).withFailureHandler(function(){}).terminarAvance(id);
+    document.getElementById('avance-btn-iniciar').style.display = '';
+    document.getElementById('avance-btn-terminar').style.display = 'none';
+    document.getElementById('avance-f-trabajo').disabled = false;
+    document.getElementById('avance-f-porcentaje').disabled = false;
+    var chip = document.getElementById('avance-chip-estado');
+    chip.textContent = 'Sin registrar avance ahora';
+    chip.classList.remove('activo');
+  }
+}
+
+function avanceNuevaPosicion_(pos){
+  var nuevo = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return;
+  var anterior = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
+  AVANCE_PUNTOS_SESION.push(nuevo);
+  AVANCE_ULTIMO_PUNTO = nuevo;
+  if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
+    avanceDibujarSegmento_(AVANCE_MAPA_INFO.cal1, AVANCE_MAPA_INFO.cal2, anterior, nuevo, 'rgba(232,135,30,0.6)');
+  }
+  var chip = document.getElementById('avance-chip-estado');
+  if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
+  if(AVANCE_SESION_ID){
+    google.script.run.withSuccessHandler(function(){}).withFailureHandler(function(){}).agregarPuntoAvance(AVANCE_SESION_ID, nuevo.lat, nuevo.lng);
+  }
+}
+
+function avanceErrorPosicion_(err){
+  var statusEl = document.getElementById('avance-rastreo-status');
+  statusEl.textContent = 'Se perdió la señal de GPS: ' + ((err && err.message) || 'revisa que le hayas dado permiso de ubicación a esta página.');
+  statusEl.className = 'status show err';
+}
+
+document.getElementById('avance-btn-iniciar').addEventListener('click', function(){
+  var huerta = AVANCE_HUERTA_ACTUAL;
+  var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
+  var trabajo = document.getElementById('avance-f-trabajo').value.trim();
+  var porcentajeStr = document.getElementById('avance-f-porcentaje').value;
+  var porcentaje = porcentajeStr === '' ? null : Number(porcentajeStr);
+  var statusEl = document.getElementById('avance-rastreo-status');
+  if(!navigator.geolocation){
+    statusEl.textContent = 'Este celular/navegador no tiene GPS disponible.'; statusEl.className = 'status show err';
+    return;
+  }
+  var btn = this;
+  btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      if(!result || !result.success){
+        statusEl.textContent = (result && result.error) || 'No se pudo iniciar.';
+        statusEl.className = 'status show err';
+        return;
+      }
+      AVANCE_SESION_ID = result.avanceId;
+      AVANCE_ULTIMO_PUNTO = null;
+      AVANCE_PUNTOS_SESION = [];
+      document.getElementById('avance-btn-iniciar').style.display = 'none';
+      document.getElementById('avance-btn-terminar').style.display = '';
+      document.getElementById('avance-f-trabajo').disabled = true;
+      document.getElementById('avance-f-porcentaje').disabled = true;
+      var chip = document.getElementById('avance-chip-estado');
+      chip.textContent = 'Registrando avance... (0 puntos)';
+      chip.classList.add('activo');
+      statusEl.textContent = 'Avance iniciado. No cierres esta página ni bloquees el celular.';
+      statusEl.className = 'status show ok';
+      AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      statusEl.textContent = 'No se pudo iniciar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.className = 'status show err';
+    })
+    .iniciarAvance(huerta, nombre, trabajo, porcentaje);
+});
+
+document.getElementById('avance-btn-terminar').addEventListener('click', function(){
+  var idTerminar = AVANCE_SESION_ID;
+  avanceDetenerRastreoSiActivo_();
+  document.getElementById('avance-f-trabajo').value = '';
+  document.getElementById('avance-f-porcentaje').value = '';
+  var statusEl = document.getElementById('avance-rastreo-status');
+  statusEl.textContent = 'Avance terminado y guardado.';
+  statusEl.className = 'status show ok';
+  if(idTerminar) avanceCargarHistorico_();
+});
 </script>
 </body>
 </html>

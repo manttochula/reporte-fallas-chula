@@ -2190,3 +2190,86 @@ INSERT IGNORE INTO operadores (nombre, direccion, telefono, flotilla) VALUES
   ('LUIS GERARDO RODRIGUEZ ROSAS', NULL, NULL, 'VEHICULAR'),
   ('NANCY HERNANDEZ CAMACHO', NULL, NULL, 'VEHICULAR'),
   ('CINTHIA CECILIA BACAB', NULL, NULL, 'VEHICULAR');
+
+-- ------------------------------------------------------------
+-- Avance de huerta: nueva pestaña en el celular (Index.html) donde el
+-- operador va marcando, en vivo y sobre un mapa de la huerta, el avance de
+-- su recorrido (ver clasificarReporteAutomatico_ más arriba para un
+-- comentario de cómo se agregan funciones nuevas -- este es un apartado
+-- totalmente nuevo, no una extensión de reportes de fallas).
+--
+-- Cómo funciona (ver server/handlers.js: guardarImagenMapaHuerta,
+-- guardarCalibracionMapaHuerta, iniciarAvance, agregarPuntoAvance,
+-- terminarAvance, getAvanceHuerta):
+--   1) Carlos sube, desde el Panel (Catálogo → Huertas), una imagen del
+--      mapa/croquis de la huerta -- se guarda en huertas.mapa_url.
+--   2) Alguien con permiso ("avance_huerta" en capturar) calibra ese mapa
+--      desde el celular: camina a 2 puntos reconocibles de la huerta, en
+--      cada uno toca ese punto en la imagen Y aprieta un botón para que el
+--      celular capture su propia ubicación GPS -- quedan 2 parejas
+--      punto-en-imagen ↔ coordenada GPS real (mapa_cal1_*/mapa_cal2_*).
+--      Con esas 2 parejas se puede calcular, para cualquier coordenada GPS
+--      nueva, en qué punto de la imagen debería pintarse (ver
+--      gpsAPosicionEnMapa_ en public/Index.html y public/Panel.html).
+--   3) Cualquier operador logueado (mismo nivel de confianza que
+--      submitReporte -- sin permiso especial de Panel) puede iniciar un
+--      registro de avance (avance_huerta), que mientras esté abierto va
+--      acumulando puntos GPS (avance_huerta_puntos) conforme camina con la
+--      página abierta y la pantalla encendida.
+--   4) El avance pintado se acumula para siempre sobre el mismo mapa de
+--      cada huerta (sin botón de reiniciar) -- así se pidió explícitamente.
+--
+-- mapa_cal1_x/mapa_cal1_y (y cal2) son FRACCIÓN del ANCHO de la imagen (no
+-- del alto) para los dos ejes -- a propósito, para que la unidad sea
+-- isométrica (un mismo tamaño en X que en Y) sin importar que la imagen no
+-- sea cuadrada, que es lo que necesita la transformación de
+-- escala+rotación de gpsAPosicionEnMapa_.
+-- ------------------------------------------------------------
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huertas' AND column_name = 'mapa_url'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huertas ADD COLUMN mapa_url VARCHAR(500) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huertas' AND column_name = 'mapa_cal1_x'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huertas ADD COLUMN mapa_cal1_x DECIMAL(7,5) DEFAULT NULL, ADD COLUMN mapa_cal1_y DECIMAL(7,5) DEFAULT NULL, ADD COLUMN mapa_cal1_lat DECIMAL(10,7) DEFAULT NULL, ADD COLUMN mapa_cal1_lng DECIMAL(10,7) DEFAULT NULL, ADD COLUMN mapa_cal2_x DECIMAL(7,5) DEFAULT NULL, ADD COLUMN mapa_cal2_y DECIMAL(7,5) DEFAULT NULL, ADD COLUMN mapa_cal2_lat DECIMAL(10,7) DEFAULT NULL, ADD COLUMN mapa_cal2_lng DECIMAL(10,7) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- Un "registro de avance" = desde que un operador aprieta "Iniciar" hasta
+-- que aprieta "Terminar" (fecha_fin queda NULL mientras sigue abierto).
+CREATE TABLE IF NOT EXISTS avance_huerta (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  huerta        VARCHAR(255) NOT NULL,
+  nombre        VARCHAR(255) NOT NULL,
+  trabajo       VARCHAR(255) DEFAULT NULL,
+  porcentaje    DECIMAL(5,2) DEFAULT NULL,
+  fecha_inicio  DATETIME NOT NULL,
+  fecha_fin     DATETIME DEFAULT NULL,
+  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_avance_huerta_huerta (huerta)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- La trayectoria GPS real de cada registro de avance -- un punto cada vez
+-- que el celular reporta una nueva posición mientras el registro está
+-- abierto. Sin llave foránea hacia avance_huerta (mismo criterio que el
+-- resto del proyecto: no hay FK entre tablas, solo columnas con índice).
+CREATE TABLE IF NOT EXISTS avance_huerta_puntos (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  avance_id     INT NOT NULL,
+  lat           DECIMAL(10,7) NOT NULL,
+  lng           DECIMAL(10,7) NOT NULL,
+  capturado_en  DATETIME NOT NULL,
+  INDEX idx_avance_puntos_avance (avance_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

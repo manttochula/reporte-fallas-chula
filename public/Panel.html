@@ -284,6 +284,19 @@
     font-family:'IBM Plex Mono',monospace; font-size:12.5px; color: var(--text-dim);
     margin-bottom: 14px;
   }
+  /* --- Avance de huerta (visor del Panel) --- */
+  .avance-mapa-wrap{
+    position:relative;
+    max-width: 700px;
+    border: 1.5px solid var(--line);
+    border-radius: 6px;
+    overflow:hidden;
+    background: var(--panel-2, #2a2a2a);
+    margin-bottom: 14px;
+  }
+  .avance-mapa-wrap img{ width:100%; display:block; }
+  .avance-mapa-wrap canvas{ position:absolute; top:0; left:0; width:100%; height:100%; }
+  .avance-aviso{ font-size: 13px; color: var(--text-dim); padding: 14px 0; }
   .ord-summary-row{
     display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px;
     position: sticky; top: 0; z-index: 30; background: var(--bg);
@@ -1131,6 +1144,7 @@
       <div class="panel-tab" id="ptab-servicios-automotrices">Servicios Automotrices</div>
       <div class="panel-tab" id="ptab-refacciones">Refacciones</div>
       <div class="panel-tab" id="ptab-insumos">Insumos</div>
+      <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
     </div>
 
@@ -2606,6 +2620,16 @@
           </select>
           <small style="color:var(--text-dim);">Con esto el sistema decide solo, al capturar un reporte desde el celular, si va a Órdenes Agrícola o a Órdenes Automotriz.</small>
         </div>
+        <div class="maq-field" id="catsimple-f-mapa-wrap" style="display:none;">
+          <label>Mapa de la huerta (para Avance Huerta)</label>
+          <img id="catsimple-f-mapa-preview" src="" alt="Mapa actual" style="display:none; max-width:100%; max-height:160px; border:1px solid var(--line); border-radius:6px; margin-bottom:8px;">
+          <input type="file" id="catsimple-f-mapa-input" accept="image/*">
+          <small style="color:var(--text-dim);">Al subir un mapa nuevo se borra la calibración anterior — habrá que volver a calibrar desde el celular.</small>
+          <div style="margin-top:8px;">
+            <button type="button" class="maq-delete-btn" id="catsimple-btn-subir-mapa" style="color: var(--maq-green, #2e7d32); border-color: var(--maq-green, #2e7d32);">Subir mapa</button>
+          </div>
+          <div class="maq-modal-status" id="catsimple-mapa-status"></div>
+        </div>
         <div class="maq-modal-actions">
           <button class="maq-delete-btn" id="catsimple-btn-delete" style="display:none;">Eliminar</button>
           <button class="maq-save-btn" id="catsimple-btn-save">Guardar</button>
@@ -3291,6 +3315,38 @@
       </div>
     </div>
 
+    <div id="pview-avancehuerta" style="display:none;">
+      <div class="toolbar">
+        <select id="ah-f-huerta"><option value="" disabled selected>Selecciona una huerta</option></select>
+        <button class="export-btn" id="ah-btn-actualizar">Actualizar</button>
+      </div>
+      <div id="ah-sin-huerta" class="avance-aviso">Selecciona una huerta para ver su mapa de avance.</div>
+      <div id="ah-cargando" class="avance-aviso" style="display:none;">Cargando...</div>
+      <div id="ah-sin-mapa" class="avance-aviso" style="display:none;">Esta huerta todavía no tiene un mapa subido (Catálogo → Huertas), o el mapa que tiene todavía no está calibrado (eso se hace desde el celular).</div>
+      <div id="ah-con-mapa" style="display:none;">
+        <div class="avance-mapa-wrap" id="ah-mapa-wrap">
+          <img id="ah-mapa-img" src="" alt="Mapa de la huerta">
+          <canvas id="ah-mapa-canvas"></canvas>
+        </div>
+        <div class="summary" id="ah-resumen"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Operador</th>
+                <th>Trabajo</th>
+                <th>%</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Puntos</th>
+              </tr>
+            </thead>
+            <tbody id="ah-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="maq-modal-overlay" id="ins-modal-overlay">
       <div class="maq-modal">
         <button class="maq-modal-close" id="ins-modal-close">&times;</button>
@@ -3338,6 +3394,7 @@
             <div class="usr-permiso-row"><label>Servicios Automotrices</label><select id="usr-perm-servicios_automotrices" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Refacciones</label><select id="usr-perm-refacciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Insumos</label><select id="usr-perm-insumos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
           </div>
         </div>
@@ -3576,7 +3633,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'avance_huerta', 'usuarios'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -3664,6 +3721,7 @@ function aplicarPermisosPanelUI(){
     ['servicios_automotrices', ptabServiciosAutomotrices, pviewServiciosAutomotrices],
     ['refacciones', ptabRefacciones, pviewRefacciones],
     ['insumos', ptabInsumos, pviewInsumos],
+    ['avance_huerta', ptabAvanceHuerta, pviewAvanceHuerta],
     ['usuarios', ptabUsuarios, pviewUsuarios],
   ];
   let primeraVisible = null;
@@ -5796,6 +5854,7 @@ const ptabMantenimiento = document.getElementById('ptab-mantenimiento');
 const ptabServiciosAutomotrices = document.getElementById('ptab-servicios-automotrices');
 const ptabRefacciones = document.getElementById('ptab-refacciones');
 const ptabInsumos = document.getElementById('ptab-insumos');
+const ptabAvanceHuerta = document.getElementById('ptab-avancehuerta');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
 const pviewOrdenes = document.getElementById('pview-ordenes');
 const pviewDiesel = document.getElementById('pview-diesel');
@@ -5808,6 +5867,7 @@ const pviewMantenimiento = document.getElementById('pview-mantenimiento');
 const pviewServiciosAutomotrices = document.getElementById('pview-servicios-automotrices');
 const pviewRefacciones = document.getElementById('pview-refacciones');
 const pviewInsumos = document.getElementById('pview-insumos');
+const pviewAvanceHuerta = document.getElementById('pview-avancehuerta');
 const pviewUsuarios = document.getElementById('pview-usuarios');
 let USUARIOS_CARGADOS = false;
 let DIESEL_CARGADO = false;
@@ -5820,9 +5880,10 @@ let REFACCIONES_CARGADAS = false;
 let PROVEEDORES_CARGADOS = false;
 let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
+let AVANCE_HUERTA_HUERTAS_CARGADAS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabAvanceHuerta, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewAvanceHuerta, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -5911,6 +5972,187 @@ ptabInsumos.addEventListener('click', function(){
   if(!INSUMOS_CATALOGO_CARGADO){ cargarCatalogoInsumos(); }
   if(!INSUMOS_CARGADOS){ cargarInsumos(); }
 });
+ptabAvanceHuerta.addEventListener('click', function(){
+  activarPanelTab(ptabAvanceHuerta, pviewAvanceHuerta);
+  if(!AVANCE_HUERTA_HUERTAS_CARGADAS){ AVANCE_HUERTA_HUERTAS_CARGADAS = true; poblarSelectHuertaAvanceHuerta_(); }
+});
+
+// ---------------------------------------------------------------
+// Avance de huerta (vista del Panel): aquí es de SOLO LECTURA -- ver el
+// mapa con el avance acumulado pintado y la tabla de registros. Subir el
+// mapa se hace desde Catálogo → Huertas; calibrar y capturar avance se
+// hace desde el celular (Index.html). La transformación GPS→pixel está
+// duplicada aquí IDÉNTICA a la de Index.html (mismo criterio que
+// seccionDeOrden_/seccionDeFila_, que también están duplicadas entre
+// cliente y servidor en este proyecto porque no hay un módulo JS
+// compartido entre archivos).
+// ---------------------------------------------------------------
+function ahGpsAPosicionEnMapa_(cal1, cal2, lat, lng){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(cal1.lat * Math.PI / 180);
+  function aMetros(p){ return { e: (p.lng - cal1.lng) * metrosPorGradoLng, n: (p.lat - cal1.lat) * metrosPorGradoLat }; }
+  var m2 = aMetros(cal2);
+  var denom = m2.e * m2.e + m2.n * m2.n;
+  if(denom < 1e-9) return null;
+  var px2 = cal2.x - cal1.x;
+  var py2 = cal2.y - cal1.y;
+  var kRe = (px2 * m2.e - py2 * m2.n) / denom;
+  var kIm = (py2 * m2.e + px2 * m2.n) / denom;
+  var mP = aMetros({ lat: lat, lng: lng });
+  var px = kRe * mP.e + kIm * mP.n;
+  var py = kIm * mP.e - kRe * mP.n;
+  return { x: cal1.x + px, y: cal1.y + py };
+}
+
+function ahEscalaFraccionPorMetro_(cal1, cal2){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(cal1.lat * Math.PI / 180);
+  var e = (cal2.lng - cal1.lng) * metrosPorGradoLng;
+  var n = (cal2.lat - cal1.lat) * metrosPorGradoLat;
+  var distMetros = Math.sqrt(e*e + n*n);
+  var distFraccion = Math.hypot(cal2.x - cal1.x, cal2.y - cal1.y);
+  return distMetros > 0 ? (distFraccion / distMetros) : 0;
+}
+
+var AH_RADIO_PINTADO_METROS = 8; // igual que AVANCE_RADIO_PINTADO_METROS en Index.html
+var AH_MAPA_INFO = null;
+var AH_HUERTA_ACTUAL = '';
+var AH_SIN_MAPA_TEXTO_DEFAULT = 'Esta huerta todavía no tiene un mapa subido (Catálogo → Huertas), o el mapa que tiene todavía no está calibrado (eso se hace desde el celular).';
+
+function poblarSelectHuertaAvanceHuerta_(){
+  poblarSelectSimple_('ah-f-huerta', HUERTAS || [], true);
+}
+
+function ahFraccionAPixelCanvas_(xFrac, yFrac){
+  var canvas = document.getElementById('ah-mapa-canvas');
+  return { x: xFrac * canvas.width, y: yFrac * canvas.width }; // SIEMPRE * canvas.width en los 2 ejes
+}
+
+function ahAjustarCanvas_(){
+  var img = document.getElementById('ah-mapa-img');
+  var canvas = document.getElementById('ah-mapa-canvas');
+  canvas.width = img.clientWidth;
+  canvas.height = img.clientHeight;
+}
+
+function ahDibujarSegmento_(cal1, cal2, puntoAnterior, puntoNuevo){
+  var canvas = document.getElementById('ah-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  var posNueva = ahGpsAPosicionEnMapa_(cal1, cal2, puntoNuevo.lat, puntoNuevo.lng);
+  if(!posNueva) return;
+  var escala = ahEscalaFraccionPorMetro_(cal1, cal2);
+  var radioPixeles = Math.max(2, AH_RADIO_PINTADO_METROS * escala * canvas.width);
+  var pNueva = ahFraccionAPixelCanvas_(posNueva.x, posNueva.y);
+  ctx.fillStyle = 'rgba(76,141,174,0.55)';
+  ctx.strokeStyle = 'rgba(76,141,174,0.55)';
+  if(puntoAnterior){
+    var posAnterior = ahGpsAPosicionEnMapa_(cal1, cal2, puntoAnterior.lat, puntoAnterior.lng);
+    if(posAnterior){
+      var pAnterior = ahFraccionAPixelCanvas_(posAnterior.x, posAnterior.y);
+      ctx.lineWidth = radioPixeles * 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pAnterior.x, pAnterior.y);
+      ctx.lineTo(pNueva.x, pNueva.y);
+      ctx.stroke();
+    }
+  }
+  ctx.beginPath();
+  ctx.arc(pNueva.x, pNueva.y, radioPixeles, 0, 2*Math.PI);
+  ctx.fill();
+}
+
+function ahDibujarHistorico_(historico){
+  var canvas = document.getElementById('ah-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if(!AH_MAPA_INFO || !AH_MAPA_INFO.calibrado) return;
+  var cal1 = AH_MAPA_INFO.cal1, cal2 = AH_MAPA_INFO.cal2;
+  (historico || []).forEach(function(sesion){
+    var anterior = null;
+    (sesion.puntos || []).forEach(function(p){
+      ahDibujarSegmento_(cal1, cal2, anterior, p);
+      anterior = p;
+    });
+  });
+}
+
+function ahRenderTabla_(historico){
+  var tbody = document.getElementById('ah-table-body');
+  var resumen = document.getElementById('ah-resumen');
+  if(!historico || historico.length === 0){
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);">Todavía no hay avance registrado en esta huerta.</td></tr>';
+    resumen.textContent = '';
+    return;
+  }
+  var totalPuntos = 0;
+  var filas = historico.slice().reverse().map(function(s){
+    totalPuntos += (s.puntos || []).length;
+    return '<tr>'
+      + '<td>' + escapeHtml(s.nombre || '') + '</td>'
+      + '<td>' + escapeHtml(s.trabajo || '—') + '</td>'
+      + '<td>' + (s.porcentaje !== null && s.porcentaje !== undefined ? s.porcentaje + '%' : '—') + '</td>'
+      + '<td>' + (s.fechaInicio ? new Date(s.fechaInicio).toLocaleString('es-MX') : '—') + '</td>'
+      + '<td>' + (s.fechaFin ? new Date(s.fechaFin).toLocaleString('es-MX') : 'En curso') + '</td>'
+      + '<td>' + (s.puntos || []).length + '</td>'
+      + '</tr>';
+  });
+  tbody.innerHTML = filas.join('');
+  resumen.textContent = historico.length + ' registro(s) de avance · ' + totalPuntos + ' punto(s) de GPS en total.';
+}
+
+function cargarAvanceHuertaPanel_(huerta){
+  AH_HUERTA_ACTUAL = huerta;
+  AH_MAPA_INFO = null;
+  document.getElementById('ah-sin-huerta').style.display = huerta ? 'none' : '';
+  document.getElementById('ah-cargando').style.display = 'none';
+  document.getElementById('ah-sin-mapa').style.display = 'none';
+  document.getElementById('ah-sin-mapa').textContent = AH_SIN_MAPA_TEXTO_DEFAULT;
+  document.getElementById('ah-con-mapa').style.display = 'none';
+  if(!huerta) return;
+  document.getElementById('ah-cargando').style.display = '';
+  google.script.run
+    .withSuccessHandler(function(mapa){
+      document.getElementById('ah-cargando').style.display = 'none';
+      if(!mapa || !mapa.mapaUrl){
+        document.getElementById('ah-sin-mapa').style.display = '';
+        return;
+      }
+      AH_MAPA_INFO = mapa;
+      if(!mapa.calibrado){
+        document.getElementById('ah-sin-mapa').style.display = '';
+        document.getElementById('ah-sin-mapa').textContent = 'Esta huerta ya tiene mapa, pero todavía no se calibra desde el celular. Pide que alguien camine a 2 puntos conocidos de la huerta y calibre desde "Avance Huerta" en Reporte de Fallas.';
+        return;
+      }
+      document.getElementById('ah-con-mapa').style.display = '';
+      var img = document.getElementById('ah-mapa-img');
+      img.onload = function(){
+        ahAjustarCanvas_();
+        google.script.run
+          .withSuccessHandler(function(historico){
+            ahDibujarHistorico_(historico || []);
+            ahRenderTabla_(historico || []);
+          })
+          .withFailureHandler(function(){ ahRenderTabla_([]); })
+          .getAvanceHuerta(huerta);
+      };
+      img.src = mapa.mapaUrl;
+    })
+    .withFailureHandler(function(){
+      document.getElementById('ah-cargando').style.display = 'none';
+      document.getElementById('ah-sin-mapa').style.display = '';
+      document.getElementById('ah-sin-mapa').textContent = 'No se pudo cargar el mapa. Revisa tu conexión.';
+    })
+    .getMapaHuerta(huerta);
+}
+
+document.getElementById('ah-f-huerta').addEventListener('change', function(){
+  cargarAvanceHuertaPanel_(this.value);
+});
+document.getElementById('ah-btn-actualizar').addEventListener('click', function(){
+  if(AH_HUERTA_ACTUAL) cargarAvanceHuertaPanel_(AH_HUERTA_ACTUAL);
+});
+
 ptabUsuarios.addEventListener('click', function(){
   activarPanelTab(ptabUsuarios, pviewUsuarios);
   if(!USUARIOS_CARGADOS){ cargarUsuarios(); }
@@ -15494,7 +15736,7 @@ function cargarModelos(){
 // Refacciones) en vez de pedirlos otra vez.
 // ---------------------------------------------------------------
 const CATALOGOS_SIMPLES = [
-  { key: 'huertas', singular: 'la huerta', getFn: 'getHuertasCatalogo', guardarFn: 'guardarHuerta', eliminarFn: 'eliminarHuerta', tieneEmpresaProveedor: true },
+  { key: 'huertas', singular: 'la huerta', getFn: 'getHuertasCatalogo', guardarFn: 'guardarHuerta', eliminarFn: 'eliminarHuerta', tieneEmpresaProveedor: true, tieneMapaHuerta: true },
   { key: 'departamentos', singular: 'el departamento', getFn: 'getDepartamentosCatalogo', guardarFn: 'guardarDepartamento', eliminarFn: 'eliminarDepartamento' },
   { key: 'tiposunidad', singular: 'el tipo de unidad', getFn: 'getTiposUnidad', guardarFn: 'guardarTipoUnidad', eliminarFn: 'eliminarTipoUnidad', tieneCategoriaExtra: true },
   { key: 'operadores', singular: 'el operador', getFn: 'getOperadoresCatalogo', guardarFn: 'guardarOperador', eliminarFn: 'eliminarOperador', tieneOperadorExtra: true },
@@ -15641,6 +15883,26 @@ function abrirModalCatalogoSimple(key, registro){
   } else {
     categoriaWrap.style.display = 'none';
   }
+  const mapaWrap = document.getElementById('catsimple-f-mapa-wrap');
+  const mapaPreview = document.getElementById('catsimple-f-mapa-preview');
+  const mapaStatus = document.getElementById('catsimple-mapa-status');
+  document.getElementById('catsimple-f-mapa-input').value = '';
+  mapaStatus.textContent = ''; mapaStatus.className = 'maq-modal-status';
+  // Solo se puede subir el mapa editando una huerta que ya existe (necesita
+  // su nombre ya guardado en el catálogo) -- si es "Agregar" nueva, primero
+  // hay que Guardar y luego volver a entrar a Editar para subir el mapa.
+  if(cfg.tieneMapaHuerta && registro){
+    mapaWrap.style.display = '';
+    if(registro.MapaUrl){
+      mapaPreview.src = registro.MapaUrl;
+      mapaPreview.style.display = '';
+    } else {
+      mapaPreview.src = '';
+      mapaPreview.style.display = 'none';
+    }
+  } else {
+    mapaWrap.style.display = 'none';
+  }
   const statusEl = document.getElementById('catsimple-modal-status');
   statusEl.textContent = ''; statusEl.className = 'maq-modal-status';
   document.getElementById('catsimple-modal-overlay').classList.add('open');
@@ -15724,6 +15986,59 @@ document.getElementById('catsimple-btn-delete').addEventListener('click', functi
     })
     .withFailureHandler(function(){ btn.disabled = false; alert('No se pudo eliminar. Intenta de nuevo.'); })
     [cfg.eliminarFn](ACCESS_CODE, PANEL_USUARIO, id);
+});
+
+// "Subir mapa" (solo Catálogo → Huertas, con registro ya guardado): sube la
+// imagen vía guardarImagenMapaHuerta -- acción separada de "Guardar" porque
+// requiere el permiso 'avance_huerta' (capturar) en vez de 'catalogo', y
+// porque subir un mapa nuevo borra la calibración existente (el servidor lo
+// hace, aquí solo se avisa).
+document.getElementById('catsimple-btn-subir-mapa').addEventListener('click', async function(){
+  const mapaStatus = document.getElementById('catsimple-mapa-status');
+  const nombreHuerta = document.getElementById('catsimple-f-nombre').value.trim();
+  const fileInput = document.getElementById('catsimple-f-mapa-input');
+  const file = fileInput.files[0];
+  if(!nombreHuerta){
+    mapaStatus.textContent = 'Escribe el nombre de la huerta primero.'; mapaStatus.className = 'maq-modal-status show err';
+    return;
+  }
+  if(!file){
+    mapaStatus.textContent = 'Elige una imagen del mapa.'; mapaStatus.className = 'maq-modal-status show err';
+    return;
+  }
+  const btn = this;
+  btn.disabled = true;
+  mapaStatus.textContent = 'Subiendo mapa...'; mapaStatus.className = 'maq-modal-status show';
+  let dataUrl;
+  try {
+    dataUrl = await leerArchivoComoDataUrl_(file);
+  } catch (e) {
+    btn.disabled = false;
+    mapaStatus.textContent = 'No se pudo leer la imagen. Intenta de nuevo.'; mapaStatus.className = 'maq-modal-status show err';
+    return;
+  }
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      if(!result || !result.success){
+        mapaStatus.textContent = (result && result.error) || 'No se pudo subir el mapa.';
+        mapaStatus.className = 'maq-modal-status show err';
+        return;
+      }
+      mapaStatus.textContent = 'Mapa subido. Ahora hay que calibrarlo desde el celular (Reporte de Fallas → Avance Huerta) antes de poder usarlo.';
+      mapaStatus.className = 'maq-modal-status show ok';
+      const mapaPreview = document.getElementById('catsimple-f-mapa-preview');
+      mapaPreview.src = result.mapaUrl;
+      mapaPreview.style.display = '';
+      fileInput.value = '';
+      recargarCatalogoSimpleYDependientes('huertas');
+    })
+    .withFailureHandler(function(){
+      btn.disabled = false;
+      mapaStatus.textContent = 'No se pudo subir. Revisa tu conexión e intenta de nuevo.';
+      mapaStatus.className = 'maq-modal-status show err';
+    })
+    .guardarImagenMapaHuerta(ACCESS_CODE, PANEL_USUARIO, nombreHuerta, dataUrl);
 });
 
 // Después de agregar/editar/borrar, recarga ese catálogo y — si afecta

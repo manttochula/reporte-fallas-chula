@@ -37,7 +37,13 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // niveles distintos en cada uno (ej. visualizar en Soldadura pero capturar
 // en Agrícola) — ver permisoDeSeccionOrden_/seccionDeFila_ más abajo, que
 // traducen cada orden a cuál de los cinco le corresponde.
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
+// "avance_huerta": pestaña nueva del Panel para ver el mapa de avance de
+// cada huerta (ver sección "Avance de huerta" más abajo). 'capturar' en
+// este permiso es, además, lo que se revisa (sin la clave compartida del
+// Panel, ver requierePermisoAvanceHuerta_) para dejar calibrar el mapa
+// desde el celular -- no cualquier operador puede recalibrar, solo a quien
+// Carlos le dé este permiso.
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -54,6 +60,27 @@ async function requierePermisoPanel_(code, nombreUsuario, pestanas, nivelRequeri
   if (rows.length === 0) throw new Error('Usuario no encontrado.');
   if (!tienePermisoPanel_(rows[0].panel_permisos, pestanas, nivelRequerido)) {
     throw new Error('Tu usuario no tiene permiso de ' + nivelRequerido + ' en esta sección del Panel.');
+  }
+}
+
+// Variante de requierePermisoPanel_ SIN la clave compartida del Panel —
+// para la calibración del mapa de Avance de huerta, que se hace desde el
+// celular (Index.html), no desde el Panel de escritorio, y el celular no
+// maneja ni manda esa clave compartida (mismo nivel de confianza que
+// submitReporte: con haber iniciado sesión con su nombre ya basta). Aun
+// así, calibrar SÍ exige tener el permiso 'avance_huerta' en 'capturar'
+// configurado desde Usuarios — no cualquiera que reporta fallas puede
+// recalibrar el mapa de todos.
+async function requierePermisoAvanceHuerta_(nombreUsuario, nivelRequerido) {
+  const nombre = (nombreUsuario || '').toString().trim();
+  if (!nombre) throw new Error('No se identificó a la persona.');
+  const [rows] = await pool.query(
+    'SELECT panel_permisos FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    [nombre]
+  );
+  if (rows.length === 0) throw new Error('Usuario no encontrado.');
+  if (!tienePermisoPanel_(rows[0].panel_permisos, 'avance_huerta', nivelRequerido)) {
+    throw new Error('Tu usuario no tiene permiso para calibrar el mapa de avance. Pide que te lo den desde el Panel (Usuarios).');
   }
 }
 
@@ -4904,7 +4931,7 @@ async function getHuertasCatalogo(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
   const [rows] = await pool.query(`
     SELECT h.id AS Id, h.nombre AS Nombre, h.empresa_id AS EmpresaId, e.nombre AS EmpresaNombre,
-           h.proveedor_id AS ProveedorId, p.nombre AS ProveedorNombre
+           h.proveedor_id AS ProveedorId, p.nombre AS ProveedorNombre, h.mapa_url AS MapaUrl
     FROM huertas h
     LEFT JOIN empresas e ON e.id = h.empresa_id
     LEFT JOIN proveedores_combustible p ON p.id = h.proveedor_id
@@ -4917,6 +4944,7 @@ async function getHuertasCatalogo(code, nombreUsuario) {
     EmpresaNombre: r.EmpresaNombre,
     ProveedorId: r.ProveedorId,
     ProveedorNombre: r.ProveedorNombre,
+    MapaUrl: r.MapaUrl,
   }));
 }
 
@@ -4950,6 +4978,186 @@ async function guardarHuerta(code, nombreUsuario, id, data) {
 }
 
 async function eliminarHuerta(code, nombreUsuario, id) { return catalogoHuertas_.eliminar(code, nombreUsuario, id); }
+
+// ---------------------------------------------------------------
+// Avance de huerta: pestaña nueva en el celular (Index.html) donde el
+// operador marca, en vivo sobre un mapa, su recorrido por la huerta. Ver
+// el comentario largo en db/schema.sql (junto a "ALTER TABLE huertas ADD
+// COLUMN mapa_url") para el flujo completo (subir mapa -> calibrar ->
+// iniciar/terminar avance).
+// ---------------------------------------------------------------
+
+// Sube/reemplaza la imagen del mapa de una huerta (acción del Panel,
+// Catálogo → Huertas). Upsert por nombre: si la huerta todavía no existe
+// como fila en el catálogo (puede pasar -- las 14 huertas del celular son
+// una lista fija en el HTML, no siempre dadas de alta aquí), se crea. Subir
+// una imagen nueva SIEMPRE borra la calibración anterior (mapa_cal1_*/
+// mapa_cal2_*) -- una calibración vieja ya no tiene sentido sobre una
+// imagen distinta, y dejarla puesta pintaría los puntos en el lugar
+// equivocado sin que nadie se diera cuenta.
+async function guardarImagenMapaHuerta(code, nombreUsuario, huerta, imagenDataUrl) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  if (!imagenDataUrl) return { success: false, error: 'Falta la imagen del mapa.' };
+  try {
+    const mapaUrl = await guardarArchivo_(imagenDataUrl);
+    await pool.query(
+      `INSERT INTO huertas (nombre, mapa_url)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE
+         mapa_url = VALUES(mapa_url),
+         mapa_cal1_x = NULL, mapa_cal1_y = NULL, mapa_cal1_lat = NULL, mapa_cal1_lng = NULL,
+         mapa_cal2_x = NULL, mapa_cal2_y = NULL, mapa_cal2_lat = NULL, mapa_cal2_lng = NULL`,
+      [nombreHuerta, mapaUrl]
+    );
+    return { success: true, mapaUrl };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+// Abierta (sin permiso especial): la usan tanto Index.html (para saber qué
+// mostrar en la pestaña Avance de huerta) como el Panel (para el visor).
+async function getMapaHuerta(huerta) {
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return { mapaUrl: null, calibrado: false };
+  const [rows] = await pool.query(
+    'SELECT mapa_url, mapa_cal1_x, mapa_cal1_y, mapa_cal1_lat, mapa_cal1_lng, mapa_cal2_x, mapa_cal2_y, mapa_cal2_lat, mapa_cal2_lng FROM huertas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    [nombreHuerta]
+  );
+  if (rows.length === 0 || !rows[0].mapa_url) return { mapaUrl: null, calibrado: false };
+  const r = rows[0];
+  const calibrado = [r.mapa_cal1_x, r.mapa_cal1_y, r.mapa_cal1_lat, r.mapa_cal1_lng, r.mapa_cal2_x, r.mapa_cal2_y, r.mapa_cal2_lat, r.mapa_cal2_lng]
+    .every((v) => v !== null && v !== undefined);
+  return {
+    mapaUrl: r.mapa_url,
+    calibrado,
+    cal1: calibrado ? { x: Number(r.mapa_cal1_x), y: Number(r.mapa_cal1_y), lat: Number(r.mapa_cal1_lat), lng: Number(r.mapa_cal1_lng) } : null,
+    cal2: calibrado ? { x: Number(r.mapa_cal2_x), y: Number(r.mapa_cal2_y), lat: Number(r.mapa_cal2_lat), lng: Number(r.mapa_cal2_lng) } : null,
+  };
+}
+
+// Calibración (desde el celular, caminando a los 2 puntos -- ver
+// requierePermisoAvanceHuerta_ más arriba). cal1/cal2: {x, y, lat, lng},
+// con x/y como fracción (0-1) del ANCHO de la imagen para los dos ejes
+// (ver comentario en schema.sql). Se valida que los 2 puntos no queden
+// prácticamente en el mismo lugar (ni en la imagen ni en GPS real) -- con
+// 2 puntos iguales no se puede calcular ninguna transformación.
+async function guardarCalibracionMapaHuerta(nombreUsuario, huerta, cal1, cal2) {
+  await requierePermisoAvanceHuerta_(nombreUsuario, 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  const numeros = [cal1 && cal1.x, cal1 && cal1.y, cal1 && cal1.lat, cal1 && cal1.lng, cal2 && cal2.x, cal2 && cal2.y, cal2 && cal2.lat, cal2 && cal2.lng];
+  if (numeros.some((v) => typeof v !== 'number' || Number.isNaN(v))) {
+    return { success: false, error: 'Faltan datos de los 2 puntos de calibración.' };
+  }
+  const distanciaPixeles = Math.hypot(cal2.x - cal1.x, cal2.y - cal1.y);
+  const distanciaGpsGrados = Math.hypot(cal2.lat - cal1.lat, cal2.lng - cal1.lng);
+  if (distanciaPixeles < 0.02) {
+    return { success: false, error: 'Los 2 puntos que marcaste en la imagen están casi en el mismo lugar. Elige 2 puntos bien separados.' };
+  }
+  if (distanciaGpsGrados < 0.00005) {
+    return { success: false, error: 'Los 2 puntos de GPS capturados están casi en el mismo lugar. Camina a un punto bien separado del otro antes de capturar.' };
+  }
+  const [rows] = await pool.query('SELECT mapa_url FROM huertas WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombreHuerta]);
+  if (rows.length === 0 || !rows[0].mapa_url) {
+    return { success: false, error: 'Esta huerta todavía no tiene un mapa subido. Pide que lo suban primero desde el Panel (Catálogo → Huertas).' };
+  }
+  await pool.query(
+    `UPDATE huertas SET
+       mapa_cal1_x = ?, mapa_cal1_y = ?, mapa_cal1_lat = ?, mapa_cal1_lng = ?,
+       mapa_cal2_x = ?, mapa_cal2_y = ?, mapa_cal2_lat = ?, mapa_cal2_lng = ?
+     WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))`,
+    [cal1.x, cal1.y, cal1.lat, cal1.lng, cal2.x, cal2.y, cal2.lat, cal2.lng, nombreHuerta]
+  );
+  return { success: true };
+}
+
+// A partir de aquí, las 4 funciones del recorrido en sí (iniciar/agregar
+// punto/terminar/consultar) son abiertas -- mismo nivel de confianza que
+// submitReporte: basta con haber iniciado sesión en el celular, sin pedir
+// ningún permiso de Panel. Cualquier operador con acceso a esa huerta para
+// Reportar puede marcar su propio avance ahí.
+async function iniciarAvance(huerta, nombre, trabajo, porcentaje) {
+  const nombreHuerta = (huerta || '').toString().trim();
+  const nombrePersona = (nombre || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  if (!nombrePersona) return { success: false, error: 'Falta indicar quién reporta.' };
+  const porcentajeNum = (porcentaje === '' || porcentaje === undefined || porcentaje === null) ? null : Number(porcentaje);
+  if (porcentajeNum !== null && (Number.isNaN(porcentajeNum) || porcentajeNum < 0 || porcentajeNum > 100)) {
+    return { success: false, error: 'El porcentaje debe ser un número entre 0 y 100.' };
+  }
+  try {
+    const [result] = await pool.query(
+      'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio) VALUES (?, ?, ?, ?, NOW())',
+      [nombreHuerta, nombrePersona, (trabajo || '').toString().trim() || null, porcentajeNum]
+    );
+    return { success: true, avanceId: result.insertId };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+// Se llama repetidamente (cada vez que el celular capta una posición
+// nueva) mientras el registro esté abierto. Si el registro ya no existe o
+// ya se cerró (alguien le dio "Terminar" desde otra pestaña, poco común
+// pero posible), regresa success:false EN VEZ de lanzar error -- esto se
+// llama en silencio desde un watchPosition en segundo plano, y no tiene
+// sentido tronar ni mostrarle nada a media faena por esto.
+async function agregarPuntoAvance(avanceId, lat, lng) {
+  const id = Number(avanceId);
+  if (!id || typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
+    return { success: false, error: 'Datos de ubicación inválidos.' };
+  }
+  const [rows] = await pool.query('SELECT fecha_fin FROM avance_huerta WHERE id = ?', [id]);
+  if (rows.length === 0 || rows[0].fecha_fin !== null) {
+    return { success: false, error: 'Este registro de avance ya no está abierto.' };
+  }
+  await pool.query('INSERT INTO avance_huerta_puntos (avance_id, lat, lng, capturado_en) VALUES (?, ?, ?, NOW())', [id, lat, lng]);
+  return { success: true };
+}
+
+async function terminarAvance(avanceId) {
+  const id = Number(avanceId);
+  if (!id) return { success: false, error: 'Falta indicar qué registro terminar.' };
+  await pool.query('UPDATE avance_huerta SET fecha_fin = NOW() WHERE id = ? AND fecha_fin IS NULL', [id]);
+  return { success: true };
+}
+
+// Todo el histórico de una huerta, agrupado por registro (cada registro es
+// un trazo independiente -- nunca se conecta con una línea el final de un
+// registro con el inicio de otro, aunque hayan sido el mismo día). Sin
+// límite/paginación a propósito: es la cantidad de puntos de GPS de una
+// sola huerta, que para el uso real de este sistema se mantiene chica.
+async function getAvanceHuerta(huerta) {
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return [];
+  const [sesiones] = await pool.query(
+    'SELECT id, nombre, trabajo, porcentaje, fecha_inicio, fecha_fin FROM avance_huerta WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY fecha_inicio',
+    [nombreHuerta]
+  );
+  if (sesiones.length === 0) return [];
+  const ids = sesiones.map((s) => s.id);
+  const [puntos] = await pool.query(
+    'SELECT avance_id, lat, lng, capturado_en FROM avance_huerta_puntos WHERE avance_id IN (?) ORDER BY capturado_en',
+    [ids]
+  );
+  const puntosPorSesion = {};
+  puntos.forEach((p) => {
+    if (!puntosPorSesion[p.avance_id]) puntosPorSesion[p.avance_id] = [];
+    puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng) });
+  });
+  return sesiones.map((s) => ({
+    avanceId: s.id,
+    nombre: s.nombre,
+    trabajo: s.trabajo,
+    porcentaje: s.porcentaje !== null ? Number(s.porcentaje) : null,
+    fechaInicio: s.fecha_inicio,
+    fechaFin: s.fecha_fin,
+    puntos: puntosPorSesion[s.id] || [],
+  }));
+}
 
 async function getDepartamentosCatalogo(code, nombreUsuario) { return catalogoDepartamentos_.get(code, nombreUsuario); }
 async function guardarDepartamento(code, nombreUsuario, id, data) { return catalogoDepartamentos_.guardar(code, nombreUsuario, id, data); }
@@ -6224,6 +6432,13 @@ module.exports = {
   getHuertasCatalogo,
   guardarHuerta,
   eliminarHuerta,
+  guardarImagenMapaHuerta,
+  getMapaHuerta,
+  guardarCalibracionMapaHuerta,
+  iniciarAvance,
+  agregarPuntoAvance,
+  terminarAvance,
+  getAvanceHuerta,
   getDepartamentosCatalogo,
   guardarDepartamento,
   eliminarDepartamento,

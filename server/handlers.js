@@ -424,7 +424,17 @@ function normalizaFilas(rows) {
 // Automotriz/Llantas/principal -- lo único nuevo es que Terceros ahora va
 // primero en vez de entre Llantas y principal, por ser "siempre que el
 // equipo sea elegible" en vez de depender de la descripción.
-const PALABRAS_SOLDADURA_ = ['soldar', 'soldadura', 'soldado', 'soldada', 'soldador'];
+// Además de las palabras genéricas, se incluyen nombres de partes/fallas
+// del tractor que casi siempre implican una reparación de soldadura aunque
+// la descripción no diga "soldar" explícitamente (según Carlos): "tirón"
+// (incluye "tirones"), "tercer punto" (del enganche de 3 puntos), y
+// "abocard..." (abocardado/abocardada/se abocardó/etc. -- cuando un
+// barreno o perno queda ovalado/agrandado, típicamente se repara soldando
+// y volviendo a barrenar).
+const PALABRAS_SOLDADURA_ = [
+  'soldar', 'soldadura', 'soldado', 'soldada', 'soldador',
+  'tiron', 'tercer punto', 'abocard',
+];
 const PALABRAS_LLANTAS_ = [
   'llanta', 'llantas', 'ponche', 'ponchada', 'ponchado', 'ponchadura',
   'rin', 'rines', 'neumatico', 'neumaticos', 'camara de aire', 'birlo', 'birlos',

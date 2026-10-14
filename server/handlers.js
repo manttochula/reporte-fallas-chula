@@ -29,14 +29,15 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // "servicios_automotrices" contra "mantenimiento" (Preventivos Agrícolas):
 // mismo motor por debajo (mantenimiento_reglas/mantenimiento_servicios),
 // pero pestañas y permisos independientes para poder dar uno sin el otro.
-// "ordenes_soldadura"/"ordenes_automotriz" son permisos independientes de
-// "ordenes" para los otros dos apartados de la pestaña Órdenes (Soldadura y
-// Automotriz respectivamente) — "ordenes" sigue siendo el de Agrícola/
-// principal, para no migrar a nadie. Un mismo usuario puede tener niveles
-// distintos en cada uno (ej. visualizar en Soldadura pero capturar en
-// Agrícola) — ver permisoDeSeccionOrden_/seccionDeFila_ más abajo, que
-// traducen cada orden a cuál de los tres le corresponde.
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
+// "ordenes_soldadura"/"ordenes_automotriz"/"ordenes_llantas"/"ordenes_terceros"
+// son permisos independientes de "ordenes" para los otros cuatro apartados
+// de la pestaña Órdenes (Soldadura, Automotriz, Llantas y Ponches, y
+// Reparaciones con terceros respectivamente) — "ordenes" sigue siendo el de
+// Agrícola/principal, para no migrar a nadie. Un mismo usuario puede tener
+// niveles distintos en cada uno (ej. visualizar en Soldadura pero capturar
+// en Agrícola) — ver permisoDeSeccionOrden_/seccionDeFila_ más abajo, que
+// traducen cada orden a cuál de los cinco le corresponde.
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -90,21 +91,28 @@ async function requiereAccesoOrdenes_(code, nombreUsuario, nivelPanelRequerido, 
 
 // A qué permiso de Panel corresponde cada sección de la pestaña Órdenes.
 // 'ordenes' sigue siendo el de Agrícola/principal (así nadie pierde acceso
-// al agregarse los otros dos); Soldadura y Automotriz tienen cada uno el
-// suyo, independiente.
+// al agregarse los demás); cada una de las otras cuatro tiene el suyo,
+// independiente.
 function permisoDeSeccionOrden_(seccion) {
   if (seccion === 'soldadura') return 'ordenes_soldadura';
   if (seccion === 'automotriz') return 'ordenes_automotriz';
+  if (seccion === 'llantas') return 'ordenes_llantas';
+  if (seccion === 'terceros') return 'ordenes_terceros';
   return 'ordenes';
 }
 
 // Misma sección que seccionDeOrden_ del cliente (Panel.html) — a partir de
-// una fila de la tabla reportes (columnas es_soldadura/es_automotriz).
-// Soldadura tiene prioridad sobre Automotriz si por algún motivo las dos
-// banderas estuvieran activas; las tres son mutuamente excluyentes.
+// una fila de la tabla reportes (columnas es_soldadura/es_automotriz/
+// es_llantas/es_terceros). Orden de prioridad si por algún motivo más de
+// una bandera estuviera activa a la vez: Soldadura > Automotriz > Llantas y
+// Ponches > Reparaciones con terceros > Agrícola/principal. Las cinco
+// secciones son mutuamente excluyentes en la práctica (el modal de
+// crear/editar orden solo deja marcar una a la vez).
 function seccionDeFila_(fila) {
   if (fila && Number(fila.es_soldadura)) return 'soldadura';
   if (fila && Number(fila.es_automotriz)) return 'automotriz';
+  if (fila && Number(fila.es_llantas)) return 'llantas';
+  if (fila && Number(fila.es_terceros)) return 'terceros';
   return 'principal';
 }
 
@@ -114,7 +122,7 @@ function seccionDeFila_(fila) {
 // mecanismo de siempre para Taller.html (requiereAccesoOrdenes_ ya resuelve
 // ese caso sin distinguir sección). Lanza error si la orden no existe.
 async function requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, nivelPanelRequerido) {
-  const [rows] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  const [rows] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (rows.length === 0) throw new Error('No se encontró la orden ' + orden + '.');
   await requiereAccesoOrdenes_(code, nombreUsuario, nivelPanelRequerido, permisoDeSeccionOrden_(seccionDeFila_(rows[0])));
 }
@@ -212,6 +220,9 @@ const REPORTE_SELECT = `
     reportes.dias_atencion                           AS DiasAtencion,
     reportes.es_soldadura                             AS EsSoldadura,
     reportes.es_automotriz                             AS EsAutomotriz,
+    reportes.es_llantas                                 AS EsLlantas,
+    reportes.es_terceros                                 AS EsTerceros,
+    reportes.costo_reparacion                             AS CostoReparacion,
     reportes.en_proceso_sin_fecha                       AS EnProcesoSinFecha,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden) AS RefaccionesNecesariasCount,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden AND rrn.entregado = 1) AS RefaccionesEntregadasCount,
@@ -220,7 +231,8 @@ const REPORTE_SELECT = `
     mo.lectura_cierre                    AS LecturaCierre,
     mr.tipo_periodicidad                 AS TipoPeriodicidadRegla,
     m.departamento                       AS Departamento,
-    m.operador_asignado                  AS OperadorAsignado
+    m.operador_asignado                  AS OperadorAsignado,
+    m.admite_terceros                    AS AdmiteTerceros
   FROM reportes
   LEFT JOIN mantenimiento_ordenes mo ON mo.orden = reportes.orden
   LEFT JOIN mantenimiento_reglas mr ON mr.id = mo.regla_id
@@ -407,6 +419,18 @@ async function submitReporte(data) {
   }
 }
 
+// Reparaciones con terceros solo se puede marcar si el equipo está dado de
+// alta en el Catálogo con "Admite reparación con terceros" activo — el
+// cliente ya oculta/deshabilita esa casilla cuando no aplica, pero el
+// servidor siempre la vuelve a validar (mismo criterio de "no confiar solo
+// en el cliente" que el resto del sistema).
+async function equipoAdmiteTerceros_(codigoUnidad) {
+  const codigo = (codigoUnidad || '').toString().trim();
+  if (!codigo) return false;
+  const [rows] = await pool.query('SELECT admite_terceros FROM maquinaria WHERE codigo_unidad = ?', [codigo]);
+  return rows.length > 0 && !!Number(rows[0].admite_terceros);
+}
+
 // Staff: crea una orden directamente desde el Panel (pestaña Órdenes →
 // "Nueva orden"), sin pasar por el formulario "Reportar" del celular. A
 // diferencia de submitReporte, aquí la foto es opcional (el Panel es de
@@ -416,8 +440,14 @@ async function crearOrdenPanel(code, nombreUsuario, data) {
   data = data || {};
   // El permiso depende de a qué sección va la orden nueva (la elige quien
   // la captura con las casillas "Es trabajo de Soldadura"/"Es trabajo
-  // Automotriz" del modal) -- no siempre es 'ordenes' (Agrícola/principal).
-  const seccionNueva = seccionDeFila_({ es_soldadura: data.esSoldadura ? 1 : 0, es_automotriz: data.esAutomotriz ? 1 : 0 });
+  // Automotriz"/"Llantas y Ponches"/"Reparaciones con terceros" del modal)
+  // -- no siempre es 'ordenes' (Agrícola/principal).
+  const seccionNueva = seccionDeFila_({
+    es_soldadura: data.esSoldadura ? 1 : 0,
+    es_automotriz: data.esAutomotriz ? 1 : 0,
+    es_llantas: data.esLlantas ? 1 : 0,
+    es_terceros: data.esTerceros ? 1 : 0,
+  });
   await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionNueva), 'capturar');
   try {
     const codigoUnidad = (data.unidad || '').toString().trim();
@@ -428,6 +458,8 @@ async function crearOrdenPanel(code, nombreUsuario, data) {
     const fecha = normalizarFechaLocal_(data.fecha);
     const esSoldadura = data.esSoldadura ? 1 : 0;
     const esAutomotriz = data.esAutomotriz ? 1 : 0;
+    const esLlantas = data.esLlantas ? 1 : 0;
+    const esTerceros = data.esTerceros ? 1 : 0;
 
     if (!codigoUnidad || !unidadLabel) return { success: false, error: 'Selecciona la unidad.' };
     if (!huerta) return { success: false, error: 'Selecciona la huerta.' };
@@ -438,6 +470,9 @@ async function crearOrdenPanel(code, nombreUsuario, data) {
     if (!descripcion) return { success: false, error: 'Escribe la descripción.' };
     if (!nombre) return { success: false, error: 'Escribe quién reportó.' };
     if (!fecha) return { success: false, error: 'Selecciona la fecha del reporte.' };
+    if (esTerceros && !(await equipoAdmiteTerceros_(codigoUnidad))) {
+      return { success: false, error: 'Este equipo no está habilitado en el Catálogo para "Reparaciones con terceros".' };
+    }
 
     let fotoUrl = '';
     if (data.foto) fotoUrl = await guardarArchivo_(data.foto);
@@ -445,9 +480,9 @@ async function crearOrdenPanel(code, nombreUsuario, data) {
     const orden = await siguienteFolio_(pool, 'orden', 'OF', 5);
     await pool.query(
       `INSERT INTO reportes
-        (orden, codigo_unidad, unidad, huerta, descripcion, nombre, fecha, foto_url, es_soldadura, es_automotriz)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orden, codigoUnidad, unidadLabel, huerta, descripcion, nombre, fecha, fotoUrl || null, esSoldadura, esAutomotriz]
+        (orden, codigo_unidad, unidad, huerta, descripcion, nombre, fecha, foto_url, es_soldadura, es_automotriz, es_llantas, es_terceros)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orden, codigoUnidad, unidadLabel, huerta, descripcion, nombre, fecha, fotoUrl || null, esSoldadura, esAutomotriz, esLlantas, esTerceros]
     );
 
     await registrarAuditoria_('reportes', orden, 'crear', nombreUsuario, unidadLabel + ' — ' + descripcion);
@@ -465,17 +500,17 @@ async function getReportes(code) {
 }
 
 async function getReportesTaller(code, nombreUsuario) {
-  // Basta con tener 'visualizar' en CUALQUIERA de las tres secciones para
+  // Basta con tener 'visualizar' en CUALQUIERA de las cinco secciones para
   // poder entrar a la pestaña -- de cuáles en concreto sí puede ver, se
   // encarga el filtro de abajo (seccionesPermitidas).
-  await requiereAccesoOrdenes_(code, nombreUsuario, 'visualizar', ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz']);
+  await requiereAccesoOrdenes_(code, nombreUsuario, 'visualizar', ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros']);
 
   // A un usuario de Panel (con panel_permisos propio) solo se le regresan
   // las secciones de Órdenes que sí puede ver -- así nunca le llega al
   // cliente una fila de una sección que no debería ver, sin tener que
   // repetir ese filtro en cada lugar que usa ALL_RECORDS (alertas, letrero
   // de pendientes, exportaciones, etc.). Taller.html (sin nombreUsuario, o
-  // con un nombre sin fila propia de panel_permisos) sigue viendo las tres,
+  // con un nombre sin fila propia de panel_permisos) sigue viendo las cinco,
   // igual que siempre -- Taller.html no distingue secciones.
   const nombre = (nombreUsuario || '').toString().trim();
   let seccionesPermitidas = null;
@@ -485,7 +520,7 @@ async function getReportesTaller(code, nombreUsuario) {
       [nombre]
     );
     if (filaUsuario.length > 0 && filaUsuario[0].panel_permisos) {
-      seccionesPermitidas = ['principal', 'soldadura', 'automotriz'].filter((seccion) =>
+      seccionesPermitidas = ['principal', 'soldadura', 'automotriz', 'llantas', 'terceros'].filter((seccion) =>
         tienePermisoPanel_(filaUsuario[0].panel_permisos, permisoDeSeccionOrden_(seccion), 'visualizar')
       );
     }
@@ -499,10 +534,14 @@ async function getReportesTaller(code, nombreUsuario) {
     params.push(huertasRestringidas);
   }
   if (seccionesPermitidas) {
+    // Mismo orden de prioridad que seccionDeFila_: Soldadura > Automotriz >
+    // Llantas y Ponches > Reparaciones con terceros > Agrícola/principal.
     const porSeccion = [];
-    if (seccionesPermitidas.includes('principal')) porSeccion.push('(reportes.es_soldadura = 0 AND reportes.es_automotriz = 0)');
+    if (seccionesPermitidas.includes('principal')) porSeccion.push('(reportes.es_soldadura = 0 AND reportes.es_automotriz = 0 AND reportes.es_llantas = 0 AND reportes.es_terceros = 0)');
     if (seccionesPermitidas.includes('soldadura')) porSeccion.push('reportes.es_soldadura = 1');
     if (seccionesPermitidas.includes('automotriz')) porSeccion.push('(reportes.es_automotriz = 1 AND reportes.es_soldadura = 0)');
+    if (seccionesPermitidas.includes('llantas')) porSeccion.push('(reportes.es_llantas = 1 AND reportes.es_soldadura = 0 AND reportes.es_automotriz = 0)');
+    if (seccionesPermitidas.includes('terceros')) porSeccion.push('(reportes.es_terceros = 1 AND reportes.es_soldadura = 0 AND reportes.es_automotriz = 0 AND reportes.es_llantas = 0)');
     // requiereAccesoOrdenes_ ya garantizó arriba al menos una sección
     // visible, así que porSeccion nunca queda vacío aquí.
     condiciones.push('(' + porSeccion.join(' OR ') + ')');
@@ -517,7 +556,7 @@ async function actualizarOrden(code, nombreUsuario, orden, campos) {
   // Soldadura o Automotriz) -- se busca antes de entrar al try para que un
   // error de permiso se propague igual que antes (no se devuelva como
   // {success:false}).
-  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (filaSeccion.length === 0) throw new Error('No se encontró la orden ' + orden);
   await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])));
   campos = campos || {};
@@ -659,7 +698,7 @@ async function actualizarOrden(code, nombreUsuario, orden, campos) {
 // (no tiene botón para ello) ni poner la Fecha de atención directamente;
 // eso sigue siendo exclusivo del Panel.
 async function marcarOrdenEnProceso(code, nombreUsuario, orden) {
-  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
   await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])), 'capturar');
   try {
@@ -768,15 +807,21 @@ async function sincronizarUbicacionOrdenesAbiertas_(codigoUnidad, huertaNueva, o
 // igual que editarMovimiento/editarCargaDiesel.
 async function editarOrden(code, nombreUsuario, orden, data) {
   data = data || {};
-  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
   const seccionAnterior = seccionDeFila_(filaSeccion[0]);
   await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionAnterior), 'capturar');
-  // Este modal también puede cambiar las casillas de Soldadura/Automotriz
-  // (mover la orden a otra sección) -- si la sección destino es distinta,
-  // también se exige permiso de capturar ahí, para que nadie pueda "mover"
-  // una orden a una sección donde no tiene permiso de editar.
-  const seccionNueva = seccionDeFila_({ es_soldadura: data.esSoldadura ? 1 : 0, es_automotriz: data.esAutomotriz ? 1 : 0 });
+  // Este modal también puede cambiar las casillas de Soldadura/Automotriz/
+  // Llantas y Ponches/Reparaciones con terceros (mover la orden a otra
+  // sección) -- si la sección destino es distinta, también se exige permiso
+  // de capturar ahí, para que nadie pueda "mover" una orden a una sección
+  // donde no tiene permiso de editar.
+  const seccionNueva = seccionDeFila_({
+    es_soldadura: data.esSoldadura ? 1 : 0,
+    es_automotriz: data.esAutomotriz ? 1 : 0,
+    es_llantas: data.esLlantas ? 1 : 0,
+    es_terceros: data.esTerceros ? 1 : 0,
+  });
   if (seccionNueva !== seccionAnterior) {
     await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionNueva), 'capturar');
   }
@@ -801,12 +846,17 @@ async function editarOrden(code, nombreUsuario, orden, data) {
     const vistoBueno = data.vistoBueno ? 'Si' : null;
     const esSoldadura = data.esSoldadura ? 1 : 0;
     const esAutomotriz = data.esAutomotriz ? 1 : 0;
+    const esLlantas = data.esLlantas ? 1 : 0;
+    const esTerceros = data.esTerceros ? 1 : 0;
     const nota = (data.nota || '').toString().trim();
 
     if (!huerta) return { success: false, error: 'Selecciona la huerta.' };
     if (!descripcion) return { success: false, error: 'Escribe la descripción.' };
     if (!nombre) return { success: false, error: 'Escribe quién reportó.' };
     if (!fecha) return { success: false, error: 'Selecciona la fecha del reporte.' };
+    if (esTerceros && !(await equipoAdmiteTerceros_(anterior.codigo_unidad))) {
+      return { success: false, error: 'Este equipo no está habilitado en el Catálogo para "Reparaciones con terceros".' };
+    }
 
     let diasAtencion = null;
     const diasAtencionRaw = (data.diasAtencion === undefined || data.diasAtencion === null)
@@ -829,9 +879,9 @@ async function editarOrden(code, nombreUsuario, orden, data) {
 
     await pool.query(
       `UPDATE reportes SET huerta = ?, descripcion = ?, nombre = ?, fecha = ?, fecha_atencion = ?, fecha_salida = ?,
-        refaccionamiento = ?, atendio_por = ?, trabajo_realizado = ?, visto_bueno = ?, dias_atencion = ?, es_soldadura = ?, es_automotriz = ?, en_proceso_sin_fecha = ?, modificado_por = ?, modificado_en = NOW()
+        refaccionamiento = ?, atendio_por = ?, trabajo_realizado = ?, visto_bueno = ?, dias_atencion = ?, es_soldadura = ?, es_automotriz = ?, es_llantas = ?, es_terceros = ?, en_proceso_sin_fecha = ?, modificado_por = ?, modificado_en = NOW()
        WHERE orden = ?`,
-      [huerta, descripcion, nombre, fecha, fechaAtencion, fechaSalida, refaccionamiento, atendioPor, trabajoRealizado, vistoBueno, diasAtencion, esSoldadura, esAutomotriz, enProcesoSinFecha, modificadoPor, orden]
+      [huerta, descripcion, nombre, fecha, fechaAtencion, fechaSalida, refaccionamiento, atendioPor, trabajoRealizado, vistoBueno, diasAtencion, esSoldadura, esAutomotriz, esLlantas, esTerceros, enProcesoSinFecha, modificadoPor, orden]
     );
 
     // Bitácora: qué campos cambiaron de verdad, más la nota libre si el
@@ -846,6 +896,8 @@ async function editarOrden(code, nombreUsuario, orden, data) {
     if ((anterior.visto_bueno || null) !== vistoBueno) cambios.push('visto bueno: ' + (vistoBueno ? 'Sí' : 'quitado'));
     if (Number(anterior.es_soldadura || 0) !== esSoldadura) cambios.push('Área de Soldadura: ' + (esSoldadura ? 'marcada' : 'quitada'));
     if (Number(anterior.es_automotriz || 0) !== esAutomotriz) cambios.push('Automotriz: ' + (esAutomotriz ? 'marcada' : 'quitada'));
+    if (Number(anterior.es_llantas || 0) !== esLlantas) cambios.push('Llantas y Ponches: ' + (esLlantas ? 'marcada' : 'quitada'));
+    if (Number(anterior.es_terceros || 0) !== esTerceros) cambios.push('Reparaciones con terceros: ' + (esTerceros ? 'marcada' : 'quitada'));
     if ((anterior.dias_atencion === null ? null : Number(anterior.dias_atencion)) !== diasAtencion) {
       cambios.push('días de atención: ' + (anterior.dias_atencion === null || anterior.dias_atencion === undefined ? 'sin definir' : anterior.dias_atencion) + ' → ' + (diasAtencion === null ? 'sin definir' : diasAtencion));
     }
@@ -915,7 +967,7 @@ async function editarOrden(code, nombreUsuario, orden, data) {
 // preventivo, para no dejar una referencia suelta a una orden que ya no
 // existe.
 async function eliminarOrden(code, nombreUsuario, orden) {
-  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
   await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])), 'capturar');
   try {
@@ -2402,7 +2454,8 @@ const MAQUINARIA_SELECT = `
     m.usa_diesel      AS UsaDiesel,
     m.usa_gasolina    AS UsaGasolina,
     m.combustible_automotriz_tipo AS CombustibleAutomotrizTipo,
-    m.operador_asignado AS OperadorAsignado
+    m.operador_asignado AS OperadorAsignado,
+    m.admite_terceros AS AdmiteTerceros
   FROM maquinaria m
   LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
   LEFT JOIN modelos_refacciones mdo ON mdo.id = m.modelo_id
@@ -2510,18 +2563,23 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
     // antes de este catálogo), y el nombre a mostrar se resuelve en
     // getMaquinaria a partir de marca_id/modelo_id primero.
     const operadorAsignado = (data.operadorAsignado || '').toString().trim() || null;
+    // Admite Reparaciones con terceros (pestaña Órdenes): marca qué equipos
+    // pueden usar esa categoría al crear/editar una orden — ver es_terceros
+    // en db/schema.sql y la validación en crearOrdenPanel/editarOrden.
+    const admiteTerceros = data.admiteTerceros ? 1 : 0;
 
     await pool.query(
       `INSERT INTO maquinaria
-        (codigo_unidad, unidad, departamento, marca_id, modelo_id, anio, color, serie, placa, tipo_unidad, observaciones, usa_diesel, usa_gasolina, combustible_automotriz_tipo, operador_asignado)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (codigo_unidad, unidad, departamento, marca_id, modelo_id, anio, color, serie, placa, tipo_unidad, observaciones, usa_diesel, usa_gasolina, combustible_automotriz_tipo, operador_asignado, admite_terceros)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
         unidad = VALUES(unidad), departamento = VALUES(departamento), marca_id = VALUES(marca_id),
         modelo_id = VALUES(modelo_id), anio = VALUES(anio), color = VALUES(color), serie = VALUES(serie),
         placa = VALUES(placa), tipo_unidad = VALUES(tipo_unidad), observaciones = VALUES(observaciones),
         usa_diesel = VALUES(usa_diesel), usa_gasolina = VALUES(usa_gasolina),
         combustible_automotriz_tipo = VALUES(combustible_automotriz_tipo),
-        operador_asignado = VALUES(operador_asignado)`,
+        operador_asignado = VALUES(operador_asignado),
+        admite_terceros = VALUES(admite_terceros)`,
       [
         codigo,
         unidad,
@@ -2538,6 +2596,7 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
         usaGasolina,
         combustibleAutomotrizTipo,
         operadorAsignado,
+        admiteTerceros,
       ]
     );
     return { success: true, codigoUnidad: codigo };
@@ -4505,7 +4564,7 @@ async function getRefaccionesNecesarias(code, nombreUsuario, orden) {
 // simple y sin ambigüedad que calcular la diferencia exacta contra lo que
 // ya había — mismo criterio que refacciones_modelos en guardarRefaccion).
 async function guardarRefaccionesNecesarias(code, nombreUsuario, orden, items) {
-  const [ordenRows] = await pool.query('SELECT orden, es_soldadura, es_automotriz FROM reportes WHERE orden = ?', [orden]);
+  const [ordenRows] = await pool.query('SELECT orden, es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (ordenRows.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
   await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(ordenRows[0])));
   items = Array.isArray(items) ? items : [];
@@ -4551,6 +4610,31 @@ async function guardarRefaccionesNecesarias(code, nombreUsuario, orden, items) {
   );
 
   return { success: true, cantidad: limpios.length };
+}
+
+// Costo total de la reparación (columna reportes.costo_reparacion) —
+// capturado desde el mismo modal de Refaccionamiento, junto al listado de
+// piezas necesarias de arriba (no lo reemplaza, son cosas independientes).
+// Pensado sobre todo para Llantas y Ponches / Reparaciones con terceros,
+// pero no se restringe por sección: cualquier orden puede tener un costo.
+async function guardarCostoReparacion(code, nombreUsuario, orden, costo) {
+  const [ordenRows] = await pool.query('SELECT orden, es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
+  if (ordenRows.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(ordenRows[0])));
+
+  let costoFinal = null;
+  if (costo !== null && costo !== undefined && costo !== '') {
+    const costoNum = Number(costo);
+    if (isNaN(costoNum) || costoNum < 0) return { success: false, error: 'El costo debe ser un número de 0 o más.' };
+    costoFinal = costoNum;
+  }
+
+  await pool.query('UPDATE reportes SET costo_reparacion = ? WHERE orden = ?', [costoFinal, orden]);
+  await agregarObservacionOrden_(
+    orden,
+    (nombreUsuario || 'Alguien') + ' ' + (costoFinal === null ? 'quitó el costo de la reparación.' : 'capturó el costo de la reparación: $' + costoFinal.toFixed(2) + '.')
+  );
+  return { success: true };
 }
 
 // Marca/quita la marca de "Entregado" de UNA pieza ya guardada en la lista
@@ -4927,7 +5011,11 @@ async function eliminarModelo(code, nombreUsuario, id) {
 // ---------------------------------------------------------------
 
 async function getProveedores(code, nombreUsuario) {
-  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  // También lo usa el selector de "Atendió" en Llantas y Ponches /
+  // Reparaciones con terceros (ver abrirModalEditarOrden en Panel.html), no
+  // solo la pestaña Refacciones — por eso acepta cualquiera de los tres
+  // permisos.
+  await requierePermisoPanel_(code, nombreUsuario, ['refacciones', 'ordenes_llantas', 'ordenes_terceros'], 'visualizar');
   const [rows] = await pool.query(`
     SELECT id AS Id, nombre AS Nombre, correo AS Correo, telefono AS Telefono,
            contacto AS Contacto, marcas AS Marcas, notas AS Notas
@@ -5057,7 +5145,7 @@ async function getOrdPendAtencionDias(code, nombreUsuario) {
   // llama en cuanto se abre la pestaña Órdenes sin importar qué sección(es)
   // tenga el usuario -- por eso basta con 'visualizar' en cualquiera de las
   // tres, para no tronar la pestaña a quien solo tiene Soldadura/Automotriz.
-  await requierePermisoPanel_(code, nombreUsuario, ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz'], 'visualizar');
+  await requierePermisoPanel_(code, nombreUsuario, ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'], 'visualizar');
   const [rows] = await pool.query(
     "SELECT clave, valor FROM configuracion_general WHERE clave IN ('ord_pend_atencion_dias', 'ord_pend_atencion_tipo')"
   );
@@ -5982,6 +6070,7 @@ module.exports = {
   interpretarRefaccionesFoto,
   getRefaccionesNecesarias,
   guardarRefaccionesNecesarias,
+  guardarCostoReparacion,
   marcarRefaccionNecesariaEntregada,
   marcarRefaccionNecesariaPendiente,
   getCategorias,

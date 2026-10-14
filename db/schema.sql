@@ -1606,6 +1606,24 @@ WHERE panel_permisos IS NOT NULL
   AND JSON_EXTRACT(panel_permisos, '$.ordenes') IS NOT NULL
   AND JSON_EXTRACT(panel_permisos, '$.ordenes_automotriz') IS NULL;
 
+-- Mismo patrón que arriba, para las 2 secciones nuevas de Órdenes:
+-- "Llantas y Ponches" ("ordenes_llantas") y "Reparaciones con terceros"
+-- ("ordenes_terceros"). A quien ya tenía "ordenes" configurado se le copia
+-- ese mismo nivel, para que no pierda ni gane acceso de golpe.
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.ordenes_llantas', JSON_EXTRACT(panel_permisos, '$.ordenes'))
+WHERE panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes') IS NOT NULL
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes_llantas') IS NULL;
+
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.ordenes_terceros', JSON_EXTRACT(panel_permisos, '$.ordenes'))
+WHERE panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes') IS NOT NULL
+  AND JSON_EXTRACT(panel_permisos, '$.ordenes_terceros') IS NULL;
+
 -- ------------------------------------------------------------
 -- Huertas EXTRA por usuario, además de su huerta única de siempre
 -- (columna `huerta`) — ver huertasEfectivasDeFila_/datosReportarUsuario_/
@@ -2032,6 +2050,69 @@ SET @col_exists = (
 );
 SET @sql_alter = IF(@col_exists = 0,
   'ALTER TABLE movimientos_maquinaria ADD COLUMN odometro_llegada DECIMAL(12,2) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Dos secciones nuevas de la pestaña Órdenes, mismo patrón que
+-- es_soldadura/es_automotriz (independientes entre sí, ver seccionDeFila_
+-- en server/handlers.js para el orden de prioridad cuando más de una
+-- bandera está marcada a la vez):
+--   es_llantas:  "Llantas y Ponches" — cualquier equipo, sin restricción.
+--   es_terceros: "Reparaciones con terceros" — solo se puede marcar si el
+--                equipo (maquinaria.codigo_unidad) tiene admite_terceros=1
+--                en el catálogo (ver más abajo), validado también en el
+--                servidor en crearOrdenPanel/editarOrden.
+-- ------------------------------------------------------------
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'es_llantas'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE reportes ADD COLUMN es_llantas TINYINT(1) NOT NULL DEFAULT 0',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'es_terceros'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE reportes ADD COLUMN es_terceros TINYINT(1) NOT NULL DEFAULT 0',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- Costo de la reparación (monto total que cobró el taller/proveedor),
+-- opcional, capturado desde el modal de Refaccionamiento de la orden —
+-- junto con el listado de piezas necesarias que ya existía, no lo
+-- reemplaza. Pensado sobre todo para Llantas/Terceros, pero no se
+-- restringe a nivel de base de datos (cualquier orden podría tenerlo).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'costo_reparacion'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE reportes ADD COLUMN costo_reparacion DECIMAL(12,2) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- admite_terceros: marca en el catálogo de equipos (Catálogo) qué unidades
+-- pueden usar la categoría de Órdenes "Reparaciones con terceros" — ver
+-- es_terceros arriba. 0 por defecto (la mayoría de los equipos no aplica).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'admite_terceros'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE maquinaria ADD COLUMN admite_terceros TINYINT(1) NOT NULL DEFAULT 0',
   'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;

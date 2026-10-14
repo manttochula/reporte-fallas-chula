@@ -2842,9 +2842,9 @@ document.getElementById('avance-btn-guardar-calib').addEventListener('click', fu
       statusEl.className = 'status show ok';
       cargarAvanceHuerta(huerta);
     })
-    .withFailureHandler(function(){
+    .withFailureHandler(function(err){
       btn.disabled = false;
-      statusEl.textContent = 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
       statusEl.className = 'status show err';
     })
     .guardarCalibracionMapaHuerta(nombre, huerta, AVANCE_CAL_PENDIENTE.a, AVANCE_CAL_PENDIENTE.b);

@@ -5110,12 +5110,22 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   if (!id || typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
     return { success: false, error: 'Datos de ubicación inválidos.' };
   }
-  const [rows] = await pool.query('SELECT fecha_fin FROM avance_huerta WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT huerta, fecha_fin FROM avance_huerta WHERE id = ?', [id]);
   if (rows.length === 0 || rows[0].fecha_fin !== null) {
     return { success: false, error: 'Este registro de avance ya no está abierto.' };
   }
   await pool.query('INSERT INTO avance_huerta_puntos (avance_id, lat, lng, capturado_en) VALUES (?, ?, ?, NOW())', [id, lat, lng]);
-  return { success: true };
+  // Detección automática de cuadros completados (ver comentario junto a
+  // marcarCuadrosCompletadosPorPunto_ más abajo) -- envuelta en try/catch
+  // a propósito: si esto fallara por cualquier motivo, NUNCA debe tirar el
+  // guardado del punto GPS en sí, que es lo importante de esta llamada.
+  let actividadesCompletadas = [];
+  try {
+    actividadesCompletadas = await marcarCuadrosCompletadosPorPunto_(rows[0].huerta, id, lat, lng);
+  } catch (err) {
+    actividadesCompletadas = [];
+  }
+  return { success: true, actividadesCompletadas };
 }
 
 async function terminarAvance(avanceId) {
@@ -5157,6 +5167,234 @@ async function getAvanceHuerta(huerta) {
     fechaFin: s.fecha_fin,
     puntos: puntosPorSesion[s.id] || [],
   }));
+}
+
+// ------------------------------------------------------------
+// Cuadros (lotes numerados) y actividades planeadas por cuadro — ver
+// comentario en db/schema.sql (huerta_cuadros/huerta_actividades) para el
+// diseño completo. Resumen: desde el Panel, Carlos marca con un clic en el
+// mapa dónde está cada cuadro (se guarda como fracción del ancho de la
+// imagen, igual que un punto de calibración) y le asigna actividades
+// ("trabajo"). Cada actividad se marca sola como completada en cuanto el
+// recorrido GPS del operador (el mismo de avance_huerta_puntos, sin
+// cambiar nada de cómo se captura) pasa a menos de
+// CUADRO_RADIO_DETECCION_METROS del cuadro — sin que el operador toque
+// nada. También se revisa el histórico ya guardado al crear la actividad,
+// por si el operador ya había pasado por ahí antes.
+const CUADRO_RADIO_DETECCION_METROS = 30;
+
+// Inversa de gpsAPosicionEnMapa_ (ver Index.html/Panel.html): a partir de
+// una posición en la imagen (xFrac/yFrac, fracción del ANCHO para los 2
+// ejes) y la misma calibración de 2 puntos, regresa la coordenada GPS real
+// que le corresponde. Es la misma matemática de rotación+escala, solo que
+// despejada al revés. Verificada por "round-trip" (ida y vuelta recupera
+// el punto original) contra gpsAPosicionEnMapa_ antes de usarse aquí.
+function posicionEnMapaAGps_(cal1, cal2, xFrac, yFrac) {
+  const metrosPorGradoLat = 111320;
+  const metrosPorGradoLng = 111320 * Math.cos((cal1.lat * Math.PI) / 180);
+  const aMetros = (p) => ({ e: (p.lng - cal1.lng) * metrosPorGradoLng, n: (p.lat - cal1.lat) * metrosPorGradoLat });
+  const m2 = aMetros(cal2);
+  const denom = m2.e * m2.e + m2.n * m2.n;
+  if (denom < 1e-9) return null;
+  const px2 = cal2.x - cal1.x;
+  const py2 = cal2.y - cal1.y;
+  const kRe = (px2 * m2.e - py2 * m2.n) / denom;
+  const kIm = (py2 * m2.e + px2 * m2.n) / denom;
+  const mag2 = kRe * kRe + kIm * kIm;
+  if (mag2 < 1e-12) return null;
+  const px = xFrac - cal1.x;
+  const py = yFrac - cal1.y;
+  const e = (kRe * px + kIm * py) / mag2;
+  const n = (kIm * px - kRe * py) / mag2;
+  return { lat: cal1.lat + n / metrosPorGradoLat, lng: cal1.lng + e / metrosPorGradoLng };
+}
+
+// Distancia en metros entre 2 coordenadas GPS reales (aproximación plana,
+// de sobra para distancias chicas dentro de una huerta).
+function distanciaMetrosAvance_(p1, p2) {
+  const metrosPorGradoLat = 111320;
+  const metrosPorGradoLng = 111320 * Math.cos((p1.lat * Math.PI) / 180);
+  const e = (p2.lng - p1.lng) * metrosPorGradoLng;
+  const n = (p2.lat - p1.lat) * metrosPorGradoLat;
+  return Math.sqrt(e * e + n * n);
+}
+
+// Acción del Panel (marcar un cuadro en el mapa). x/y: fracción (0-1) del
+// ancho de la imagen, igual que un punto de calibración. Nombre único por
+// huerta (ver UNIQUE KEY en schema.sql) -- si Carlos marca 2 veces el mismo
+// nombre, se actualiza su posición en vez de duplicarlo.
+async function guardarCuadroHuerta(code, nombreUsuario, huerta, nombre, x, y) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  const nombreCuadro = (nombre || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  if (!nombreCuadro) return { success: false, error: 'Falta el nombre del cuadro.' };
+  const xNum = Number(x);
+  const yNum = Number(y);
+  if (Number.isNaN(xNum) || Number.isNaN(yNum)) return { success: false, error: 'Falta dónde quedó el clic en el mapa.' };
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO huerta_cuadros (huerta, nombre, x, y)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE x = VALUES(x), y = VALUES(y)`,
+      [nombreHuerta, nombreCuadro, xNum, yNum]
+    );
+    return { success: true, id: result.insertId };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+// Borra el cuadro y, con él, cualquier actividad que ya se le hubiera
+// asignado (sin llave foránea que lo haga solo -- se borra explícito aquí
+// para no dejar actividades huérfanas apuntando a un cuadro que ya no
+// existe).
+async function eliminarCuadroHuerta(code, nombreUsuario, cuadroId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const id = Number(cuadroId);
+  if (!id) return { success: false, error: 'Falta indicar qué cuadro borrar.' };
+  await pool.query('DELETE FROM huerta_actividades WHERE cuadro_id = ?', [id]);
+  await pool.query('DELETE FROM huerta_cuadros WHERE id = ?', [id]);
+  return { success: true };
+}
+
+// Abierta (sin permiso especial) -- la usan tanto el Panel (para marcar/
+// listar cuadros y asignar actividades) como el celular (para mostrar, de
+// solo lectura, qué cuadros existen).
+async function getCuadrosHuerta(huerta) {
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return [];
+  const [rows] = await pool.query(
+    'SELECT id, nombre, x, y FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
+    [nombreHuerta]
+  );
+  return rows.map((r) => ({ id: r.id, nombre: r.nombre, x: Number(r.x), y: Number(r.y) }));
+}
+
+// Acción del Panel (asignar una actividad/trabajo a un cuadro ya marcado).
+// Revisa de inmediato el histórico YA guardado de esa huerta (puntos de
+// recorridos anteriores) -- si el operador ya había pasado cerca de ese
+// cuadro antes de que esta actividad existiera, se crea directamente como
+// "completado" en vez de "pendiente".
+async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, trabajo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  const idCuadro = Number(cuadroId);
+  const trabajoTexto = (trabajo || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  if (!idCuadro) return { success: false, error: 'Falta indicar a qué cuadro corresponde.' };
+  if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
+  const [cuadros] = await pool.query('SELECT x, y FROM huerta_cuadros WHERE id = ?', [idCuadro]);
+  if (cuadros.length === 0) return { success: false, error: 'Ese cuadro ya no existe.' };
+  try {
+    const [result] = await pool.query(
+      'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por) VALUES (?, ?, ?, ?)',
+      [nombreHuerta, idCuadro, trabajoTexto, (nombreUsuario || '').toString().trim() || null]
+    );
+    const actividadId = result.insertId;
+    const completadoYa = await verificarActividadContraHistorico_(nombreHuerta, idCuadro, cuadros[0]);
+    if (completadoYa) {
+      await pool.query(
+        'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ? WHERE id = ?',
+        ['completado', completadoYa.avanceId, actividadId]
+      );
+    }
+    return { success: true, id: actividadId, completadaDeInmediato: !!completadoYa };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+// Revisa, entre los puntos YA guardados de los recorridos de esa huerta,
+// si alguno ya pasó cerca del cuadro dado. Regresa el primer punto (con su
+// avanceId) que cumpla, o null si ninguno. Necesita la calibración de la
+// huerta para convertir la posición del cuadro (pixel) a GPS real; si la
+// huerta todavía no está calibrada, no hay nada que comparar.
+async function verificarActividadContraHistorico_(huerta, cuadroId, cuadroXY) {
+  const mapa = await getMapaHuerta(huerta);
+  if (!mapa.calibrado) return null;
+  const cuadroGps = posicionEnMapaAGps_(mapa.cal1, mapa.cal2, cuadroXY.x, cuadroXY.y);
+  if (!cuadroGps) return null;
+  const [puntos] = await pool.query(
+    `SELECT p.avance_id, p.lat, p.lng FROM avance_huerta_puntos p
+     JOIN avance_huerta a ON a.id = p.avance_id
+     WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))`,
+    [huerta]
+  );
+  for (const p of puntos) {
+    const dist = distanciaMetrosAvance_(cuadroGps, { lat: Number(p.lat), lng: Number(p.lng) });
+    if (dist <= CUADRO_RADIO_DETECCION_METROS) return { avanceId: p.avance_id };
+  }
+  return null;
+}
+
+async function eliminarActividadHuerta(code, nombreUsuario, actividadId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const id = Number(actividadId);
+  if (!id) return { success: false, error: 'Falta indicar qué actividad borrar.' };
+  await pool.query('DELETE FROM huerta_actividades WHERE id = ?', [id]);
+  return { success: true };
+}
+
+// Abierta (sin permiso especial) -- la usan tanto el Panel como el celular
+// (de solo lectura, para que el operador vea qué se le pidió y cómo va).
+async function getActividadesHuerta(huerta) {
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return [];
+  const [rows] = await pool.query(
+    `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, a.trabajo, a.estado, a.creado_en, a.completado_en
+     FROM huerta_actividades a
+     JOIN huerta_cuadros c ON c.id = a.cuadro_id
+     WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))
+     ORDER BY c.nombre, a.creado_en`,
+    [nombreHuerta]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    cuadroId: r.cuadro_id,
+    cuadroNombre: r.cuadroNombre,
+    trabajo: r.trabajo,
+    estado: r.estado,
+    creadoEn: r.creado_en,
+    completadoEn: r.completado_en,
+  }));
+}
+
+// Se llama desde agregarPuntoAvance después de guardar cada punto nuevo
+// del recorrido (ver abajo) -- SIN que el operador haga nada. Solo revisa
+// los cuadros de esa huerta que todavía tengan alguna actividad pendiente
+// (evita trabajo de más sobre cuadros ya completados o sin actividades).
+// Regresa la lista de actividades que se acaban de completar con este
+// punto, para que el celular pueda, si quiere, avisarle algo al operador.
+async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng) {
+  const mapa = await getMapaHuerta(huerta);
+  if (!mapa.calibrado) return [];
+  const [cuadros] = await pool.query(
+    `SELECT c.id, c.x, c.y FROM huerta_cuadros c
+     WHERE LOWER(TRIM(c.huerta)) = LOWER(TRIM(?))
+       AND EXISTS (SELECT 1 FROM huerta_actividades a WHERE a.cuadro_id = c.id AND a.estado = 'pendiente')`,
+    [huerta]
+  );
+  if (cuadros.length === 0) return [];
+  const idsCerca = [];
+  cuadros.forEach((c) => {
+    const posGps = posicionEnMapaAGps_(mapa.cal1, mapa.cal2, Number(c.x), Number(c.y));
+    if (!posGps) return;
+    if (distanciaMetrosAvance_(posGps, { lat, lng }) <= CUADRO_RADIO_DETECCION_METROS) idsCerca.push(c.id);
+  });
+  if (idsCerca.length === 0) return [];
+  const [actividadesAfectadas] = await pool.query(
+    `SELECT a.id, c.nombre AS cuadroNombre, a.trabajo FROM huerta_actividades a
+     JOIN huerta_cuadros c ON c.id = a.cuadro_id
+     WHERE a.cuadro_id IN (?) AND a.estado = 'pendiente'`,
+    [idsCerca]
+  );
+  if (actividadesAfectadas.length === 0) return [];
+  await pool.query(
+    `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_id = ? WHERE cuadro_id IN (?) AND estado = 'pendiente'`,
+    [avanceId, idsCerca]
+  );
+  return actividadesAfectadas.map((a) => ({ id: a.id, cuadroNombre: a.cuadroNombre, trabajo: a.trabajo }));
 }
 
 async function getDepartamentosCatalogo(code, nombreUsuario) { return catalogoDepartamentos_.get(code, nombreUsuario); }
@@ -6439,6 +6677,12 @@ module.exports = {
   agregarPuntoAvance,
   terminarAvance,
   getAvanceHuerta,
+  guardarCuadroHuerta,
+  eliminarCuadroHuerta,
+  getCuadrosHuerta,
+  guardarActividadHuerta,
+  eliminarActividadHuerta,
+  getActividadesHuerta,
   getDepartamentosCatalogo,
   guardarDepartamento,
   eliminarDepartamento,

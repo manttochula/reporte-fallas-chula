@@ -304,6 +304,18 @@
     border-radius:5px; font-weight:700; font-size:13px; cursor:pointer;
   }
   .ah-btn-marcar.activo{ background:#E8871E; border-color:#E8871E; color:#1C1E1F; }
+  .avance-mapa-wrap.ah-modo-cuadros{ cursor:crosshair; }
+  .ah-cuadro-chip{
+    display:inline-flex; align-items:center; gap:6px; background:var(--bg-soft, #F3F3F3);
+    border:1px solid var(--line); border-radius:20px; padding:5px 10px 5px 12px; font-size:12.5px; font-weight:600;
+  }
+  .ah-cuadro-chip a{ color:var(--text-dim); text-decoration:none; font-weight:700; padding:0 2px; }
+  .ah-cuadro-chip a:hover{ color:#c0392b; }
+  .ah-badge{ display:inline-block; padding:3px 9px; border-radius:12px; font-size:12px; font-weight:700; }
+  .ah-badge-pendiente{ background:#FBEBD0; color:#8a5a00; }
+  .ah-badge-completado{ background:#DDF2E3; color:#1e7a44; }
+  .ah-actividad-eliminar{ color:var(--text-dim); text-decoration:none; font-weight:700; cursor:pointer; }
+  .ah-actividad-eliminar:hover{ color:#c0392b; }
   .ord-summary-row{
     display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px;
     position: sticky; top: 0; z-index: 30; background: var(--bg);
@@ -3377,6 +3389,42 @@
             </table>
           </div>
         </div>
+        <div id="ah-cuadros-panel">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:18px;">
+            <div class="avance-paso" style="margin-bottom:0;">Cuadros y actividades planeadas</div>
+            <button type="button" class="ah-btn-marcar" id="ah-btn-modo-cuadros">📍 Marcar cuadros en el mapa</button>
+          </div>
+          <p class="avance-aviso" id="ah-cuadros-aviso-modo" style="display:none; padding:8px 0 0;">Haz clic en el mapa de arriba, en el lugar de cada cuadro, y escribe su nombre (por ejemplo "CUADRO 5"). Aprieta "Terminar de marcar" cuando hayas marcado todos los que necesitas.</p>
+          <div id="ah-cuadros-vacio" class="avance-aviso" style="display:none; padding:8px 0 0;">Todavía no has marcado ningún cuadro en el mapa de esta huerta.</div>
+          <div id="ah-cuadros-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0;"></div>
+          <div id="ah-actividad-form-wrap" style="display:none; gap:8px; margin:12px 0; flex-wrap:wrap; align-items:flex-end;">
+            <div class="maq-field" style="flex:1; min-width:150px; margin-bottom:0;">
+              <label>Cuadro</label>
+              <select id="ah-f-actividad-cuadro"></select>
+            </div>
+            <div class="maq-field" style="flex:2; min-width:180px; margin-bottom:0;">
+              <label>Actividad / trabajo</label>
+              <input type="text" id="ah-f-actividad-trabajo" placeholder="Ej. Poda">
+            </div>
+            <button class="maq-save-btn" id="ah-btn-agregar-actividad" style="max-width:190px; flex:none;">Agregar actividad</button>
+          </div>
+          <div class="maq-modal-status" id="ah-cuadros-status"></div>
+          <div id="ah-actividades-vacio" class="avance-aviso" style="display:none;">Todavía no has asignado ninguna actividad.</div>
+          <div class="table-wrap" id="ah-actividades-tabla-wrap" style="display:none;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cuadro</th>
+                  <th>Actividad</th>
+                  <th>Estado</th>
+                  <th>Completado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ah-actividades-table-body"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -6064,6 +6112,9 @@ var AH_SIN_MAPA_TEXTO_DEFAULT = 'Esta huerta todavía no tiene un mapa subido. S
 // guardar.
 var AH_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y}
 var AH_CAL_ARMADO = null; // null | 'a' | 'b'
+var AH_CUADROS = []; // [{id, nombre, x, y}]
+var AH_ACTIVIDADES = []; // [{id, cuadroId, cuadroNombre, trabajo, estado, creadoEn, completadoEn}]
+var AH_MODO_CUADROS = false;
 
 function poblarSelectHuertaAvanceHuerta_(){
   poblarSelectSimple_('ah-f-huerta', HUERTAS || [], true);
@@ -6143,8 +6194,40 @@ function ahRedibujarTodo_(){
       });
     });
   }
+  ahDibujarCuadros_();
   if(AH_CAL_PENDIENTE.a) ahDibujarMarcaCalibracion_('A', AH_CAL_PENDIENTE.a.x, AH_CAL_PENDIENTE.a.y);
   if(AH_CAL_PENDIENTE.b) ahDibujarMarcaCalibracion_('B', AH_CAL_PENDIENTE.b.x, AH_CAL_PENDIENTE.b.y);
+}
+
+// 'completado' si TODAS sus actividades ya están completadas (y tiene al
+// menos una), 'pendiente' si tiene alguna sin completar, 'ninguna' si el
+// cuadro todavía no tiene ninguna actividad asignada.
+function ahEstadoCuadro_(cuadroId){
+  var actividadesDelCuadro = (AH_ACTIVIDADES || []).filter(function(a){ return a.cuadroId === cuadroId; });
+  if(actividadesDelCuadro.length === 0) return 'ninguna';
+  var tienePendiente = actividadesDelCuadro.some(function(a){ return a.estado !== 'completado'; });
+  return tienePendiente ? 'pendiente' : 'completado';
+}
+
+// Un punto pequeño por cada cuadro marcado -- sin etiqueta de texto (la
+// imagen del mapa ya suele traer rotulado "CUADRO N"), con el color según
+// si ya se completó, sigue pendiente, o todavía no tiene actividad
+// asignada -- para que de un vistazo se vea cómo va el recorrido.
+function ahDibujarCuadros_(){
+  var canvas = document.getElementById('ah-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  (AH_CUADROS || []).forEach(function(c){
+    var pos = ahFraccionAPixelCanvas_(c.x, c.y);
+    var estado = ahEstadoCuadro_(c.id);
+    var color = estado === 'completado' ? '#1e7a44' : (estado === 'pendiente' ? '#E8871E' : '#8a8f94');
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+  });
 }
 
 // Acepta "19.123456, -96.123456", con espacio o sin espacio, o separado
@@ -6178,7 +6261,20 @@ function ahActualizarUiCalibracion_(){
 // calibrada (se llegó aquí por "Recalibrar"), se precargan los 2 puntos
 // que ya había -- así solo hay que corregir/afinar en vez de volver a
 // empezar de cero.
+// Apaga el modo "marcar cuadros" (botón, aviso, cursor) sin tocar nada
+// más -- se usa tanto al apretar el botón para terminar, como al entrar a
+// calibración (para que un clic no se interprete en los 2 modos a la vez).
+function ahSalirModoCuadros_(){
+  AH_MODO_CUADROS = false;
+  var btn = document.getElementById('ah-btn-modo-cuadros');
+  btn.textContent = '📍 Marcar cuadros en el mapa';
+  btn.classList.remove('activo');
+  document.getElementById('ah-cuadros-aviso-modo').style.display = 'none';
+  document.getElementById('ah-mapa-wrap').classList.remove('ah-modo-cuadros');
+}
+
 function ahEntrarModoCalibracion_(){
+  ahSalirModoCuadros_();
   document.getElementById('ah-vista-avance').style.display = 'none';
   document.getElementById('ah-link-recalibrar-wrap').style.display = 'none';
   document.getElementById('ah-calib-panel').style.display = '';
@@ -6214,15 +6310,17 @@ document.getElementById('ah-btn-marcar-b').addEventListener('click', function(){
 });
 
 document.getElementById('ah-mapa-wrap').addEventListener('click', function(ev){
-  if(document.getElementById('ah-calib-panel').style.display === 'none') return;
-  if(!AH_CAL_ARMADO) return;
   var rect = this.getBoundingClientRect();
   var xFrac = (ev.clientX - rect.left) / rect.width;
   var yFrac = (ev.clientY - rect.top) / rect.width; // SIEMPRE / rect.width en los 2 ejes (igual que al pintar)
-  AH_CAL_PENDIENTE[AH_CAL_ARMADO] = { x: xFrac, y: yFrac };
-  AH_CAL_ARMADO = null;
-  ahActualizarUiCalibracion_();
-  ahRedibujarTodo_();
+  if(document.getElementById('ah-calib-panel').style.display !== 'none' && AH_CAL_ARMADO){
+    AH_CAL_PENDIENTE[AH_CAL_ARMADO] = { x: xFrac, y: yFrac };
+    AH_CAL_ARMADO = null;
+    ahActualizarUiCalibracion_();
+    ahRedibujarTodo_();
+    return;
+  }
+  if(AH_MODO_CUADROS) ahMarcarCuadroEnClic_(xFrac, yFrac);
 });
 
 document.getElementById('ah-btn-guardar-calib').addEventListener('click', function(){
@@ -6297,12 +6395,224 @@ function ahRenderTabla_(historico){
   resumen.textContent = historico.length + ' registro(s) de avance · ' + totalPuntos + ' punto(s) de GPS en total.';
 }
 
+// Un "chip" compacto por cuadro (nombre + ✕ para borrarlo) -- más rápido
+// de leer que una tabla cuando son varios cuadros chicos.
+function ahRenderCuadrosChips_(){
+  var wrap = document.getElementById('ah-cuadros-chips');
+  var vacio = document.getElementById('ah-cuadros-vacio');
+  if(!AH_CUADROS || AH_CUADROS.length === 0){
+    wrap.innerHTML = '';
+    vacio.style.display = '';
+    return;
+  }
+  vacio.style.display = 'none';
+  wrap.innerHTML = AH_CUADROS.map(function(c){
+    return '<span class="ah-cuadro-chip">' + escapeHtml(c.nombre)
+      + ' <a href="#" data-id="' + c.id + '" class="ah-cuadro-eliminar" title="Borrar este cuadro">✕</a></span>';
+  }).join('');
+}
+
+function ahPoblarSelectActividadCuadro_(){
+  var sel = document.getElementById('ah-f-actividad-cuadro');
+  sel.innerHTML = '';
+  (AH_CUADROS || []).forEach(function(c){
+    var opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.nombre;
+    sel.appendChild(opt);
+  });
+  document.getElementById('ah-actividad-form-wrap').style.display = (AH_CUADROS && AH_CUADROS.length > 0) ? 'flex' : 'none';
+}
+
+function ahRenderActividadesTabla_(){
+  var tbody = document.getElementById('ah-actividades-table-body');
+  var vacio = document.getElementById('ah-actividades-vacio');
+  var tablaWrap = document.getElementById('ah-actividades-tabla-wrap');
+  if(!AH_ACTIVIDADES || AH_ACTIVIDADES.length === 0){
+    tbody.innerHTML = '';
+    vacio.style.display = '';
+    tablaWrap.style.display = 'none';
+    return;
+  }
+  vacio.style.display = 'none';
+  tablaWrap.style.display = '';
+  tbody.innerHTML = AH_ACTIVIDADES.map(function(a){
+    var completado = a.estado === 'completado';
+    return '<tr>'
+      + '<td>' + escapeHtml(a.cuadroNombre || '') + '</td>'
+      + '<td>' + escapeHtml(a.trabajo || '') + '</td>'
+      + '<td><span class="ah-badge ' + (completado ? 'ah-badge-completado' : 'ah-badge-pendiente') + '">' + (completado ? 'Completado' : 'Pendiente') + '</span></td>'
+      + '<td>' + (a.completadoEn ? new Date(a.completadoEn).toLocaleString('es-MX') : '—') + '</td>'
+      + '<td><a href="#" data-id="' + a.id + '" class="ah-actividad-eliminar" title="Borrar esta actividad">✕</a></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function ahRenderCuadrosYActividades_(){
+  ahRenderCuadrosChips_();
+  ahPoblarSelectActividadCuadro_();
+  ahRenderActividadesTabla_();
+  ahRedibujarTodo_();
+}
+
+function ahCargarCuadrosYActividades_(huerta){
+  google.script.run
+    .withSuccessHandler(function(cuadros){
+      AH_CUADROS = cuadros || [];
+      google.script.run
+        .withSuccessHandler(function(actividades){
+          AH_ACTIVIDADES = actividades || [];
+          ahRenderCuadrosYActividades_();
+        })
+        .withFailureHandler(function(){ AH_ACTIVIDADES = []; ahRenderCuadrosYActividades_(); })
+        .getActividadesHuerta(huerta);
+    })
+    .withFailureHandler(function(){ AH_CUADROS = []; AH_ACTIVIDADES = []; ahRenderCuadrosYActividades_(); })
+    .getCuadrosHuerta(huerta);
+}
+
+// Se dispara al hacer clic en el mapa estando en modo "marcar cuadros".
+// window.prompt() para el nombre -- mismo patrón ya usado en el Panel
+// para nombrar catálogos nuevos (Marca, Modelo, etc).
+function ahMarcarCuadroEnClic_(xFrac, yFrac){
+  var nombre = window.prompt('Nombre de este cuadro (por ejemplo: CUADRO 5):', '');
+  if(nombre === null) return;
+  nombre = nombre.trim();
+  if(!nombre) return;
+  var huerta = AH_HUERTA_ACTUAL;
+  var statusEl = document.getElementById('ah-cuadros-status');
+  statusEl.textContent = 'Guardando...';
+  statusEl.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        statusEl.textContent = (result && result.error) || 'No se pudo guardar el cuadro.';
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      statusEl.textContent = '';
+      statusEl.className = 'maq-modal-status';
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .guardarCuadroHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, nombre, xFrac, yFrac);
+}
+
+document.getElementById('ah-btn-modo-cuadros').addEventListener('click', function(){
+  if(AH_MODO_CUADROS){
+    ahSalirModoCuadros_();
+    return;
+  }
+  AH_CAL_ARMADO = null; // por si quedó armado de calibración, evita confundir el próximo clic
+  AH_MODO_CUADROS = true;
+  this.textContent = '✅ Terminar de marcar';
+  this.classList.add('activo');
+  document.getElementById('ah-cuadros-aviso-modo').style.display = '';
+  document.getElementById('ah-mapa-wrap').classList.add('ah-modo-cuadros');
+});
+
+document.getElementById('ah-cuadros-chips').addEventListener('click', function(ev){
+  var link = ev.target.closest ? ev.target.closest('.ah-cuadro-eliminar') : null;
+  if(!link) return;
+  ev.preventDefault();
+  var id = Number(link.dataset.id);
+  if(!id) return;
+  if(!window.confirm('¿Borrar este cuadro? También se borrarán las actividades que tenga asignadas.')) return;
+  var huerta = AH_HUERTA_ACTUAL;
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        document.getElementById('ah-cuadros-status').textContent = (result && result.error) || 'No se pudo borrar el cuadro.';
+        document.getElementById('ah-cuadros-status').className = 'maq-modal-status show err';
+        return;
+      }
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('ah-cuadros-status').textContent = (err && err.message) || 'No se pudo borrar. Revisa tu conexión e intenta de nuevo.';
+      document.getElementById('ah-cuadros-status').className = 'maq-modal-status show err';
+    })
+    .eliminarCuadroHuerta(ACCESS_CODE, PANEL_USUARIO, id);
+});
+
+document.getElementById('ah-btn-agregar-actividad').addEventListener('click', function(){
+  var statusEl = document.getElementById('ah-cuadros-status');
+  var huerta = AH_HUERTA_ACTUAL;
+  var cuadroId = Number(document.getElementById('ah-f-actividad-cuadro').value);
+  var trabajo = document.getElementById('ah-f-actividad-trabajo').value.trim();
+  if(!cuadroId){
+    statusEl.textContent = 'Marca al menos un cuadro en el mapa antes de agregar una actividad.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  if(!trabajo){
+    statusEl.textContent = 'Describe la actividad (por ejemplo: Poda).';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  var btn = this;
+  btn.disabled = true;
+  statusEl.textContent = 'Guardando...';
+  statusEl.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      if(!result || !result.success){
+        statusEl.textContent = (result && result.error) || 'No se pudo guardar la actividad.';
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      document.getElementById('ah-f-actividad-trabajo').value = '';
+      statusEl.textContent = result.completadaDeInmediato
+        ? 'Actividad agregada -- ya se completó (el operador ya había pasado por ese cuadro).'
+        : '';
+      statusEl.className = result.completadaDeInmediato ? 'maq-modal-status show ok' : 'maq-modal-status';
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      btn.disabled = false;
+      statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .guardarActividadHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, cuadroId, trabajo);
+});
+
+document.getElementById('ah-actividades-table-body').addEventListener('click', function(ev){
+  var link = ev.target.closest ? ev.target.closest('.ah-actividad-eliminar') : null;
+  if(!link) return;
+  ev.preventDefault();
+  var id = Number(link.dataset.id);
+  if(!id) return;
+  if(!window.confirm('¿Borrar esta actividad?')) return;
+  var huerta = AH_HUERTA_ACTUAL;
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        document.getElementById('ah-cuadros-status').textContent = (result && result.error) || 'No se pudo borrar la actividad.';
+        document.getElementById('ah-cuadros-status').className = 'maq-modal-status show err';
+        return;
+      }
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('ah-cuadros-status').textContent = (err && err.message) || 'No se pudo borrar. Revisa tu conexión e intenta de nuevo.';
+      document.getElementById('ah-cuadros-status').className = 'maq-modal-status show err';
+    })
+    .eliminarActividadHuerta(ACCESS_CODE, PANEL_USUARIO, id);
+});
+
 function cargarAvanceHuertaPanel_(huerta){
   AH_HUERTA_ACTUAL = huerta;
   AH_MAPA_INFO = null;
   AH_HISTORICO_CACHE = [];
   AH_CAL_PENDIENTE = { a: null, b: null };
   AH_CAL_ARMADO = null;
+  AH_CUADROS = [];
+  AH_ACTIVIDADES = [];
+  ahSalirModoCuadros_();
   document.getElementById('ah-sin-huerta').style.display = huerta ? 'none' : '';
   document.getElementById('ah-cargando').style.display = 'none';
   document.getElementById('ah-sin-mapa').style.display = 'none';
@@ -6334,6 +6644,7 @@ function cargarAvanceHuertaPanel_(huerta){
           })
           .withFailureHandler(function(){ ahRenderTabla_([]); ahRedibujarTodo_(); })
           .getAvanceHuerta(huerta);
+        ahCargarCuadrosYActividades_(huerta);
       };
       img.src = mapa.mapaUrl;
       if(mapa.calibrado){

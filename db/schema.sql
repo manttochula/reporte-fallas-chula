@@ -2273,3 +2273,53 @@ CREATE TABLE IF NOT EXISTS avance_huerta_puntos (
   capturado_en  DATETIME NOT NULL,
   INDEX idx_avance_puntos_avance (avance_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Cuadros (lotes numerados) y actividades planeadas por cuadro
+-- ------------------------------------------------------------
+-- Un "cuadro" es un lote/parcela ya identificado dentro de la foto del
+-- mapa de la huerta (p.ej. "CUADRO 5", ya rotulado en la imagen). Desde el
+-- Panel, Carlos marca con un clic en el mapa dónde está cada cuadro -- se
+-- guarda igual que un punto de calibración: x/y como FRACCIÓN DEL ANCHO de
+-- la imagen (mismo criterio isométrico que mapa_cal1_x/mapa_cal1_y, ver
+-- comentario arriba).
+--
+-- Sobre cada cuadro, Carlos asigna "actividades" (trabajo pendiente). Una
+-- actividad se marca sola como completada -- sin que el operador toque
+-- nada -- en cuanto el recorrido GPS que ya se guarda en
+-- avance_huerta_puntos pasa suficientemente cerca de ese cuadro (ver
+-- marcarCuadrosCompletadosPorPunto_ en server/handlers.js, que corre tras
+-- cada punto nuevo de agregarPuntoAvance). También se revisa el histórico
+-- ya guardado al crear una actividad nueva, por si el operador ya había
+-- pasado por ese cuadro antes de que existiera la actividad.
+--
+-- Sin llaves foráneas (mismo criterio que el resto del proyecto): la
+-- relación de huerta_actividades hacia huerta_cuadros es solo la columna
+-- cuadro_id, con índice.
+CREATE TABLE IF NOT EXISTS huerta_cuadros (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  huerta      VARCHAR(255) NOT NULL,
+  nombre      VARCHAR(255) NOT NULL,
+  x           DECIMAL(7,5) NOT NULL,
+  y           DECIMAL(7,5) NOT NULL,
+  creado_en   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_huerta_cuadros_huerta (huerta),
+  UNIQUE KEY uq_huerta_cuadros_nombre (huerta, nombre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- estado: 'pendiente' -> 'completado' (pasa solo, por GPS; ver arriba).
+-- avance_id queda NULL hasta que se completa, y entonces guarda a qué
+-- registro de avance_huerta (qué recorrido) se le atribuye la completada.
+CREATE TABLE IF NOT EXISTS huerta_actividades (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  huerta        VARCHAR(255) NOT NULL,
+  cuadro_id     INT NOT NULL,
+  trabajo       VARCHAR(255) NOT NULL,
+  estado        VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+  creado_por    VARCHAR(255) DEFAULT NULL,
+  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  completado_en DATETIME DEFAULT NULL,
+  avance_id     INT DEFAULT NULL,
+  INDEX idx_huerta_actividades_huerta (huerta),
+  INDEX idx_huerta_actividades_cuadro (cuadro_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

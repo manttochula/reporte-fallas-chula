@@ -304,7 +304,9 @@
     border-radius:5px; font-weight:700; font-size:13px; cursor:pointer;
   }
   .ah-btn-marcar.activo{ background:#E8871E; border-color:#E8871E; color:#1C1E1F; }
-  .avance-mapa-wrap.ah-modo-cuadros{ cursor:crosshair; }
+  #ah-mapa-google-canvas{ width:100%; height:480px; border-radius:6px; border:1px solid var(--line); }
+  .ah-mapa-google-ir{ display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap; }
+  .ah-mapa-google-ir input{ flex:1; min-width:220px; }
   .ah-cuadro-chip{
     display:inline-flex; align-items:center; gap:6px; background:var(--bg-soft, #F3F3F3);
     border:1px solid var(--line); border-radius:20px; padding:5px 10px 5px 12px; font-size:12.5px; font-weight:600;
@@ -3392,10 +3394,9 @@
         <div id="ah-cuadros-panel">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:18px;">
             <div class="avance-paso" style="margin-bottom:0;">Cuadros y actividades planeadas</div>
-            <button type="button" class="ah-btn-marcar" id="ah-btn-modo-cuadros">📍 Marcar cuadros en el mapa</button>
+            <button type="button" class="ah-btn-marcar" id="ah-btn-modo-cuadros">🗺️ Dibujar cuadros en Google Maps</button>
           </div>
-          <p class="avance-aviso" id="ah-cuadros-aviso-modo" style="display:none; padding:8px 0 0;">Haz clic en el mapa de arriba, en el lugar de cada cuadro, y escribe su nombre (por ejemplo "CUADRO 5"). Aprieta "Terminar de marcar" cuando hayas marcado todos los que necesitas.</p>
-          <div id="ah-cuadros-vacio" class="avance-aviso" style="display:none; padding:8px 0 0;">Todavía no has marcado ningún cuadro en el mapa de esta huerta.</div>
+          <div id="ah-cuadros-vacio" class="avance-aviso" style="display:none; padding:8px 0 0;">Todavía no has dibujado ningún cuadro de esta huerta.</div>
           <div id="ah-cuadros-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0;"></div>
           <div id="ah-actividad-form-wrap" style="display:none; gap:8px; margin:12px 0; flex-wrap:wrap; align-items:flex-end;">
             <div class="maq-field" style="flex:1; min-width:150px; margin-bottom:0;">
@@ -3425,6 +3426,20 @@
             </table>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="ah-mapa-google-overlay">
+      <div class="maq-modal maq-modal-wide">
+        <span class="maq-modal-close" id="ah-mapa-google-close">&times;</span>
+        <h3 style="margin-top:0;">Dibujar cuadros — <span id="ah-mapa-google-huerta-nombre"></span></h3>
+        <p class="avance-aviso" style="padding:0 0 4px;">Usa la herramienta de polígono (arriba a la derecha del mapa) para dibujar el contorno de cada cuadro sobre la imagen satelital. Al cerrar el dibujo, se te pedirá el nombre del cuadro (por ejemplo "CUADRO 5").</p>
+        <div class="ah-mapa-google-ir">
+          <input type="text" id="ah-mapa-google-ir-coords" placeholder="Ir a coordenadas, ej. 19.123456, -96.123456">
+          <button type="button" class="ah-btn-marcar" id="ah-mapa-google-btn-ir">Ir</button>
+        </div>
+        <div id="ah-mapa-google-canvas"></div>
+        <div class="maq-modal-status" id="ah-mapa-google-status"></div>
       </div>
     </div>
 
@@ -6112,9 +6127,11 @@ var AH_SIN_MAPA_TEXTO_DEFAULT = 'Esta huerta todavía no tiene un mapa subido. S
 // guardar.
 var AH_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y}
 var AH_CAL_ARMADO = null; // null | 'a' | 'b'
-var AH_CUADROS = []; // [{id, nombre, x, y}]
+var AH_CUADROS = []; // [{id, nombre, poligono: [{lat,lng}, ...]}]
 var AH_ACTIVIDADES = []; // [{id, cuadroId, cuadroNombre, trabajo, estado, creadoEn, completadoEn}]
-var AH_MODO_CUADROS = false;
+var AH_GOOGLE_MAP = null; // instancia del mapa de Google (se crea una sola vez, se reutiliza)
+var AH_GOOGLE_DRAWING_MANAGER = null;
+var AH_GOOGLE_POLIGONOS_DIBUJADOS = []; // overlays de los cuadros ya guardados, mostrados de referencia
 
 function poblarSelectHuertaAvanceHuerta_(){
   poblarSelectSimple_('ah-f-huerta', HUERTAS || [], true);
@@ -6209,23 +6226,42 @@ function ahEstadoCuadro_(cuadroId){
   return tienePendiente ? 'pendiente' : 'completado';
 }
 
-// Un punto pequeño por cada cuadro marcado -- sin etiqueta de texto (la
-// imagen del mapa ya suele traer rotulado "CUADRO N"), con el color según
-// si ya se completó, sigue pendiente, o todavía no tiene actividad
-// asignada -- para que de un vistazo se vea cómo va el recorrido.
+var AH_COLORES_CUADRO = {
+  completado: { stroke: '#1e7a44', fill: 'rgba(30,122,68,0.25)' },
+  pendiente: { stroke: '#E8871E', fill: 'rgba(232,135,30,0.25)' },
+  ninguna: { stroke: '#8a8f94', fill: 'rgba(138,143,148,0.20)' },
+};
+
+// El contorno de cada cuadro -- dibujado por Carlos en Google Maps y
+// guardado en GPS real (c.poligono) -- proyectado sobre ESTA foto usando
+// la calibración de la huerta (mismo gpsAPosicionEnMapa_ de siempre, un
+// vértice a la vez). Por eso solo se dibuja si la huerta ya está
+// calibrada: sin calibración no hay forma de saber en qué pixel de la
+// foto cae cada vértice (el polígono en sí no se pierde -- solo no se
+// puede proyectar sobre la foto). El color depende de si ya se completó,
+// sigue pendiente, o todavía no tiene actividad asignada.
 function ahDibujarCuadros_(){
+  if(!AH_MAPA_INFO || !AH_MAPA_INFO.calibrado) return;
+  var cal1 = AH_MAPA_INFO.cal1, cal2 = AH_MAPA_INFO.cal2;
   var canvas = document.getElementById('ah-mapa-canvas');
   var ctx = canvas.getContext('2d');
   (AH_CUADROS || []).forEach(function(c){
-    var pos = ahFraccionAPixelCanvas_(c.x, c.y);
-    var estado = ahEstadoCuadro_(c.id);
-    var color = estado === 'completado' ? '#1e7a44' : (estado === 'pendiente' ? '#E8871E' : '#8a8f94');
+    var poligono = c.poligono || [];
+    if(poligono.length < 3) return;
+    var puntos = poligono.map(function(v){
+      var pos = ahGpsAPosicionEnMapa_(cal1, cal2, v.lat, v.lng);
+      return pos ? ahFraccionAPixelCanvas_(pos.x, pos.y) : null;
+    }).filter(Boolean);
+    if(puntos.length < 3) return;
+    var colores = AH_COLORES_CUADRO[ahEstadoCuadro_(c.id)];
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = color;
+    ctx.moveTo(puntos[0].x, puntos[0].y);
+    for(var i = 1; i < puntos.length; i++){ ctx.lineTo(puntos[i].x, puntos[i].y); }
+    ctx.closePath();
+    ctx.fillStyle = colores.fill;
     ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = colores.stroke;
     ctx.stroke();
   });
 }
@@ -6261,20 +6297,7 @@ function ahActualizarUiCalibracion_(){
 // calibrada (se llegó aquí por "Recalibrar"), se precargan los 2 puntos
 // que ya había -- así solo hay que corregir/afinar en vez de volver a
 // empezar de cero.
-// Apaga el modo "marcar cuadros" (botón, aviso, cursor) sin tocar nada
-// más -- se usa tanto al apretar el botón para terminar, como al entrar a
-// calibración (para que un clic no se interprete en los 2 modos a la vez).
-function ahSalirModoCuadros_(){
-  AH_MODO_CUADROS = false;
-  var btn = document.getElementById('ah-btn-modo-cuadros');
-  btn.textContent = '📍 Marcar cuadros en el mapa';
-  btn.classList.remove('activo');
-  document.getElementById('ah-cuadros-aviso-modo').style.display = 'none';
-  document.getElementById('ah-mapa-wrap').classList.remove('ah-modo-cuadros');
-}
-
 function ahEntrarModoCalibracion_(){
-  ahSalirModoCuadros_();
   document.getElementById('ah-vista-avance').style.display = 'none';
   document.getElementById('ah-link-recalibrar-wrap').style.display = 'none';
   document.getElementById('ah-calib-panel').style.display = '';
@@ -6318,9 +6341,7 @@ document.getElementById('ah-mapa-wrap').addEventListener('click', function(ev){
     AH_CAL_ARMADO = null;
     ahActualizarUiCalibracion_();
     ahRedibujarTodo_();
-    return;
   }
-  if(AH_MODO_CUADROS) ahMarcarCuadroEnClic_(xFrac, yFrac);
 });
 
 document.getElementById('ah-btn-guardar-calib').addEventListener('click', function(){
@@ -6453,6 +6474,7 @@ function ahRenderCuadrosYActividades_(){
   ahPoblarSelectActividadCuadro_();
   ahRenderActividadesTabla_();
   ahRedibujarTodo_();
+  ahDibujarPoligonosGoogleExistentes_();
 }
 
 function ahCargarCuadrosYActividades_(huerta){
@@ -6471,16 +6493,118 @@ function ahCargarCuadrosYActividades_(huerta){
     .getCuadrosHuerta(huerta);
 }
 
-// Se dispara al hacer clic en el mapa estando en modo "marcar cuadros".
-// window.prompt() para el nombre -- mismo patrón ya usado en el Panel
-// para nombrar catálogos nuevos (Marca, Modelo, etc).
-function ahMarcarCuadroEnClic_(xFrac, yFrac){
+// GOOGLE MAPS: dibujar los contornos reales de los cuadros ------------------
+// Carlos dibuja el polígono de cada cuadro directamente sobre imágenes de
+// satélite de Google Maps (de verdad, no la foto que él sube). Una vez
+// guardado, ese mismo polígono (en GPS real) se proyecta también sobre la
+// foto de la huerta (ahDibujarCuadros_, arriba) para que tanto Carlos como
+// el operador en su celular vean los mismos límites.
+
+var GOOGLE_MAPS_API_KEY = 'AIzaSyCBnjqkULP4ZzGnqGjJU5vs2gr5xFvyG38';
+
+// Convierte la "ruta" que entrega el dibujo de Google Maps (un MVCArray de
+// google.maps.LatLng, donde .lat()/.lng() son FUNCIONES) a objetos simples
+// {lat, lng} listos para mandar al servidor. Acepta también objetos ya
+// simples (lat/lng como número) para poder probar esta función con datos
+// de prueba, sin necesitar la librería real de Google Maps.
+function ahPoligonoDesdeRuta_(ruta){
+  return (ruta || []).map(function(p){
+    var lat = (typeof p.lat === 'function') ? p.lat() : p.lat;
+    var lng = (typeof p.lng === 'function') ? p.lng() : p.lng;
+    return { lat: lat, lng: lng };
+  });
+}
+
+// Carga el script de Google Maps (con la librería de dibujo) solo la
+// primera vez que Carlos abre el modal -- así no se retrasa ni se gasta de
+// más al abrir el Panel si nunca llega a usar esta pantalla.
+function ahCargarGoogleMapsSiHaceFalta_(callback){
+  if(window.google && window.google.maps && window.google.maps.drawing){
+    callback();
+    return;
+  }
+  if(window.ahGoogleMapsCargando_){
+    window.ahGoogleMapsCallbacksPendientes_.push(callback);
+    return;
+  }
+  window.ahGoogleMapsCargando_ = true;
+  window.ahGoogleMapsCallbacksPendientes_ = [callback];
+  window.ahGoogleMapsListo_ = function(){
+    var pendientes = window.ahGoogleMapsCallbacksPendientes_ || [];
+    window.ahGoogleMapsCargando_ = false;
+    window.ahGoogleMapsCallbacksPendientes_ = [];
+    pendientes.forEach(function(fn){ fn(); });
+  };
+  var script = document.createElement('script');
+  script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_MAPS_API_KEY + '&libraries=drawing&callback=ahGoogleMapsListo_';
+  script.async = true;
+  document.head.appendChild(script);
+}
+
+// Punto de partida del mapa de Google: el punto A de la calibración de la
+// foto, si ya existe (así Carlos ya ve su huerta sin tener que buscarla),
+// o el centro del país si todavía no hay nada calibrado.
+function ahCentroInicialMapaGoogle_(){
+  if(AH_MAPA_INFO && AH_MAPA_INFO.calibrado && AH_MAPA_INFO.cal1){
+    return { lat: AH_MAPA_INFO.cal1.lat, lng: AH_MAPA_INFO.cal1.lng };
+  }
+  return { lat: 19.4326, lng: -99.1332 };
+}
+
+function ahInicializarMapaGoogleSiHaceFalta_(){
+  if(AH_GOOGLE_MAP) return;
+  var centro = ahCentroInicialMapaGoogle_();
+  AH_GOOGLE_MAP = new google.maps.Map(document.getElementById('ah-mapa-google-canvas'), {
+    center: centro,
+    zoom: (AH_MAPA_INFO && AH_MAPA_INFO.calibrado) ? 18 : 5,
+    mapTypeId: 'satellite',
+  });
+  AH_GOOGLE_DRAWING_MANAGER = new google.maps.drawing.DrawingManager({
+    drawingMode: google.maps.drawing.OverlayType.POLYGON,
+    drawingControl: true,
+    drawingControlOptions: { drawingModes: ['polygon'] },
+    polygonOptions: { strokeColor: '#E8871E', fillColor: '#E8871E', fillOpacity: 0.25, strokeWeight: 2, editable: false },
+  });
+  AH_GOOGLE_DRAWING_MANAGER.setMap(AH_GOOGLE_MAP);
+  google.maps.event.addListener(AH_GOOGLE_DRAWING_MANAGER, 'polygoncomplete', function(polygon){
+    ahGuardarPoligonoDibujado_(polygon);
+  });
+}
+
+// Pinta (de referencia, no editables) los cuadros que ya están guardados,
+// para que Carlos vea de una vez cuáles faltan por dibujar.
+function ahDibujarPoligonosGoogleExistentes_(){
+  if(!AH_GOOGLE_MAP) return;
+  (AH_GOOGLE_POLIGONOS_DIBUJADOS || []).forEach(function(p){ p.setMap(null); });
+  AH_GOOGLE_POLIGONOS_DIBUJADOS = (AH_CUADROS || []).filter(function(c){ return c.poligono && c.poligono.length >= 3; }).map(function(c){
+    var colores = AH_COLORES_CUADRO[ahEstadoCuadro_(c.id)];
+    var poly = new google.maps.Polygon({
+      paths: c.poligono,
+      strokeColor: colores.stroke,
+      fillColor: colores.stroke,
+      fillOpacity: 0.25,
+      strokeWeight: 2,
+      clickable: false,
+    });
+    poly.setMap(AH_GOOGLE_MAP);
+    return poly;
+  });
+}
+
+// Se dispara cuando Carlos termina de dibujar un polígono en el mapa de
+// Google (evento polygoncomplete). window.prompt() para el nombre -- mismo
+// patrón ya usado en el Panel para nombrar catálogos nuevos (Marca, Modelo,
+// etc). El dibujo temporal se quita apenas se guarda -- se vuelve a pintar
+// (ya en su color según su estado) desde ahDibujarPoligonosGoogleExistentes_.
+function ahGuardarPoligonoDibujado_(polygon){
+  var poligono = ahPoligonoDesdeRuta_(polygon.getPath().getArray());
   var nombre = window.prompt('Nombre de este cuadro (por ejemplo: CUADRO 5):', '');
-  if(nombre === null) return;
+  if(nombre === null){ polygon.setMap(null); return; }
   nombre = nombre.trim();
-  if(!nombre) return;
+  if(!nombre){ polygon.setMap(null); return; }
+  polygon.setMap(null);
   var huerta = AH_HUERTA_ACTUAL;
-  var statusEl = document.getElementById('ah-cuadros-status');
+  var statusEl = document.getElementById('ah-mapa-google-status');
   statusEl.textContent = 'Guardando...';
   statusEl.className = 'maq-modal-status show';
   google.script.run
@@ -6490,28 +6614,60 @@ function ahMarcarCuadroEnClic_(xFrac, yFrac){
         statusEl.className = 'maq-modal-status show err';
         return;
       }
-      statusEl.textContent = '';
-      statusEl.className = 'maq-modal-status';
+      statusEl.textContent = 'Cuadro "' + nombre + '" guardado.';
+      statusEl.className = 'maq-modal-status show ok';
       ahCargarCuadrosYActividades_(huerta);
     })
     .withFailureHandler(function(err){
       statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
       statusEl.className = 'maq-modal-status show err';
     })
-    .guardarCuadroHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, nombre, xFrac, yFrac);
+    .guardarCuadroHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, nombre, poligono);
+}
+
+function ahAbrirModalCuadrosGoogle_(){
+  document.getElementById('ah-mapa-google-huerta-nombre').textContent = AH_HUERTA_ACTUAL;
+  document.getElementById('ah-mapa-google-status').textContent = '';
+  document.getElementById('ah-mapa-google-status').className = 'maq-modal-status';
+  document.getElementById('ah-mapa-google-overlay').classList.add('open');
+  ahCargarGoogleMapsSiHaceFalta_(function(){
+    ahInicializarMapaGoogleSiHaceFalta_();
+    // El modal pudo estar oculto (sin tamaño) cuando se creó el mapa la
+    // primera vez -- esto obliga a Google Maps a recalcular su tamaño.
+    google.maps.event.trigger(AH_GOOGLE_MAP, 'resize');
+    AH_GOOGLE_MAP.setCenter(ahCentroInicialMapaGoogle_());
+    ahDibujarPoligonosGoogleExistentes_();
+  });
+}
+
+function ahCerrarModalCuadrosGoogle_(){
+  document.getElementById('ah-mapa-google-overlay').classList.remove('open');
 }
 
 document.getElementById('ah-btn-modo-cuadros').addEventListener('click', function(){
-  if(AH_MODO_CUADROS){
-    ahSalirModoCuadros_();
+  ahAbrirModalCuadrosGoogle_();
+});
+
+document.getElementById('ah-mapa-google-close').addEventListener('click', ahCerrarModalCuadrosGoogle_);
+
+document.getElementById('ah-mapa-google-overlay').addEventListener('click', function(ev){
+  if(ev.target === document.getElementById('ah-mapa-google-overlay')) ahCerrarModalCuadrosGoogle_();
+});
+
+document.getElementById('ah-mapa-google-btn-ir').addEventListener('click', function(){
+  var coords = ahParsearCoordenadas_(document.getElementById('ah-mapa-google-ir-coords').value);
+  var statusEl = document.getElementById('ah-mapa-google-status');
+  if(!coords){
+    statusEl.textContent = 'Escribe las coordenadas como en Google Maps: "19.123456, -96.123456".';
+    statusEl.className = 'maq-modal-status show err';
     return;
   }
-  AH_CAL_ARMADO = null; // por si quedó armado de calibración, evita confundir el próximo clic
-  AH_MODO_CUADROS = true;
-  this.textContent = '✅ Terminar de marcar';
-  this.classList.add('activo');
-  document.getElementById('ah-cuadros-aviso-modo').style.display = '';
-  document.getElementById('ah-mapa-wrap').classList.add('ah-modo-cuadros');
+  statusEl.textContent = '';
+  statusEl.className = 'maq-modal-status';
+  if(AH_GOOGLE_MAP){
+    AH_GOOGLE_MAP.setCenter(coords);
+    AH_GOOGLE_MAP.setZoom(18);
+  }
 });
 
 document.getElementById('ah-cuadros-chips').addEventListener('click', function(ev){
@@ -6612,7 +6768,7 @@ function cargarAvanceHuertaPanel_(huerta){
   AH_CAL_ARMADO = null;
   AH_CUADROS = [];
   AH_ACTIVIDADES = [];
-  ahSalirModoCuadros_();
+  ahCerrarModalCuadrosGoogle_();
   document.getElementById('ah-sin-huerta').style.display = huerta ? 'none' : '';
   document.getElementById('ah-cargando').style.display = 'none';
   document.getElementById('ah-sin-mapa').style.display = 'none';

@@ -2277,21 +2277,33 @@ CREATE TABLE IF NOT EXISTS avance_huerta_puntos (
 -- ------------------------------------------------------------
 -- Cuadros (lotes numerados) y actividades planeadas por cuadro
 -- ------------------------------------------------------------
--- Un "cuadro" es un lote/parcela ya identificado dentro de la foto del
--- mapa de la huerta (p.ej. "CUADRO 5", ya rotulado en la imagen). Desde el
--- Panel, Carlos marca con un clic en el mapa dónde está cada cuadro -- se
--- guarda igual que un punto de calibración: x/y como FRACCIÓN DEL ANCHO de
--- la imagen (mismo criterio isométrico que mapa_cal1_x/mapa_cal1_y, ver
--- comentario arriba).
+-- Un "cuadro" es un lote/parcela real de la huerta (p.ej. "CUADRO 5").
+-- Carlos lo dibuja desde el Panel con el mapa de Google (satelital, con
+-- zoom) -- NO sobre la foto subida -- marcando el contorno completo del
+-- lote con varios clics (un polígono), no solo un punto. El polígono se
+-- guarda en GPS real (lat/lng de cada vértice, en el orden en que se
+-- dibujó) como JSON: [{"lat":19.1,"lng":-96.1}, ...] -- al venir de Google
+-- Maps ya son coordenadas reales, no hace falta ninguna calibración para
+-- esto (a diferencia de mapa_cal1_*/mapa_cal2_* de arriba, que es para
+-- proyectar GPS sobre la FOTO).
+--
+-- La detección de "el operador pasó por este cuadro" (ver
+-- puntoDentroDePoligono_/marcarCuadrosCompletadosPorPunto_ en
+-- server/handlers.js) compara la posición GPS real del operador contra
+-- este polígono directamente -- sin pasar por la foto ni su calibración.
+-- Para que el operador (y Carlos, en la vista de Avance) vean el contorno
+-- del cuadro DIBUJADO ENCIMA de la foto, cada vértice del polígono se
+-- proyecta a un pixel de la foto usando la calibración de la huerta (si ya
+-- está calibrada) -- ver ahDibujarCuadros_/avanceDibujarCuadros_.
 --
 -- Sobre cada cuadro, Carlos asigna "actividades" (trabajo pendiente). Una
 -- actividad se marca sola como completada -- sin que el operador toque
 -- nada -- en cuanto el recorrido GPS que ya se guarda en
--- avance_huerta_puntos pasa suficientemente cerca de ese cuadro (ver
--- marcarCuadrosCompletadosPorPunto_ en server/handlers.js, que corre tras
--- cada punto nuevo de agregarPuntoAvance). También se revisa el histórico
--- ya guardado al crear una actividad nueva, por si el operador ya había
--- pasado por ese cuadro antes de que existiera la actividad.
+-- avance_huerta_puntos entra al polígono del cuadro (o pasa muy cerca de
+-- su borde, con margen de tolerancia por la imprecisión normal del GPS de
+-- un celular). También se revisa el histórico ya guardado al crear una
+-- actividad nueva, por si el operador ya había pasado por ese cuadro antes
+-- de que existiera la actividad.
 --
 -- Sin llaves foráneas (mismo criterio que el resto del proyecto): la
 -- relación de huerta_actividades hacia huerta_cuadros es solo la columna
@@ -2300,12 +2312,32 @@ CREATE TABLE IF NOT EXISTS huerta_cuadros (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   huerta      VARCHAR(255) NOT NULL,
   nombre      VARCHAR(255) NOT NULL,
-  x           DECIMAL(7,5) NOT NULL,
-  y           DECIMAL(7,5) NOT NULL,
+  poligono    JSON NOT NULL,
   creado_en   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_huerta_cuadros_huerta (huerta),
   UNIQUE KEY uq_huerta_cuadros_nombre (huerta, nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Si esta tabla ya se había creado en una versión anterior (con columnas
+-- x/y de un solo punto en vez de poligono), se actualiza aquí -- cambio
+-- esperado solo en instalaciones donde ya se había probado esa primera
+-- versión del marcado de cuadros.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_cuadros' AND column_name = 'x'
+);
+SET @sql_alter = IF(@col_exists > 0,
+  'ALTER TABLE huerta_cuadros ADD COLUMN poligono JSON NULL, DROP COLUMN x, DROP COLUMN y',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+-- poligono pudo haber quedado NULL para filas que ya existían antes de
+-- este cambio (cuadros marcados con la versión anterior, de un punto) --
+-- se borran: ya no tienen una forma válida que dibujar ni usar para
+-- detectar, y Carlos los vuelve a marcar (ahora como polígono) desde el
+-- mapa de Google.
+DELETE FROM huerta_cuadros WHERE poligono IS NULL;
 
 -- estado: 'pendiente' -> 'completado' (pasa solo, por GPS; ver arriba).
 -- avance_id queda NULL hasta que se completa, y entonces guarda a qué

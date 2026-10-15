@@ -2663,6 +2663,8 @@ var AVANCE_WATCH_ID = null;
 var AVANCE_ULTIMO_PUNTO = null;
 var AVANCE_PUNTOS_SESION = [];
 var AVANCE_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y} | {x,y,lat,lng}
+var AVANCE_CUADROS = []; // de getCuadrosHuerta: [{id, nombre, poligono: [{lat,lng}, ...]}]
+var AVANCE_ACTIVIDADES = []; // de getActividadesHuerta: [{id, cuadroId, cuadroNombre, trabajo, estado, ...}]
 
 function poblarSelectHuertaAvance(){
   var sel = document.getElementById('avance-f-huerta');
@@ -2743,12 +2745,60 @@ function avanceDibujarSegmento_(cal1, cal2, puntoAnterior, puntoNuevo, color){
   ctx.fill();
 }
 
+// 'completado' si TODAS sus actividades ya están completadas (y tiene al
+// menos una), 'pendiente' si tiene alguna sin completar, 'ninguna' si el
+// cuadro todavía no tiene ninguna actividad asignada. Igual que
+// ahEstadoCuadro_ en Panel.html -- así el operador ve los mismos colores
+// que Carlos ve en su Panel.
+function avanceEstadoCuadro_(cuadroId){
+  var actividadesDelCuadro = (AVANCE_ACTIVIDADES || []).filter(function(a){ return a.cuadroId === cuadroId; });
+  if(actividadesDelCuadro.length === 0) return 'ninguna';
+  var tienePendiente = actividadesDelCuadro.some(function(a){ return a.estado !== 'completado'; });
+  return tienePendiente ? 'pendiente' : 'completado';
+}
+
+var AVANCE_COLORES_CUADRO = {
+  completado: { stroke: '#1e7a44', fill: 'rgba(30,122,68,0.25)' },
+  pendiente: { stroke: '#E8871E', fill: 'rgba(232,135,30,0.25)' },
+  ninguna: { stroke: '#8a8f94', fill: 'rgba(138,143,148,0.20)' },
+};
+
+// El contorno de cada cuadro -- dibujado por Carlos en Google Maps desde
+// el Panel y guardado en GPS real (c.poligono) -- proyectado sobre esta
+// misma foto con la calibración de la huerta. Así el operador ve en su
+// celular los mismos cuadros, con el mismo color según su avance, que
+// Carlos ve en su Panel.
+function avanceDibujarCuadros_(cal1, cal2){
+  var canvas = document.getElementById('avance-mapa-canvas');
+  var ctx = canvas.getContext('2d');
+  (AVANCE_CUADROS || []).forEach(function(c){
+    var poligono = c.poligono || [];
+    if(poligono.length < 3) return;
+    var puntos = poligono.map(function(v){
+      var pos = gpsAPosicionEnMapa_(cal1, cal2, v.lat, v.lng);
+      return pos ? avanceFraccionAPixelCanvas_(pos.x, pos.y) : null;
+    }).filter(Boolean);
+    if(puntos.length < 3) return;
+    var colores = AVANCE_COLORES_CUADRO[avanceEstadoCuadro_(c.id)];
+    ctx.beginPath();
+    ctx.moveTo(puntos[0].x, puntos[0].y);
+    for(var i = 1; i < puntos.length; i++){ ctx.lineTo(puntos[i].x, puntos[i].y); }
+    ctx.closePath();
+    ctx.fillStyle = colores.fill;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = colores.stroke;
+    ctx.stroke();
+  });
+}
+
 function avanceDibujarTodoDeNuevo(){
   var canvas = document.getElementById('avance-mapa-canvas');
   var ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
     var cal1 = AVANCE_MAPA_INFO.cal1, cal2 = AVANCE_MAPA_INFO.cal2;
+    avanceDibujarCuadros_(cal1, cal2);
     AVANCE_HISTORICO.forEach(function(sesion){
       var anterior = null;
       (sesion.puntos || []).forEach(function(p){
@@ -2872,6 +2922,26 @@ function avanceCargarHistorico_(){
     .getAvanceHuerta(AVANCE_HUERTA_ACTUAL);
 }
 
+// Cuadros (contornos dibujados por Carlos en Google Maps) y sus
+// actividades -- solo para pintarlos sobre la foto con el color que les
+// corresponda; el operador no los crea ni los edita desde aquí.
+function avanceCargarCuadrosYActividades_(){
+  var huerta = AVANCE_HUERTA_ACTUAL;
+  google.script.run
+    .withSuccessHandler(function(cuadros){
+      AVANCE_CUADROS = cuadros || [];
+      google.script.run
+        .withSuccessHandler(function(actividades){
+          AVANCE_ACTIVIDADES = actividades || [];
+          avanceDibujarTodoDeNuevo();
+        })
+        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); })
+        .getActividadesHuerta(huerta);
+    })
+    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); })
+    .getCuadrosHuerta(huerta);
+}
+
 function cargarAvanceHuerta(huerta){
   avanceDetenerRastreoSiActivo_();
   AVANCE_HUERTA_ACTUAL = huerta;
@@ -2879,6 +2949,8 @@ function cargarAvanceHuerta(huerta){
   AVANCE_HISTORICO = [];
   AVANCE_PUNTOS_SESION = [];
   AVANCE_CAL_PENDIENTE = { a: null, b: null };
+  AVANCE_CUADROS = [];
+  AVANCE_ACTIVIDADES = [];
   document.getElementById('avance-sin-huerta').style.display = huerta ? 'none' : '';
   document.getElementById('avance-cargando').style.display = 'none';
   document.getElementById('avance-sin-mapa').style.display = 'none';
@@ -2902,6 +2974,7 @@ function cargarAvanceHuerta(huerta){
         document.getElementById('avance-panel-rastreo').style.display = '';
         document.getElementById('avance-link-calibrar-wrap').style.display = '';
         avanceCargarHistorico_();
+        avanceCargarCuadrosYActividades_();
       } else {
         document.getElementById('avance-panel-calibracion').style.display = '';
         document.getElementById('avance-panel-rastreo').style.display = 'none';

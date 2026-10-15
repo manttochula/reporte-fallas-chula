@@ -5172,72 +5172,106 @@ async function getAvanceHuerta(huerta) {
 // ------------------------------------------------------------
 // Cuadros (lotes numerados) y actividades planeadas por cuadro — ver
 // comentario en db/schema.sql (huerta_cuadros/huerta_actividades) para el
-// diseño completo. Resumen: desde el Panel, Carlos marca con un clic en el
-// mapa dónde está cada cuadro (se guarda como fracción del ancho de la
-// imagen, igual que un punto de calibración) y le asigna actividades
-// ("trabajo"). Cada actividad se marca sola como completada en cuanto el
-// recorrido GPS del operador (el mismo de avance_huerta_puntos, sin
-// cambiar nada de cómo se captura) pasa a menos de
-// CUADRO_RADIO_DETECCION_METROS del cuadro — sin que el operador toque
-// nada. También se revisa el histórico ya guardado al crear la actividad,
-// por si el operador ya había pasado por ahí antes.
-const CUADRO_RADIO_DETECCION_METROS = 30;
+// diseño completo. Resumen: desde el Panel, Carlos dibuja el contorno de
+// cada cuadro sobre un mapa de Google real (satelital), no sobre la foto
+// subida -- queda guardado como un polígono en coordenadas GPS reales. Le
+// asigna actividades ("trabajo") a cada cuadro. Cada actividad se marca
+// sola como completada en cuanto el recorrido GPS del operador (el mismo
+// de avance_huerta_puntos, sin cambiar nada de cómo se captura) ENTRA al
+// polígono de ese cuadro -- sin que el operador toque nada. También se
+// revisa el histórico ya guardado al crear la actividad, por si el
+// operador ya había pasado por ahí antes.
+//
+// Como el polígono ya viene en GPS real (directo de Google Maps), la
+// detección NO necesita la calibración de la foto para nada -- compara la
+// posición del operador contra el polígono directamente. La calibración
+// de la foto (mapa_cal1_*/mapa_cal2_*) solo se sigue usando para DIBUJAR
+// el contorno del cuadro ENCIMA de la foto (proyectando cada vértice del
+// polígono a un pixel con gpsAPosicionEnMapa_) -- eso lo hace el cliente
+// (Panel.html/Index.html), no el servidor.
+const CUADRO_TOLERANCIA_BORDE_METROS = 15; // margen por la imprecisión típica del GPS de un celular
 
-// Inversa de gpsAPosicionEnMapa_ (ver Index.html/Panel.html): a partir de
-// una posición en la imagen (xFrac/yFrac, fracción del ANCHO para los 2
-// ejes) y la misma calibración de 2 puntos, regresa la coordenada GPS real
-// que le corresponde. Es la misma matemática de rotación+escala, solo que
-// despejada al revés. Verificada por "round-trip" (ida y vuelta recupera
-// el punto original) contra gpsAPosicionEnMapa_ antes de usarse aquí.
-function posicionEnMapaAGps_(cal1, cal2, xFrac, yFrac) {
+function aMetrosLocal_(origen, p) {
   const metrosPorGradoLat = 111320;
-  const metrosPorGradoLng = 111320 * Math.cos((cal1.lat * Math.PI) / 180);
-  const aMetros = (p) => ({ e: (p.lng - cal1.lng) * metrosPorGradoLng, n: (p.lat - cal1.lat) * metrosPorGradoLat });
-  const m2 = aMetros(cal2);
-  const denom = m2.e * m2.e + m2.n * m2.n;
-  if (denom < 1e-9) return null;
-  const px2 = cal2.x - cal1.x;
-  const py2 = cal2.y - cal1.y;
-  const kRe = (px2 * m2.e - py2 * m2.n) / denom;
-  const kIm = (py2 * m2.e + px2 * m2.n) / denom;
-  const mag2 = kRe * kRe + kIm * kIm;
-  if (mag2 < 1e-12) return null;
-  const px = xFrac - cal1.x;
-  const py = yFrac - cal1.y;
-  const e = (kRe * px + kIm * py) / mag2;
-  const n = (kIm * px - kRe * py) / mag2;
-  return { lat: cal1.lat + n / metrosPorGradoLat, lng: cal1.lng + e / metrosPorGradoLng };
+  const metrosPorGradoLng = 111320 * Math.cos((origen.lat * Math.PI) / 180);
+  return { x: (p.lng - origen.lng) * metrosPorGradoLng, y: (p.lat - origen.lat) * metrosPorGradoLat };
 }
 
-// Distancia en metros entre 2 coordenadas GPS reales (aproximación plana,
-// de sobra para distancias chicas dentro de una huerta).
-function distanciaMetrosAvance_(p1, p2) {
-  const metrosPorGradoLat = 111320;
-  const metrosPorGradoLng = 111320 * Math.cos((p1.lat * Math.PI) / 180);
-  const e = (p2.lng - p1.lng) * metrosPorGradoLng;
-  const n = (p2.lat - p1.lat) * metrosPorGradoLat;
-  return Math.sqrt(e * e + n * n);
+// Ray casting clásico (par/impar de cruces) -- funciona para cualquier
+// polígono simple, incluyendo formas no convexas (como una "L").
+function puntoDentroDePoligono_(punto, poligono) {
+  if (!poligono || poligono.length < 3) return false;
+  const origen = poligono[0];
+  const p = aMetrosLocal_(origen, punto);
+  const verts = poligono.map((v) => aMetrosLocal_(origen, v));
+  let dentro = false;
+  for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+    const vi = verts[i];
+    const vj = verts[j];
+    const cruza = (vi.y > p.y) !== (vj.y > p.y)
+      && p.x < ((vj.x - vi.x) * (p.y - vi.y)) / (vj.y - vi.y) + vi.x;
+    if (cruza) dentro = !dentro;
+  }
+  return dentro;
 }
 
-// Acción del Panel (marcar un cuadro en el mapa). x/y: fracción (0-1) del
-// ancho de la imagen, igual que un punto de calibración. Nombre único por
-// huerta (ver UNIQUE KEY en schema.sql) -- si Carlos marca 2 veces el mismo
-// nombre, se actualiza su posición en vez de duplicarlo.
-async function guardarCuadroHuerta(code, nombreUsuario, huerta, nombre, x, y) {
+function distanciaPuntoASegmentoMetros_(punto, a, b) {
+  const origen = a;
+  const p = aMetrosLocal_(origen, punto);
+  const A = { x: 0, y: 0 };
+  const B = aMetrosLocal_(origen, b);
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const largo2 = dx * dx + dy * dy;
+  let t = largo2 < 1e-9 ? 0 : ((p.x - A.x) * dx + (p.y - A.y) * dy) / largo2;
+  t = Math.max(0, Math.min(1, t));
+  const cx = A.x + t * dx;
+  const cy = A.y + t * dy;
+  return Math.sqrt((p.x - cx) * (p.x - cx) + (p.y - cy) * (p.y - cy));
+}
+
+function distanciaPuntoAPoligonoMetros_(punto, poligono) {
+  let min = Infinity;
+  for (let i = 0, j = poligono.length - 1; i < poligono.length; j = i++) {
+    const d = distanciaPuntoASegmentoMetros_(punto, poligono[j], poligono[i]);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+// "Cubre" el cuadro si el punto cae dentro del polígono, o está a menos de
+// CUADRO_TOLERANCIA_BORDE_METROS de su borde.
+function cubreCuadro_(punto, poligono) {
+  if (puntoDentroDePoligono_(punto, poligono)) return true;
+  return distanciaPuntoAPoligonoMetros_(punto, poligono) <= CUADRO_TOLERANCIA_BORDE_METROS;
+}
+
+// Valida que sea un arreglo de al menos 3 puntos {lat,lng} numéricos.
+function poligonoValido_(poligono) {
+  if (!Array.isArray(poligono) || poligono.length < 3) return false;
+  return poligono.every((p) => p && typeof p.lat === 'number' && typeof p.lng === 'number'
+    && !Number.isNaN(p.lat) && !Number.isNaN(p.lng)
+    && p.lat >= -90 && p.lat <= 90 && p.lng >= -180 && p.lng <= 180);
+}
+
+// Acción del Panel (guardar el polígono de un cuadro, dibujado en el mapa
+// de Google). Nombre único por huerta (ver UNIQUE KEY en schema.sql) -- si
+// Carlos vuelve a guardar el mismo nombre, se actualiza su forma en vez de
+// duplicarlo (permite redibujar/corregir un cuadro ya marcado).
+async function guardarCuadroHuerta(code, nombreUsuario, huerta, nombre, poligono) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
   const nombreCuadro = (nombre || '').toString().trim();
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
   if (!nombreCuadro) return { success: false, error: 'Falta el nombre del cuadro.' };
-  const xNum = Number(x);
-  const yNum = Number(y);
-  if (Number.isNaN(xNum) || Number.isNaN(yNum)) return { success: false, error: 'Falta dónde quedó el clic en el mapa.' };
+  if (!poligonoValido_(poligono)) return { success: false, error: 'El contorno dibujado no es válido -- dibuja el cuadro con al menos 3 puntos.' };
   try {
+    const poligonoJson = JSON.stringify(poligono.map((p) => ({ lat: p.lat, lng: p.lng })));
     const [result] = await pool.query(
-      `INSERT INTO huerta_cuadros (huerta, nombre, x, y)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE x = VALUES(x), y = VALUES(y)`,
-      [nombreHuerta, nombreCuadro, xNum, yNum]
+      `INSERT INTO huerta_cuadros (huerta, nombre, poligono)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE poligono = VALUES(poligono)`,
+      [nombreHuerta, nombreCuadro, poligonoJson]
     );
     return { success: true, id: result.insertId };
   } catch (err) {
@@ -5258,24 +5292,35 @@ async function eliminarCuadroHuerta(code, nombreUsuario, cuadroId) {
   return { success: true };
 }
 
-// Abierta (sin permiso especial) -- la usan tanto el Panel (para marcar/
+// mysql2 regresa una columna JSON ya parseada a JS en la mayoría de los
+// casos, pero según la versión/driver puede llegar como texto -- esta
+// función cubre los dos casos sin tronar.
+function parsearPoligono_(valor) {
+  if (Array.isArray(valor)) return valor;
+  if (typeof valor === 'string') {
+    try { return JSON.parse(valor); } catch (e) { return []; }
+  }
+  return [];
+}
+
+// Abierta (sin permiso especial) -- la usan tanto el Panel (para dibujar/
 // listar cuadros y asignar actividades) como el celular (para mostrar, de
-// solo lectura, qué cuadros existen).
+// solo lectura, el contorno de los cuadros sobre su propio mapa).
 async function getCuadrosHuerta(huerta) {
   const nombreHuerta = (huerta || '').toString().trim();
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
-    'SELECT id, nombre, x, y FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
+    'SELECT id, nombre, poligono FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
     [nombreHuerta]
   );
-  return rows.map((r) => ({ id: r.id, nombre: r.nombre, x: Number(r.x), y: Number(r.y) }));
+  return rows.map((r) => ({ id: r.id, nombre: r.nombre, poligono: parsearPoligono_(r.poligono) }));
 }
 
-// Acción del Panel (asignar una actividad/trabajo a un cuadro ya marcado).
-// Revisa de inmediato el histórico YA guardado de esa huerta (puntos de
-// recorridos anteriores) -- si el operador ya había pasado cerca de ese
-// cuadro antes de que esta actividad existiera, se crea directamente como
-// "completado" en vez de "pendiente".
+// Acción del Panel (asignar una actividad/trabajo a un cuadro ya
+// dibujado). Revisa de inmediato el histórico YA guardado de esa huerta
+// (puntos de recorridos anteriores) -- si el operador ya había entrado a
+// ese cuadro antes de que esta actividad existiera, se crea directamente
+// como "completado" en vez de "pendiente".
 async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, trabajo) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
@@ -5284,7 +5329,7 @@ async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, tra
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
   if (!idCuadro) return { success: false, error: 'Falta indicar a qué cuadro corresponde.' };
   if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
-  const [cuadros] = await pool.query('SELECT x, y FROM huerta_cuadros WHERE id = ?', [idCuadro]);
+  const [cuadros] = await pool.query('SELECT poligono FROM huerta_cuadros WHERE id = ?', [idCuadro]);
   if (cuadros.length === 0) return { success: false, error: 'Ese cuadro ya no existe.' };
   try {
     const [result] = await pool.query(
@@ -5292,7 +5337,7 @@ async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, tra
       [nombreHuerta, idCuadro, trabajoTexto, (nombreUsuario || '').toString().trim() || null]
     );
     const actividadId = result.insertId;
-    const completadoYa = await verificarActividadContraHistorico_(nombreHuerta, idCuadro, cuadros[0]);
+    const completadoYa = await verificarActividadContraHistorico_(nombreHuerta, parsearPoligono_(cuadros[0].poligono));
     if (completadoYa) {
       await pool.query(
         'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ? WHERE id = ?',
@@ -5306,15 +5351,10 @@ async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, tra
 }
 
 // Revisa, entre los puntos YA guardados de los recorridos de esa huerta,
-// si alguno ya pasó cerca del cuadro dado. Regresa el primer punto (con su
-// avanceId) que cumpla, o null si ninguno. Necesita la calibración de la
-// huerta para convertir la posición del cuadro (pixel) a GPS real; si la
-// huerta todavía no está calibrada, no hay nada que comparar.
-async function verificarActividadContraHistorico_(huerta, cuadroId, cuadroXY) {
-  const mapa = await getMapaHuerta(huerta);
-  if (!mapa.calibrado) return null;
-  const cuadroGps = posicionEnMapaAGps_(mapa.cal1, mapa.cal2, cuadroXY.x, cuadroXY.y);
-  if (!cuadroGps) return null;
+// si alguno ya cubrió el polígono dado. Regresa el primero que cumpla (con
+// su avanceId), o null si ninguno.
+async function verificarActividadContraHistorico_(huerta, poligono) {
+  if (!poligonoValido_(poligono)) return null;
   const [puntos] = await pool.query(
     `SELECT p.avance_id, p.lat, p.lng FROM avance_huerta_puntos p
      JOIN avance_huerta a ON a.id = p.avance_id
@@ -5322,8 +5362,7 @@ async function verificarActividadContraHistorico_(huerta, cuadroId, cuadroXY) {
     [huerta]
   );
   for (const p of puntos) {
-    const dist = distanciaMetrosAvance_(cuadroGps, { lat: Number(p.lat), lng: Number(p.lng) });
-    if (dist <= CUADRO_RADIO_DETECCION_METROS) return { avanceId: p.avance_id };
+    if (cubreCuadro_({ lat: Number(p.lat), lng: Number(p.lng) }, poligono)) return { avanceId: p.avance_id };
   }
   return null;
 }
@@ -5367,32 +5406,27 @@ async function getActividadesHuerta(huerta) {
 // Regresa la lista de actividades que se acaban de completar con este
 // punto, para que el celular pueda, si quiere, avisarle algo al operador.
 async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng) {
-  const mapa = await getMapaHuerta(huerta);
-  if (!mapa.calibrado) return [];
   const [cuadros] = await pool.query(
-    `SELECT c.id, c.x, c.y FROM huerta_cuadros c
+    `SELECT c.id, c.poligono FROM huerta_cuadros c
      WHERE LOWER(TRIM(c.huerta)) = LOWER(TRIM(?))
        AND EXISTS (SELECT 1 FROM huerta_actividades a WHERE a.cuadro_id = c.id AND a.estado = 'pendiente')`,
     [huerta]
   );
   if (cuadros.length === 0) return [];
-  const idsCerca = [];
-  cuadros.forEach((c) => {
-    const posGps = posicionEnMapaAGps_(mapa.cal1, mapa.cal2, Number(c.x), Number(c.y));
-    if (!posGps) return;
-    if (distanciaMetrosAvance_(posGps, { lat, lng }) <= CUADRO_RADIO_DETECCION_METROS) idsCerca.push(c.id);
-  });
-  if (idsCerca.length === 0) return [];
+  const idsCubiertos = cuadros
+    .filter((c) => cubreCuadro_({ lat, lng }, parsearPoligono_(c.poligono)))
+    .map((c) => c.id);
+  if (idsCubiertos.length === 0) return [];
   const [actividadesAfectadas] = await pool.query(
     `SELECT a.id, c.nombre AS cuadroNombre, a.trabajo FROM huerta_actividades a
      JOIN huerta_cuadros c ON c.id = a.cuadro_id
      WHERE a.cuadro_id IN (?) AND a.estado = 'pendiente'`,
-    [idsCerca]
+    [idsCubiertos]
   );
   if (actividadesAfectadas.length === 0) return [];
   await pool.query(
     `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_id = ? WHERE cuadro_id IN (?) AND estado = 'pendiente'`,
-    [avanceId, idsCerca]
+    [avanceId, idsCubiertos]
   );
   return actividadesAfectadas.map((a) => ({ id: a.id, cuadroNombre: a.cuadroNombre, trabajo: a.trabajo }));
 }

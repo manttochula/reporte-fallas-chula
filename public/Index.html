@@ -889,7 +889,10 @@
         <div id="avance-panel-rastreo" style="display:none;">
           <div class="field">
             <label>Qué trabajo es</label>
-            <input type="text" id="avance-f-trabajo" placeholder="Ej. cosecha, fumigación, poda...">
+            <select id="avance-f-trabajo">
+              <option value="" disabled selected>Selecciona una actividad</option>
+            </select>
+            <div class="avance-aviso" id="avance-f-trabajo-vacio" style="display:none; padding-top:6px;">Todavía no hay actividades pendientes asignadas a esta huerta. Pídele a tu encargado que las agregue desde el Panel (Avance Huerta → Dibujar cuadros en Google Maps).</div>
           </div>
           <div class="field">
             <label>Porcentaje de avance (opcional)</label>
@@ -2925,6 +2928,47 @@ function avanceCargarHistorico_(){
 // Cuadros (contornos dibujados por Carlos en Google Maps) y sus
 // actividades -- solo para pintarlos sobre la foto con el color que les
 // corresponda; el operador no los crea ni los edita desde aquí.
+// En vez de dejar que el operador escriba a mano qué trabajo está
+// haciendo, elige de las actividades que Carlos ya planeó por cuadro
+// desde el Panel -- menos errores de dedo y la terminología siempre
+// coincide con lo que Carlos ve en su lado. Solo se ofrecen las que
+// siguen PENDIENTES (una vez completada, ya no tiene caso elegirla de
+// nuevo); si la huerta todavía no tiene ninguna pendiente, se oculta el
+// select y se avisa que hace falta que Carlos las cargue primero.
+function avancePoblarSelectTrabajo_(){
+  var sel = document.getElementById('avance-f-trabajo');
+  var vacio = document.getElementById('avance-f-trabajo-vacio');
+  var btnIniciar = document.getElementById('avance-btn-iniciar');
+  var pendientes = (AVANCE_ACTIVIDADES || []).filter(function(a){ return a.estado !== 'completado'; });
+  var valorAnterior = sel.value;
+  sel.innerHTML = '';
+  var placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  placeholder.textContent = 'Selecciona una actividad';
+  sel.appendChild(placeholder);
+  pendientes.forEach(function(a){
+    var opt = document.createElement('option');
+    var etiqueta = (a.cuadroNombre || '') + ' — ' + (a.trabajo || '');
+    opt.value = etiqueta;
+    opt.textContent = etiqueta;
+    sel.appendChild(opt);
+  });
+  // Conserva la selección si sigue existiendo en la lista (por ejemplo,
+  // tras un refresco que no cambió nada).
+  if(valorAnterior){
+    var opciones = sel.querySelectorAll('option');
+    for(var i = 0; i < opciones.length; i++){
+      if(opciones[i].value === valorAnterior){ sel.selectedIndex = i; break; }
+    }
+  }
+  var hayPendientes = pendientes.length > 0;
+  sel.style.display = hayPendientes ? '' : 'none';
+  vacio.style.display = hayPendientes ? 'none' : '';
+  if(!sel.disabled) btnIniciar.disabled = !hayPendientes; // no tocar el disabled si ya hay un avance en curso
+}
+
 function avanceCargarCuadrosYActividades_(){
   var huerta = AVANCE_HUERTA_ACTUAL;
   google.script.run
@@ -2934,11 +2978,12 @@ function avanceCargarCuadrosYActividades_(){
         .withSuccessHandler(function(actividades){
           AVANCE_ACTIVIDADES = actividades || [];
           avanceDibujarTodoDeNuevo();
+          avancePoblarSelectTrabajo_();
         })
-        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); })
+        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); avancePoblarSelectTrabajo_(); })
         .getActividadesHuerta(huerta);
     })
-    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); })
+    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); avancePoblarSelectTrabajo_(); })
     .getCuadrosHuerta(huerta);
 }
 
@@ -2973,6 +3018,12 @@ function cargarAvanceHuerta(huerta){
         document.getElementById('avance-panel-calibracion').style.display = 'none';
         document.getElementById('avance-panel-rastreo').style.display = '';
         document.getElementById('avance-link-calibrar-wrap').style.display = '';
+        // Mientras llegan las actividades de esta huerta, deja el select en
+        // un estado de "cargando" y el botón deshabilitado -- evita que
+        // parpadee como si no hubiera ninguna pendiente antes de tiempo.
+        document.getElementById('avance-f-trabajo').innerHTML = '<option value="" disabled selected>Cargando actividades...</option>';
+        document.getElementById('avance-f-trabajo-vacio').style.display = 'none';
+        document.getElementById('avance-btn-iniciar').disabled = true;
         avanceCargarHistorico_();
         avanceCargarCuadrosYActividades_();
       } else {
@@ -3008,6 +3059,8 @@ function avanceDetenerRastreoSiActivo_(){
     document.getElementById('avance-btn-terminar').style.display = 'none';
     document.getElementById('avance-f-trabajo').disabled = false;
     document.getElementById('avance-f-porcentaje').disabled = false;
+    document.getElementById('avance-f-porcentaje').value = '';
+    avanceCargarCuadrosYActividades_(); // refresca la lista -- el avance que acaba de terminar pudo haber completado solo alguna actividad por el GPS, y ya no debe seguir apareciendo para elegir
     var chip = document.getElementById('avance-chip-estado');
     chip.textContent = 'Sin registrar avance ahora';
     chip.classList.remove('activo');
@@ -3039,10 +3092,14 @@ function avanceErrorPosicion_(err){
 document.getElementById('avance-btn-iniciar').addEventListener('click', function(){
   var huerta = AVANCE_HUERTA_ACTUAL;
   var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
-  var trabajo = document.getElementById('avance-f-trabajo').value.trim();
+  var trabajo = document.getElementById('avance-f-trabajo').value;
   var porcentajeStr = document.getElementById('avance-f-porcentaje').value;
   var porcentaje = porcentajeStr === '' ? null : Number(porcentajeStr);
   var statusEl = document.getElementById('avance-rastreo-status');
+  if(!trabajo){
+    statusEl.textContent = 'Elige de la lista qué actividad vas a hacer.'; statusEl.className = 'status show err';
+    return;
+  }
   if(!navigator.geolocation){
     statusEl.textContent = 'Este celular/navegador no tiene GPS disponible.'; statusEl.className = 'status show err';
     return;
@@ -3081,9 +3138,7 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
 
 document.getElementById('avance-btn-terminar').addEventListener('click', function(){
   var idTerminar = AVANCE_SESION_ID;
-  avanceDetenerRastreoSiActivo_();
-  document.getElementById('avance-f-trabajo').value = '';
-  document.getElementById('avance-f-porcentaje').value = '';
+  avanceDetenerRastreoSiActivo_(); // ya deja el select de actividad en su placeholder y limpia el porcentaje
   var statusEl = document.getElementById('avance-rastreo-status');
   statusEl.textContent = 'Avance terminado y guardado.';
   statusEl.className = 'status show ok';

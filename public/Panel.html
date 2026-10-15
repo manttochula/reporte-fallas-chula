@@ -3433,10 +3433,16 @@
       <div class="maq-modal maq-modal-wide">
         <span class="maq-modal-close" id="ah-mapa-google-close">&times;</span>
         <h3 style="margin-top:0;">Dibujar cuadros — <span id="ah-mapa-google-huerta-nombre"></span></h3>
-        <p class="avance-aviso" style="padding:0 0 4px;">Usa la herramienta de polígono (arriba a la derecha del mapa) para dibujar el contorno de cada cuadro sobre la imagen satelital. Al cerrar el dibujo, se te pedirá el nombre del cuadro (por ejemplo "CUADRO 5").</p>
+        <p class="avance-aviso" style="padding:0 0 4px;">Toca "✏️ Dibujar cuadro nuevo" y luego ve tocando el mapa en cada esquina del cuadro, en orden. Cuando ya hayas marcado todas las esquinas, toca "✅ Terminar cuadro" y escribe su nombre (por ejemplo "CUADRO 5").</p>
         <div class="ah-mapa-google-ir">
           <input type="text" id="ah-mapa-google-ir-coords" placeholder="Ir a coordenadas, ej. 19.123456, -96.123456">
           <button type="button" class="ah-btn-marcar" id="ah-mapa-google-btn-ir">Ir</button>
+        </div>
+        <div class="ah-mapa-google-ir">
+          <button type="button" class="ah-btn-marcar" id="ah-mapa-google-btn-dibujar">✏️ Dibujar cuadro nuevo</button>
+          <button type="button" class="ah-btn-marcar" id="ah-mapa-google-btn-terminar" style="display:none;" disabled>✅ Terminar cuadro</button>
+          <button type="button" class="ah-btn-marcar" id="ah-mapa-google-btn-cancelar-dibujo" style="display:none;">✕ Cancelar dibujo</button>
+          <span id="ah-mapa-google-conteo-puntos" class="avance-aviso" style="padding:0;"></span>
         </div>
         <div id="ah-mapa-google-canvas"></div>
         <div class="maq-modal-status" id="ah-mapa-google-status"></div>
@@ -6130,8 +6136,14 @@ var AH_CAL_ARMADO = null; // null | 'a' | 'b'
 var AH_CUADROS = []; // [{id, nombre, poligono: [{lat,lng}, ...]}]
 var AH_ACTIVIDADES = []; // [{id, cuadroId, cuadroNombre, trabajo, estado, creadoEn, completadoEn}]
 var AH_GOOGLE_MAP = null; // instancia del mapa de Google (se crea una sola vez, se reutiliza)
-var AH_GOOGLE_DRAWING_MANAGER = null;
 var AH_GOOGLE_POLIGONOS_DIBUJADOS = []; // overlays de los cuadros ya guardados, mostrados de referencia
+// Dibujo manual de un cuadro nuevo -- Google retiró su "Drawing Library"
+// (dejó de funcionar en mayo 2026), así que el contorno se arma a mano:
+// Carlos toca cada esquina del cuadro en el mapa y un botón "Terminar
+// cuadro" cierra el polígono.
+var AH_GOOGLE_DIBUJANDO = false;
+var AH_GOOGLE_DIBUJO_PUNTOS = []; // [{lat,lng}, ...] -- las esquinas tocadas hasta ahora
+var AH_GOOGLE_DIBUJO_POLIGONO = null; // vista previa en vivo del polígono que se está dibujando
 
 function poblarSelectHuertaAvanceHuerta_(){
   poblarSelectSimple_('ah-f-huerta', HUERTAS || [], true);
@@ -6502,24 +6514,24 @@ function ahCargarCuadrosYActividades_(huerta){
 
 var GOOGLE_MAPS_API_KEY = 'AIzaSyCBnjqkULP4ZzGnqGjJU5vs2gr5xFvyG38';
 
-// Convierte la "ruta" que entrega el dibujo de Google Maps (un MVCArray de
-// google.maps.LatLng, donde .lat()/.lng() son FUNCIONES) a objetos simples
-// {lat, lng} listos para mandar al servidor. Acepta también objetos ya
-// simples (lat/lng como número) para poder probar esta función con datos
-// de prueba, sin necesitar la librería real de Google Maps.
-function ahPoligonoDesdeRuta_(ruta){
-  return (ruta || []).map(function(p){
-    var lat = (typeof p.lat === 'function') ? p.lat() : p.lat;
-    var lng = (typeof p.lng === 'function') ? p.lng() : p.lng;
-    return { lat: lat, lng: lng };
-  });
+// Convierte un google.maps.LatLng (.lat()/.lng() como FUNCIONES, como lo
+// entrega un evento de clic del mapa) a un objeto simple {lat, lng} listo
+// para guardar/mandar al servidor. Acepta también un objeto ya simple
+// (lat/lng como número) para poder probar esta función con datos de
+// prueba, sin necesitar la librería real de Google Maps.
+function ahPuntoDesdeLatLng_(latLng){
+  var lat = (typeof latLng.lat === 'function') ? latLng.lat() : latLng.lat;
+  var lng = (typeof latLng.lng === 'function') ? latLng.lng() : latLng.lng;
+  return { lat: lat, lng: lng };
 }
 
-// Carga el script de Google Maps (con la librería de dibujo) solo la
-// primera vez que Carlos abre el modal -- así no se retrasa ni se gasta de
-// más al abrir el Panel si nunca llega a usar esta pantalla.
+// Carga el script de Google Maps solo la primera vez que Carlos abre el
+// modal -- así no se retrasa ni se gasta de más al abrir el Panel si nunca
+// llega a usar esta pantalla. (Ya NO se pide la librería de dibujo --
+// Google la retiró en mayo de 2026 -- el contorno se arma a mano, ver
+// ahClicEnMapaGoogle_ más abajo.)
 function ahCargarGoogleMapsSiHaceFalta_(callback){
-  if(window.google && window.google.maps && window.google.maps.drawing){
+  if(window.google && window.google.maps && window.google.maps.Map){
     callback();
     return;
   }
@@ -6536,7 +6548,7 @@ function ahCargarGoogleMapsSiHaceFalta_(callback){
     pendientes.forEach(function(fn){ fn(); });
   };
   var script = document.createElement('script');
-  script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_MAPS_API_KEY + '&libraries=drawing&callback=ahGoogleMapsListo_';
+  script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_MAPS_API_KEY + '&callback=ahGoogleMapsListo_';
   script.async = true;
   document.head.appendChild(script);
 }
@@ -6559,16 +6571,54 @@ function ahInicializarMapaGoogleSiHaceFalta_(){
     zoom: (AH_MAPA_INFO && AH_MAPA_INFO.calibrado) ? 18 : 5,
     mapTypeId: 'satellite',
   });
-  AH_GOOGLE_DRAWING_MANAGER = new google.maps.drawing.DrawingManager({
-    drawingMode: google.maps.drawing.OverlayType.POLYGON,
-    drawingControl: true,
-    drawingControlOptions: { drawingModes: ['polygon'] },
-    polygonOptions: { strokeColor: '#E8871E', fillColor: '#E8871E', fillOpacity: 0.25, strokeWeight: 2, editable: false },
+  // Vista previa en vivo del cuadro que se está dibujando a mano (empieza
+  // vacía/oculta; se va llenando en ahClicEnMapaGoogle_).
+  AH_GOOGLE_DIBUJO_POLIGONO = new google.maps.Polygon({
+    paths: [],
+    strokeColor: '#E8871E', fillColor: '#E8871E', fillOpacity: 0.25, strokeWeight: 2, clickable: false,
   });
-  AH_GOOGLE_DRAWING_MANAGER.setMap(AH_GOOGLE_MAP);
-  google.maps.event.addListener(AH_GOOGLE_DRAWING_MANAGER, 'polygoncomplete', function(polygon){
-    ahGuardarPoligonoDibujado_(polygon);
+  AH_GOOGLE_DIBUJO_POLIGONO.setMap(AH_GOOGLE_MAP);
+  google.maps.event.addListener(AH_GOOGLE_MAP, 'click', function(ev){
+    ahClicEnMapaGoogle_(ev);
   });
+}
+
+// Mientras se está dibujando un cuadro a mano (AH_GOOGLE_DIBUJANDO), cada
+// clic en el mapa agrega una esquina más al polígono en construcción.
+// Fuera de ese modo, el clic no hace nada (igual que antes del cambio).
+function ahClicEnMapaGoogle_(ev){
+  if(!AH_GOOGLE_DIBUJANDO) return;
+  AH_GOOGLE_DIBUJO_PUNTOS.push(ahPuntoDesdeLatLng_(ev.latLng));
+  AH_GOOGLE_DIBUJO_POLIGONO.setPath(AH_GOOGLE_DIBUJO_PUNTOS);
+  ahActualizarUiDibujoCuadroGoogle_();
+}
+
+function ahActualizarUiDibujoCuadroGoogle_(){
+  var n = AH_GOOGLE_DIBUJO_PUNTOS.length;
+  document.getElementById('ah-mapa-google-btn-terminar').disabled = n < 3;
+  document.getElementById('ah-mapa-google-conteo-puntos').textContent = n === 0
+    ? ''
+    : (n < 3 ? 'Llevas ' + n + ' esquina(s) marcada(s) -- faltan al menos ' + (3 - n) + ' más.' : n + ' esquinas marcadas. Toca "✅ Terminar cuadro" cuando termines, o sigue tocando el mapa para agregar más.');
+}
+
+function ahEmpezarDibujoCuadroGoogle_(){
+  AH_GOOGLE_DIBUJANDO = true;
+  AH_GOOGLE_DIBUJO_PUNTOS = [];
+  if(AH_GOOGLE_DIBUJO_POLIGONO) AH_GOOGLE_DIBUJO_POLIGONO.setPath([]);
+  document.getElementById('ah-mapa-google-btn-dibujar').style.display = 'none';
+  document.getElementById('ah-mapa-google-btn-terminar').style.display = '';
+  document.getElementById('ah-mapa-google-btn-cancelar-dibujo').style.display = '';
+  ahActualizarUiDibujoCuadroGoogle_();
+}
+
+function ahCancelarDibujoCuadroGoogle_(){
+  AH_GOOGLE_DIBUJANDO = false;
+  AH_GOOGLE_DIBUJO_PUNTOS = [];
+  if(AH_GOOGLE_DIBUJO_POLIGONO) AH_GOOGLE_DIBUJO_POLIGONO.setPath([]);
+  document.getElementById('ah-mapa-google-btn-dibujar').style.display = '';
+  document.getElementById('ah-mapa-google-btn-terminar').style.display = 'none';
+  document.getElementById('ah-mapa-google-btn-cancelar-dibujo').style.display = 'none';
+  document.getElementById('ah-mapa-google-conteo-puntos').textContent = '';
 }
 
 // Pinta (de referencia, no editables) los cuadros que ya están guardados,
@@ -6591,18 +6641,18 @@ function ahDibujarPoligonosGoogleExistentes_(){
   });
 }
 
-// Se dispara cuando Carlos termina de dibujar un polígono en el mapa de
-// Google (evento polygoncomplete). window.prompt() para el nombre -- mismo
-// patrón ya usado en el Panel para nombrar catálogos nuevos (Marca, Modelo,
-// etc). El dibujo temporal se quita apenas se guarda -- se vuelve a pintar
-// (ya en su color según su estado) desde ahDibujarPoligonosGoogleExistentes_.
-function ahGuardarPoligonoDibujado_(polygon){
-  var poligono = ahPoligonoDesdeRuta_(polygon.getPath().getArray());
+// Se dispara al tocar "✅ Terminar cuadro" con al menos 3 esquinas ya
+// marcadas. window.prompt() para el nombre -- mismo patrón ya usado en el
+// Panel para nombrar catálogos nuevos (Marca, Modelo, etc). Si se cancela
+// el nombre, se cancela todo el dibujo (igual que antes, cuando se
+// cancelaba el prompt tras dibujar con la herramienta de Google).
+function ahTerminarDibujoCuadroGoogle_(){
+  if(AH_GOOGLE_DIBUJO_PUNTOS.length < 3) return;
+  var poligono = AH_GOOGLE_DIBUJO_PUNTOS.slice();
   var nombre = window.prompt('Nombre de este cuadro (por ejemplo: CUADRO 5):', '');
-  if(nombre === null){ polygon.setMap(null); return; }
+  if(nombre === null){ ahCancelarDibujoCuadroGoogle_(); return; }
   nombre = nombre.trim();
-  if(!nombre){ polygon.setMap(null); return; }
-  polygon.setMap(null);
+  if(!nombre){ ahCancelarDibujoCuadroGoogle_(); return; }
   var huerta = AH_HUERTA_ACTUAL;
   var statusEl = document.getElementById('ah-mapa-google-status');
   statusEl.textContent = 'Guardando...';
@@ -6616,6 +6666,7 @@ function ahGuardarPoligonoDibujado_(polygon){
       }
       statusEl.textContent = 'Cuadro "' + nombre + '" guardado.';
       statusEl.className = 'maq-modal-status show ok';
+      ahCancelarDibujoCuadroGoogle_(); // quita la vista previa y los botones de dibujo -- ya se repinta en su color definitivo desde ahDibujarPoligonosGoogleExistentes_
       ahCargarCuadrosYActividades_(huerta);
     })
     .withFailureHandler(function(err){
@@ -6630,6 +6681,7 @@ function ahAbrirModalCuadrosGoogle_(){
   document.getElementById('ah-mapa-google-status').textContent = '';
   document.getElementById('ah-mapa-google-status').className = 'maq-modal-status';
   document.getElementById('ah-mapa-google-overlay').classList.add('open');
+  ahCancelarDibujoCuadroGoogle_(); // por si quedó un dibujo a medias de la vez anterior
   ahCargarGoogleMapsSiHaceFalta_(function(){
     ahInicializarMapaGoogleSiHaceFalta_();
     // El modal pudo estar oculto (sin tamaño) cuando se creó el mapa la
@@ -6642,6 +6694,7 @@ function ahAbrirModalCuadrosGoogle_(){
 
 function ahCerrarModalCuadrosGoogle_(){
   document.getElementById('ah-mapa-google-overlay').classList.remove('open');
+  ahCancelarDibujoCuadroGoogle_();
 }
 
 document.getElementById('ah-btn-modo-cuadros').addEventListener('click', function(){
@@ -6649,6 +6702,10 @@ document.getElementById('ah-btn-modo-cuadros').addEventListener('click', functio
 });
 
 document.getElementById('ah-mapa-google-close').addEventListener('click', ahCerrarModalCuadrosGoogle_);
+
+document.getElementById('ah-mapa-google-btn-dibujar').addEventListener('click', ahEmpezarDibujoCuadroGoogle_);
+document.getElementById('ah-mapa-google-btn-terminar').addEventListener('click', ahTerminarDibujoCuadroGoogle_);
+document.getElementById('ah-mapa-google-btn-cancelar-dibujo').addEventListener('click', ahCancelarDibujoCuadroGoogle_);
 
 document.getElementById('ah-mapa-google-overlay').addEventListener('click', function(ev){
   if(ev.target === document.getElementById('ah-mapa-google-overlay')) ahCerrarModalCuadrosGoogle_();

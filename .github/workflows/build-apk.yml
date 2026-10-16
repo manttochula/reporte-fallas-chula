@@ -57,7 +57,7 @@ jobs:
       - name: Instalar Node.js (lo necesita Capacitor)
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Instalar las dependencias del proyecto
         run: npm ci

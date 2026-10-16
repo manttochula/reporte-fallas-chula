@@ -5135,6 +5135,40 @@ async function terminarAvance(avanceId) {
   return { success: true };
 }
 
+// El celular la llama al entrar a "Avance Huerta" (ver avanceReanudarSiHayAbierto_
+// en Index.html) para saber si ESE operador ya tiene un registro abierto
+// para esa huerta -- por ejemplo porque el celular bloqueó la pantalla por
+// inactividad, o Android/iOS mató la página a medio registrar -- y así
+// retomarlo en el mismo avanceId en vez de dejarlo huérfano (sin
+// fecha_fin, acumulando para siempre sin que nadie lo note) o arriesgarse
+// a que el operador inicie uno nuevo encimado sin darse cuenta. Abierta
+// (mismo criterio que el resto del recorrido en sí).
+async function getAvanceAbierto(huerta, nombre) {
+  const nombreHuerta = (huerta || '').toString().trim();
+  const nombrePersona = (nombre || '').toString().trim();
+  if (!nombreHuerta || !nombrePersona) return { existe: false };
+  const [sesiones] = await pool.query(
+    `SELECT id, trabajo, porcentaje, fecha_inicio FROM avance_huerta
+     WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) AND LOWER(TRIM(nombre)) = LOWER(TRIM(?)) AND fecha_fin IS NULL
+     ORDER BY fecha_inicio DESC LIMIT 1`,
+    [nombreHuerta, nombrePersona]
+  );
+  if (sesiones.length === 0) return { existe: false };
+  const sesion = sesiones[0];
+  const [puntos] = await pool.query(
+    'SELECT lat, lng FROM avance_huerta_puntos WHERE avance_id = ? ORDER BY capturado_en, id',
+    [sesion.id]
+  );
+  return {
+    existe: true,
+    avanceId: sesion.id,
+    trabajo: sesion.trabajo,
+    porcentaje: sesion.porcentaje !== null ? Number(sesion.porcentaje) : null,
+    fechaInicio: sesion.fecha_inicio,
+    puntos: puntos.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })),
+  };
+}
+
 // Todo el histórico de una huerta, agrupado por registro (cada registro es
 // un trazo independiente -- nunca se conecta con una línea el final de un
 // registro con el inicio de otro, aunque hayan sido el mismo día). Sin
@@ -6882,6 +6916,7 @@ module.exports = {
   iniciarAvance,
   agregarPuntoAvance,
   terminarAvance,
+  getAvanceAbierto,
   getAvanceHuerta,
   guardarCuadroHuerta,
   eliminarCuadroHuerta,

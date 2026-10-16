@@ -2663,9 +2663,88 @@ var AVANCE_HUERTA_ACTUAL = '';
 var AVANCE_HISTORICO = []; // de getAvanceHuerta: [{avanceId, nombre, trabajo, porcentaje, puntos:[{lat,lng}]}]
 var AVANCE_SESION_ID = null;
 var AVANCE_WATCH_ID = null;
+var AVANCE_WAKE_LOCK = null; // ver avanceSolicitarWakeLock_ -- mantiene la pantalla encendida mientras se registra avance
 var AVANCE_ULTIMO_PUNTO = null;
 var AVANCE_PUNTOS_SESION = [];
 var AVANCE_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y} | {x,y,lat,lng}
+
+// ¿Esta página está corriendo dentro de la app nativa de Android (la que
+// se instala como .apk), o en un navegador normal? La app nativa trae un
+// plugin (BackgroundLocation) que SÍ puede seguir capturando GPS con la
+// pantalla bloqueada -- ver avanceIniciarRastreoNativo_ más abajo. En un
+// navegador normal (o en iPhone, que todavía no tiene su propia app) esto
+// regresa false y todo sigue exactamente igual que antes (Wake Lock +
+// watchPosition). window.Capacitor solo existe dentro de esa app nativa.
+function avanceEsAppNativa_(){
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+}
+
+// Pide los permisos nativos de ubicación en el orden que Android exige:
+// primero el normal ("location"), y SOLO si ese quedó concedido, aparte
+// el de "todo el tiempo" ("backgroundLocation") -- pedirlos juntos hace
+// que muchos celulares rechacen automáticamente el de fondo. Si el
+// operador llega a negar el de fondo o el de notificaciones, de todos
+// modos se continúa: BackgroundLocationPlugin.start() en Android solo
+// exige el permiso normal (sin el de fondo, el rastreo puede cortarse más
+// fácil con la pantalla bloqueada por mucho tiempo, pero no es un error
+// que deba impedir registrar el avance).
+function avancePedirPermisosNativos_(){
+  var BL = window.Capacitor.Plugins.BackgroundLocation;
+  return BL.checkPermissions().then(function(estado){
+    if(estado && estado.location === 'granted') return estado;
+    return BL.requestPermissions({ permissions: ['location'] });
+  }).then(function(estado){
+    if(!estado || estado.location !== 'granted'){
+      return Promise.reject(new Error('Sin el permiso de ubicación no se puede registrar el avance.'));
+    }
+    var pedirFondo = (estado.backgroundLocation === 'granted') ? Promise.resolve() : BL.requestPermissions({ permissions: ['backgroundLocation'] });
+    var pedirNotif = (estado.notifications === 'granted') ? Promise.resolve() : BL.requestPermissions({ permissions: ['notifications'] });
+    return Promise.all([pedirFondo, pedirNotif]);
+  });
+}
+
+// Arranca el rastreo en segundo plano de la app nativa (ver
+// BackgroundLocationPlugin.java / BackgroundLocationService.java) para un
+// avance que ya se dio de alta en el servidor (avanceId). apiBase se
+// manda tal cual lo ve el WebView (window.location.origin) para que el
+// servicio nativo mande los puntos GPS al mismo sitio donde está corriendo
+// esta página, sin tener que repetir la dirección a mano aquí.
+function avanceIniciarRastreoNativo_(avanceId){
+  var BL = window.Capacitor.Plugins.BackgroundLocation;
+  return avancePedirPermisosNativos_().then(function(){
+    return BL.start({ avanceId: avanceId, apiBase: window.location.origin });
+  });
+}
+
+function avanceDetenerRastreoNativo_(){
+  return window.Capacitor.Plugins.BackgroundLocation.stop();
+}
+
+// Mientras la pantalla NO está bloqueada, el servicio nativo también
+// reenvía aquí cada punto nuevo (ver BackgroundLocationPlugin.onNuevoPunto)
+// para que el operador siga viendo su trazo avanzar en el mapa en vivo,
+// igual que en el modo navegador -- la diferencia es que aquí NO se vuelve
+// a mandar el punto al servidor (el servicio nativo ya lo mandó directo
+// por HTTP): esta función solo actualiza lo que se VE en pantalla.
+function avanceNuevoPuntoNativo_(lat, lng){
+  var nuevo = { lat: lat, lng: lng };
+  if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return;
+  var anterior = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
+  AVANCE_PUNTOS_SESION.push(nuevo);
+  AVANCE_ULTIMO_PUNTO = nuevo;
+  if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
+    avanceDibujarSegmento_(AVANCE_MAPA_INFO.cal1, AVANCE_MAPA_INFO.cal2, anterior, nuevo, 'rgba(232,135,30,0.6)');
+  }
+  var chip = document.getElementById('avance-chip-estado');
+  if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
+}
+
+if(avanceEsAppNativa_() && window.Capacitor.Plugins.BackgroundLocation){
+  window.Capacitor.Plugins.BackgroundLocation.addListener('puntoNuevo', function(data){
+    if(!AVANCE_SESION_ID) return; // ya se terminó el avance -- se descarta cualquier punto tardío
+    avanceNuevoPuntoNativo_(data.lat, data.lng);
+  });
+}
 var AVANCE_CUADROS = []; // de getCuadrosHuerta: [{id, nombre, poligono: [{lat,lng}, ...]}]
 var AVANCE_ACTIVIDADES = []; // de getActividadesHuerta: [{id, cuadroId, cuadroNombre, trabajo, estado, ...}]
 
@@ -2971,6 +3050,66 @@ function avancePoblarSelectTrabajo_(){
   if(!sel.disabled) btnIniciar.disabled = !hayPendientes; // no tocar el disabled si ya hay un avance en curso
 }
 
+// Al entrar a "Avance Huerta" revisa si ESTE operador ya tiene un registro
+// abierto para esta huerta (ver getAvanceAbierto en handlers.js) -- por
+// ejemplo porque bloqueó la pantalla él mismo, se le acabó la batería, o
+// cerró el navegador por accidente a medio registrar. Si lo hay, lo retoma
+// en el mismo avanceId (sigue sumando puntos ahí, no empieza uno nuevo
+// encimado) en vez de dejarlo huérfano para siempre o arriesgar que el
+// operador no se dé cuenta y pierda ese avance.
+function avanceReanudarSiHayAbierto_(){
+  var huerta = AVANCE_HUERTA_ACTUAL;
+  var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
+  if(!huerta || !nombre) return;
+  google.script.run
+    .withSuccessHandler(function(abierto){
+      // Por si ya se inició (o se retomó) uno nuevo mientras llegaba esta
+      // respuesta, o si mientras tanto se cambió de huerta.
+      if(!abierto || !abierto.existe || AVANCE_SESION_ID || AVANCE_HUERTA_ACTUAL !== huerta) return;
+      AVANCE_SESION_ID = abierto.avanceId;
+      AVANCE_PUNTOS_SESION = abierto.puntos || [];
+      AVANCE_ULTIMO_PUNTO = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
+      document.getElementById('avance-btn-iniciar').style.display = 'none';
+      document.getElementById('avance-btn-terminar').style.display = '';
+      document.getElementById('avance-f-trabajo').disabled = true;
+      document.getElementById('avance-f-porcentaje').disabled = true;
+      if(abierto.trabajo){
+        // avanceCargarCuadrosYActividades_ puebla este <select> por su
+        // cuenta, en paralelo -- puede que todavía no haya terminado
+        // cuando llega esta respuesta. Para no depender de ese orden, si
+        // la opción todavía no existe se agrega aquí mismo (se descarta
+        // sola en cuanto ese otro llamado repueble el select de verdad).
+        var selTrabajo = document.getElementById('avance-f-trabajo');
+        var yaExisteOpcion = Array.prototype.some.call(selTrabajo.options, function(o){ return o.value === abierto.trabajo; });
+        if(!yaExisteOpcion){
+          var optResumen = document.createElement('option');
+          optResumen.value = abierto.trabajo;
+          optResumen.textContent = abierto.trabajo;
+          selTrabajo.appendChild(optResumen);
+        }
+        selTrabajo.value = abierto.trabajo;
+      }
+      if(abierto.porcentaje !== null && abierto.porcentaje !== undefined) document.getElementById('avance-f-porcentaje').value = abierto.porcentaje;
+      var chip = document.getElementById('avance-chip-estado');
+      chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
+      chip.classList.add('activo');
+      var statusEl = document.getElementById('avance-rastreo-status');
+      statusEl.textContent = 'Retomamos tu avance que seguía en curso' + (abierto.fechaInicio ? (' (iniciado ' + new Date(abierto.fechaInicio).toLocaleString('es-MX') + ')') : '') + '.';
+      statusEl.className = 'status show ok';
+      avanceDibujarTodoDeNuevo();
+      if(avanceEsAppNativa_()){
+        avanceIniciarRastreoNativo_(abierto.avanceId).catch(function(){
+          AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+        });
+      } else {
+        AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+        avanceSolicitarWakeLock_();
+      }
+    })
+    .withFailureHandler(function(){ /* sin red: no se puede saber todavía -- no es grave, se reintenta la próxima vez que se entre a esta huerta */ })
+    .getAvanceAbierto(huerta, nombre);
+}
+
 function avanceCargarCuadrosYActividades_(){
   var huerta = AVANCE_HUERTA_ACTUAL;
   google.script.run
@@ -3028,6 +3167,7 @@ function cargarAvanceHuerta(huerta){
         document.getElementById('avance-btn-iniciar').disabled = true;
         avanceCargarHistorico_();
         avanceCargarCuadrosYActividades_();
+        avanceReanudarSiHayAbierto_();
       } else {
         document.getElementById('avance-panel-calibracion').style.display = '';
         document.getElementById('avance-panel-rastreo').style.display = 'none';
@@ -3048,7 +3188,69 @@ document.getElementById('avance-f-huerta').addEventListener('change', function()
   cargarAvanceHuerta(this.value);
 });
 
+// Petición de Carlos: que el operador pueda iniciar su avance, guardar el
+// celular (y hasta bloquearlo) y que el GPS lo siga registrando solo. Esto
+// NO es posible de verdad desde ESTA página web sola (ni esta ni ninguna
+// otra) -- cuando el operador bloquea la pantalla a propósito con el botón
+// de encendido, el sistema operativo del celular congela cualquier
+// navegador sin importar qué tan bien esté programada la página.
+//
+// En Android, Carlos ya tiene la app nativa (el .apk, ver
+// avanceEsAppNativa_ / BackgroundLocationPlugin.java) que SÍ resuelve esto
+// de verdad -- usa un servicio propio de Android que el sistema operativo
+// no congela, con el permiso de ubicación "Todo el tiempo". En iPhone
+// todavía no existe esa app nativa, así que ahí sigue aplicando la
+// limitación de siempre.
+//
+// Lo que SÍ se puede resolver desde esta página web sola -- y en la práctica es la causa
+// más común de que "se corte solo" -- es que la pantalla se apague SOLA
+// por inactividad (el operador deja el celular bocabajo o en la bolsa
+// mientras camina, sin tocarlo, y a los pocos segundos se apaga el
+// celular solo). El Screen Wake Lock API evita justo eso mientras haya un
+// avance en curso -- no evita que el operador apague la pantalla él mismo
+// con el botón, pero si no la toca, ya no se apaga sola. Se vuelve a pedir
+// cada vez que la pestaña recupera el foco (la mayoría de los navegadores
+// la liberan solos al perder el foco).
+function avanceSolicitarWakeLock_(){
+  if(!('wakeLock' in navigator)) return;
+  navigator.wakeLock.request('screen').then(function(lock){
+    AVANCE_WAKE_LOCK = lock;
+    lock.addEventListener('release', function(){ AVANCE_WAKE_LOCK = null; });
+  }).catch(function(){ /* el celular pudo negarlo (p.ej. batería baja) -- no es crítico, el rastreo sigue igual */ });
+}
+
+function avanceLiberarWakeLock_(){
+  if(AVANCE_WAKE_LOCK){
+    AVANCE_WAKE_LOCK.release().catch(function(){});
+    AVANCE_WAKE_LOCK = null;
+  }
+}
+
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible' && AVANCE_SESION_ID){
+    avanceSolicitarWakeLock_();
+  }
+});
+
+// Mensaje que se le muestra al operador al empezar (o retomar) un avance --
+// distinto según si esto corre dentro de la app nativa de Android (que sí
+// puede seguir con la pantalla bloqueada), o es la página web sola, y en
+// ese caso según si este celular/navegador soporta mantener la pantalla
+// encendida sola (ver avanceSolicitarWakeLock_) o no.
+function avanceMensajeRastreoActivo_(){
+  if(avanceEsAppNativa_()){
+    return 'Avance iniciado. Puedes bloquear el celular -- esta app lo va a seguir registrando en segundo plano (vas a ver un aviso fijo en la pantalla mientras dure).';
+  }
+  return ('wakeLock' in navigator)
+    ? 'Avance iniciado. Vamos a mantener la pantalla encendida para que el GPS no se corte solo por inactividad -- evita apagarla tú mismo con el botón de encendido.'
+    : 'Avance iniciado. No cierres esta página ni bloquees el celular.';
+}
+
 function avanceDetenerRastreoSiActivo_(){
+  avanceLiberarWakeLock_();
+  if(avanceEsAppNativa_()){
+    avanceDetenerRastreoNativo_().catch(function(){ /* si ya no estaba corriendo, no hay nada que hacer */ });
+  }
   if(AVANCE_WATCH_ID !== null){
     navigator.geolocation.clearWatch(AVANCE_WATCH_ID);
     AVANCE_WATCH_ID = null;
@@ -3126,9 +3328,24 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
       var chip = document.getElementById('avance-chip-estado');
       chip.textContent = 'Registrando avance... (0 puntos)';
       chip.classList.add('activo');
-      statusEl.textContent = 'Avance iniciado. No cierres esta página ni bloquees el celular.';
+      statusEl.textContent = avanceMensajeRastreoActivo_();
       statusEl.className = 'status show ok';
-      AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+      if(avanceEsAppNativa_()){
+        // Dentro de la app nativa de Android, el rastreo lo lleva el
+        // plugin BackgroundLocation (sigue funcionando con la pantalla
+        // bloqueada). Si por lo que sea no se pudo activar (el operador
+        // negó el permiso de ubicación, por ejemplo), no se deja al
+        // operador sin ningún rastreo: se cae de vuelta al watchPosition
+        // normal del navegador, igual que en el sitio web.
+        avanceIniciarRastreoNativo_(result.avanceId).catch(function(err){
+          statusEl.textContent = 'No se pudo activar el rastreo en segundo plano (' + ((err && err.message) || 'revisa los permisos de ubicación') + '). Mientras tengas esta pantalla abierta se sigue registrando igual.';
+          statusEl.className = 'status show err';
+          AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+        });
+      } else {
+        AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+        avanceSolicitarWakeLock_();
+      }
     })
     .withFailureHandler(function(){
       btn.disabled = false;

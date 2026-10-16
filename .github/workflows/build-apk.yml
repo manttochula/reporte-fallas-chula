@@ -1,0 +1,73 @@
+# Compila la app nativa de Android (el .apk que se instala en los
+# celulares de los operadores) automáticamente cada vez que se sube
+# código relacionado a GitHub -- el mismo espíritu que ya usan con Render
+# para el sitio web: subes el código y "algo" lo compila solo, sin tener
+# que instalar Android Studio en ninguna computadora.
+#
+# Cómo conseguir el .apk después de que esto corra:
+#   1. Entra a https://github.com/manttochula/reporte-fallas-chula/actions
+#   2. Abre la corrida más reciente de "Compilar app nativa de Android"
+#      (tarda unos 3-6 minutos la primera vez).
+#   3. Hasta abajo de esa página hay una sección "Artifacts" --
+#      "reporte-de-fallas-android" es el .apk, listo para descargar.
+#   4. Pasa ese .apk a un celular Android (por USB, WhatsApp, Drive, lo
+#      que sea más fácil) y ábrelo ahí para instalarlo -- la primera vez
+#      Android va a pedir permiso para "instalar aplicaciones de fuentes
+#      desconocidas", solo para esta vez.
+name: Compilar app nativa de Android
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android/**'
+      - 'capacitor.config.ts'
+      - 'www/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-apk.yml'
+  # Para poder pedir una compilación nueva a mano desde la pestaña
+  # "Actions" de GitHub, sin tener que subir nada -- útil para probar de
+  # nuevo después de un ajuste de permisos, por ejemplo.
+  workflow_dispatch: {}
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Java (lo necesita Android para compilar)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Instalar el SDK de Android
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar Node.js (lo necesita Capacitor)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar las dependencias del proyecto
+        run: npm ci
+
+      - name: Sincronizar Capacitor con el proyecto de Android
+        run: npx cap sync android
+
+      - name: Dar permiso de ejecución al script de compilación
+        run: chmod +x android/gradlew
+
+      - name: Compilar el .apk
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Dejar el .apk listo para descargar
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-de-fallas-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 90

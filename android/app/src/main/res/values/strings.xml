@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Reporte de Fallas</string>
+    <string name="title_activity_main">Reporte de Fallas</string>
+    <string name="package_name">mx.chulabrand.reportefallas</string>
+    <string name="custom_url_scheme">mx.chulabrand.reportefallas</string>
+</resources>

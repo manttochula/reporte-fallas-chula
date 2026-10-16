@@ -44,8 +44,15 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Instalar el SDK de Android
-        uses: android-actions/setup-android@v3
+      # Las máquinas de GitHub ya traen el SDK de Android instalado y
+      # funcionando -- antes usábamos una herramienta extra
+      # (android-actions/setup-android) para "prepararlo", pero esa
+      # herramienta intenta instalar un paquete viejo que Google ya quitó
+      # y por eso fallaba. Lo único que hace falta es aceptar las
+      # licencias; Gradle descarga solo, durante la compilación, las
+      # piezas exactas del SDK que el proyecto necesita.
+      - name: Aceptar las licencias del SDK de Android
+        run: yes | sdkmanager --licenses > /dev/null || true
 
       - name: Instalar Node.js (lo necesita Capacitor)
         uses: actions/setup-node@v4

@@ -5190,6 +5190,14 @@ async function getAvanceHuerta(huerta) {
 // polígono a un pixel con gpsAPosicionEnMapa_) -- eso lo hace el cliente
 // (Panel.html/Index.html), no el servidor.
 const CUADRO_TOLERANCIA_BORDE_METROS = 15; // margen por la imprecisión típica del GPS de un celular
+// Margen al comparar avance_metros contra lo esperado para dar por
+// completada una actividad por surcos -- sin esto, 2 cantidades calculadas
+// por separado (una ya redondeada a centímetros en la base de datos, la
+// otra recalculada al vuelo con trigonometría) que en teoría deberían
+// coincidir exactamente al llegar al 100% pueden quedar una fracción de
+// milímetro por debajo solo por redondeo, y la actividad nunca se
+// terminaría de completar sola.
+const SURCOS_TOLERANCIA_METROS = 0.1;
 
 function aMetrosLocal_(origen, p) {
   const metrosPorGradoLat = 111320;
@@ -5246,6 +5254,66 @@ function cubreCuadro_(punto, poligono) {
   return distanciaPuntoAPoligonoMetros_(punto, poligono) <= CUADRO_TOLERANCIA_BORDE_METROS;
 }
 
+// Distancia GPS real (en metros) entre 2 puntos cualesquiera -- a
+// diferencia de distanciaPuntoASegmentoMetros_ (que mide contra un
+// SEGMENTO, para la tolerancia de borde), esta es la línea recta entre 2
+// puntos sueltos, usada para medir cuánto avanzó el operador de un punto
+// de su recorrido al siguiente.
+function distanciaMetros_(a, b) {
+  const p = aMetrosLocal_(a, b);
+  return Math.sqrt(p.x * p.x + p.y * p.y);
+}
+
+// ------------------------------------------------------------
+// Avance por surcos -- petición explícita de Carlos: "si en el cuadro 02
+// fueran 10 surcos y avanzo la mitad de uno llevaría un avance del 5%" en
+// vez del criterio binario de antes (pendiente/completado solo con pasar
+// por cualquier parte del cuadro). huerta_cuadros.surcos es el número de
+// surcos REALES de ese lote (una sola vez, es una propiedad física del
+// cuadro, no de la actividad). huerta_actividades.intervalo_surcos es
+// cada cuántos surcos cuenta esa actividad EN PARTICULAR como una pasada
+// (1 = surco por surco, 2 = cada dos surcos -- p.ej. un implemento ancho
+// que cubre 2 surcos de una pasada).
+//
+// La longitud de "un surco" se ESTIMA sola, sin que Carlos tenga que
+// medir nada: se toma el LADO más largo del polígono que ya dibujó en
+// Google Maps (entre 2 vértices consecutivos, no cualquier par) -- para un
+// cuadro razonablemente rectangular, ese lado largo es justo la distancia
+// de punta a punta de un surco que corre a lo largo del lote. Se usa el
+// lado más largo y no la diagonal entre 2 vértices cualesquiera (que sería
+// más larga y sobreestimaría el surco) precisamente porque la diagonal no
+// es un recorrido real que el operador vaya a hacer.
+//
+// Si un cuadro NO tiene surcos capturados (NULL), se mantiene el
+// comportamiento binario de siempre: cualquier punto dentro del polígono
+// completa de inmediato sus actividades pendientes.
+function calcularLargoPoligonoMetros_(poligono) {
+  if (!poligono || poligono.length < 2) return 0;
+  const origen = poligono[0];
+  const verts = poligono.map((v) => aMetrosLocal_(origen, v));
+  let max = 0;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d > max) max = d;
+  }
+  return max;
+}
+
+// null = "este cuadro no tiene surcos capturados todavía -- usar el
+// criterio binario de antes en vez de un %".
+function calcularDistanciaTotalEsperadaMetros_(poligono, surcos, intervaloSurcos) {
+  const n = Number(surcos);
+  if (!n || n <= 0) return null;
+  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  const pasadas = Math.ceil(n / intervalo);
+  const largo = calcularLargoPoligonoMetros_(poligono);
+  return pasadas * largo;
+}
+
 // Valida que sea un arreglo de al menos 3 puntos {lat,lng} numéricos.
 function poligonoValido_(poligono) {
   if (!Array.isArray(poligono) || poligono.length < 3) return false;
@@ -5292,6 +5360,45 @@ async function eliminarCuadroHuerta(code, nombreUsuario, cuadroId) {
   return { success: true };
 }
 
+// Acción del Panel: define (o quita) cuántos surcos REALES tiene un
+// cuadro -- separada de guardarCuadroHuerta a propósito, para no
+// arriesgar el contorno ya dibujado solo por ajustar este número. null/''
+// = "quitar el dato" (ese cuadro vuelve al criterio binario de antes). El
+// % de cualquier actividad pendiente de este cuadro depende de este
+// número, así que se reevalúan de inmediato por si el cambio ya las deja
+// en 100% (p.ej. si Carlos corrige el número de surcos hacia abajo).
+async function actualizarSurcosCuadro(code, nombreUsuario, cuadroId, surcos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const id = Number(cuadroId);
+  if (!id) return { success: false, error: 'Falta indicar qué cuadro.' };
+  let surcosNum = null;
+  if (surcos !== null && surcos !== undefined && surcos !== '') {
+    surcosNum = Math.round(Number(surcos));
+    if (!Number.isFinite(surcosNum) || surcosNum <= 0) {
+      return { success: false, error: 'El número de surcos debe ser un entero mayor a 0 (o déjalo vacío para quitarlo).' };
+    }
+  }
+  const [cuadros] = await pool.query('SELECT poligono FROM huerta_cuadros WHERE id = ?', [id]);
+  if (cuadros.length === 0) return { success: false, error: 'Ese cuadro ya no existe.' };
+  await pool.query('UPDATE huerta_cuadros SET surcos = ? WHERE id = ?', [surcosNum, id]);
+  const poligono = parsearPoligono_(cuadros[0].poligono);
+  const [actividades] = await pool.query(
+    `SELECT id, intervalo_surcos, avance_metros FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
+    [id]
+  );
+  for (const act of actividades) {
+    const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, surcosNum, act.intervalo_surcos);
+    const avanceMetros = Number(act.avance_metros) || 0;
+    if (esperado !== null && avanceMetros >= esperado - SURCOS_TOLERANCIA_METROS) {
+      await pool.query(
+        `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_metros = ? WHERE id = ?`,
+        [Math.min(avanceMetros, esperado), act.id]
+      );
+    }
+  }
+  return { success: true, surcos: surcosNum };
+}
+
 // mysql2 regresa una columna JSON ya parseada a JS en la mayoría de los
 // casos, pero según la versión/driver puede llegar como texto -- esta
 // función cubre los dos casos sin tronar.
@@ -5310,61 +5417,85 @@ async function getCuadrosHuerta(huerta) {
   const nombreHuerta = (huerta || '').toString().trim();
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
-    'SELECT id, nombre, poligono FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
+    'SELECT id, nombre, poligono, surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
     [nombreHuerta]
   );
-  return rows.map((r) => ({ id: r.id, nombre: r.nombre, poligono: parsearPoligono_(r.poligono) }));
+  return rows.map((r) => ({ id: r.id, nombre: r.nombre, poligono: parsearPoligono_(r.poligono), surcos: r.surcos }));
 }
 
 // Acción del Panel (asignar una actividad/trabajo a un cuadro ya
-// dibujado). Revisa de inmediato el histórico YA guardado de esa huerta
-// (puntos de recorridos anteriores) -- si el operador ya había entrado a
-// ese cuadro antes de que esta actividad existiera, se crea directamente
-// como "completado" en vez de "pendiente".
-async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, trabajo) {
+// dibujado, con cada cuántos surcos cuenta como una pasada para ESA
+// actividad -- ver comentario junto a calcularDistanciaTotalEsperadaMetros_
+// más arriba). Revisa de inmediato el histórico YA guardado de esa huerta
+// (puntos de recorridos anteriores) -- si el operador ya había recorrido
+// parte (o todo) ese cuadro antes de que esta actividad existiera, nace
+// con ese avance ya contado (o de una vez "completado", si ya alcanza).
+async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, trabajo, intervaloSurcos) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
   const idCuadro = Number(cuadroId);
   const trabajoTexto = (trabajo || '').toString().trim();
+  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
   if (!idCuadro) return { success: false, error: 'Falta indicar a qué cuadro corresponde.' };
   if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
-  const [cuadros] = await pool.query('SELECT poligono FROM huerta_cuadros WHERE id = ?', [idCuadro]);
+  const [cuadros] = await pool.query('SELECT poligono, surcos FROM huerta_cuadros WHERE id = ?', [idCuadro]);
   if (cuadros.length === 0) return { success: false, error: 'Ese cuadro ya no existe.' };
   try {
     const [result] = await pool.query(
-      'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por) VALUES (?, ?, ?, ?)',
-      [nombreHuerta, idCuadro, trabajoTexto, (nombreUsuario || '').toString().trim() || null]
+      'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por, intervalo_surcos) VALUES (?, ?, ?, ?, ?)',
+      [nombreHuerta, idCuadro, trabajoTexto, (nombreUsuario || '').toString().trim() || null, intervalo]
     );
     const actividadId = result.insertId;
-    const completadoYa = await verificarActividadContraHistorico_(nombreHuerta, parsearPoligono_(cuadros[0].poligono));
+    const poligono = parsearPoligono_(cuadros[0].poligono);
+    const historico = await calcularMetrosHistoricosEnPoligono_(nombreHuerta, poligono);
+    const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, cuadros[0].surcos, intervalo);
+    const completadoYa = esperado === null ? historico.cubierto : historico.metros >= esperado - SURCOS_TOLERANCIA_METROS;
     if (completadoYa) {
       await pool.query(
-        'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ? WHERE id = ?',
-        ['completado', completadoYa.avanceId, actividadId]
+        'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ?, avance_metros = ? WHERE id = ?',
+        ['completado', historico.avanceIdReferencia, esperado === null ? historico.metros : Math.min(historico.metros, esperado), actividadId]
       );
+    } else if (historico.metros > 0) {
+      await pool.query('UPDATE huerta_actividades SET avance_metros = ? WHERE id = ?', [historico.metros, actividadId]);
     }
-    return { success: true, id: actividadId, completadaDeInmediato: !!completadoYa };
+    return { success: true, id: actividadId, completadaDeInmediato: completadoYa };
   } catch (err) {
     return { success: false, error: err.toString() };
   }
 }
 
 // Revisa, entre los puntos YA guardados de los recorridos de esa huerta,
-// si alguno ya cubrió el polígono dado. Regresa el primero que cumpla (con
-// su avanceId), o null si ninguno.
-async function verificarActividadContraHistorico_(huerta, poligono) {
-  if (!poligonoValido_(poligono)) return null;
+// cuántos metros se recorrieron DENTRO del polígono dado -- mismo
+// criterio que la acumulación en vivo (ver actualizarAvancePorPunto_):
+// solo cuenta el tramo entre 2 puntos consecutivos de UNA MISMA sesión si
+// AMBOS cubren el cuadro (así no se cuenta de golpe la entrada desde
+// fuera). avanceIdReferencia es la sesión del primer punto, en orden
+// cronológico, que ya cubrió el cuadro (para atribuirle la actividad si
+// queda completada de inmediato); cubierto indica si al menos un punto lo
+// cubrió, para el criterio binario de los cuadros sin surcos capturados.
+async function calcularMetrosHistoricosEnPoligono_(huerta, poligono) {
+  if (!poligonoValido_(poligono)) return { metros: 0, avanceIdReferencia: null, cubierto: false };
   const [puntos] = await pool.query(
     `SELECT p.avance_id, p.lat, p.lng FROM avance_huerta_puntos p
      JOIN avance_huerta a ON a.id = p.avance_id
-     WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))`,
+     WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))
+     ORDER BY p.avance_id, p.capturado_en, p.id`,
     [huerta]
   );
+  let metros = 0;
+  let avanceIdReferencia = null;
+  let anterior = null; // { avanceId, lat, lng }
   for (const p of puntos) {
-    if (cubreCuadro_({ lat: Number(p.lat), lng: Number(p.lng) }, poligono)) return { avanceId: p.avance_id };
+    const actual = { lat: Number(p.lat), lng: Number(p.lng) };
+    const cubre = cubreCuadro_(actual, poligono);
+    if (cubre && avanceIdReferencia === null) avanceIdReferencia = p.avance_id;
+    if (cubre && anterior && anterior.avanceId === p.avance_id && cubreCuadro_(anterior, poligono)) {
+      metros += distanciaMetros_(anterior, actual);
+    }
+    anterior = { avanceId: p.avance_id, lat: actual.lat, lng: actual.lng };
   }
-  return null;
+  return { metros, avanceIdReferencia, cubierto: avanceIdReferencia !== null };
 }
 
 async function eliminarActividadHuerta(code, nombreUsuario, actividadId) {
@@ -5377,58 +5508,99 @@ async function eliminarActividadHuerta(code, nombreUsuario, actividadId) {
 
 // Abierta (sin permiso especial) -- la usan tanto el Panel como el celular
 // (de solo lectura, para que el operador vea qué se le pidió y cómo va).
+// porcentaje/avanceMetros/distanciaTotalEsperada se calculan al vuelo
+// (nunca quedan "viejos" si Carlos luego cambia el número de surcos del
+// cuadro). distanciaTotalEsperada es null cuando ese cuadro no tiene
+// surcos capturados -- ahí porcentaje se queda en 0 o 100 (el criterio
+// binario de siempre, por estado).
 async function getActividadesHuerta(huerta) {
   const nombreHuerta = (huerta || '').toString().trim();
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
-    `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, a.trabajo, a.estado, a.creado_en, a.completado_en
+    `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, c.poligono AS cuadroPoligono, c.surcos AS cuadroSurcos,
+            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.creado_en, a.completado_en
      FROM huerta_actividades a
      JOIN huerta_cuadros c ON c.id = a.cuadro_id
      WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))
      ORDER BY c.nombre, a.creado_en`,
     [nombreHuerta]
   );
-  return rows.map((r) => ({
-    id: r.id,
-    cuadroId: r.cuadro_id,
-    cuadroNombre: r.cuadroNombre,
-    trabajo: r.trabajo,
-    estado: r.estado,
-    creadoEn: r.creado_en,
-    completadoEn: r.completado_en,
-  }));
+  return rows.map((r) => {
+    const poligono = parsearPoligono_(r.cuadroPoligono);
+    const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, r.cuadroSurcos, r.intervalo_surcos);
+    const avanceMetros = Number(r.avance_metros) || 0;
+    const porcentaje = r.estado === 'completado'
+      ? 100
+      : (esperado ? Math.max(0, Math.min(100, (avanceMetros / esperado) * 100)) : 0);
+    return {
+      id: r.id,
+      cuadroId: r.cuadro_id,
+      cuadroNombre: r.cuadroNombre,
+      trabajo: r.trabajo,
+      estado: r.estado,
+      surcos: r.cuadroSurcos,
+      intervaloSurcos: r.intervalo_surcos,
+      avanceMetros,
+      distanciaTotalEsperada: esperado,
+      porcentaje: Math.round(porcentaje),
+      creadoEn: r.creado_en,
+      completadoEn: r.completado_en,
+    };
+  });
 }
 
 // Se llama desde agregarPuntoAvance después de guardar cada punto nuevo
 // del recorrido (ver abajo) -- SIN que el operador haga nada. Solo revisa
 // los cuadros de esa huerta que todavía tengan alguna actividad pendiente
 // (evita trabajo de más sobre cuadros ya completados o sin actividades).
+// Por cada cuadro que el punto nuevo cubre, mide el tramo recorrido DENTRO
+// de él (contra el punto anterior de ESTA MISMA sesión, si también lo
+// cubría -- así no se cuenta de golpe la entrada desde fuera como avance
+// sobre los surcos) y lo suma al avance_metros de cada actividad pendiente
+// de ese cuadro; si con eso ya alcanza lo esperado (o el cuadro no tiene
+// surcos capturados, el criterio binario de siempre) la marca completada.
 // Regresa la lista de actividades que se acaban de completar con este
 // punto, para que el celular pueda, si quiere, avisarle algo al operador.
 async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng) {
+  const actual = { lat, lng };
   const [cuadros] = await pool.query(
-    `SELECT c.id, c.poligono FROM huerta_cuadros c
+    `SELECT c.id, c.nombre AS cuadroNombre, c.poligono, c.surcos FROM huerta_cuadros c
      WHERE LOWER(TRIM(c.huerta)) = LOWER(TRIM(?))
        AND EXISTS (SELECT 1 FROM huerta_actividades a WHERE a.cuadro_id = c.id AND a.estado = 'pendiente')`,
     [huerta]
   );
   if (cuadros.length === 0) return [];
-  const idsCubiertos = cuadros
-    .filter((c) => cubreCuadro_({ lat, lng }, parsearPoligono_(c.poligono)))
-    .map((c) => c.id);
-  if (idsCubiertos.length === 0) return [];
-  const [actividadesAfectadas] = await pool.query(
-    `SELECT a.id, c.nombre AS cuadroNombre, a.trabajo FROM huerta_actividades a
-     JOIN huerta_cuadros c ON c.id = a.cuadro_id
-     WHERE a.cuadro_id IN (?) AND a.estado = 'pendiente'`,
-    [idsCubiertos]
+  const [ultimos] = await pool.query(
+    'SELECT lat, lng FROM avance_huerta_puntos WHERE avance_id = ? ORDER BY id DESC LIMIT 2',
+    [avanceId]
   );
-  if (actividadesAfectadas.length === 0) return [];
-  await pool.query(
-    `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_id = ? WHERE cuadro_id IN (?) AND estado = 'pendiente'`,
-    [avanceId, idsCubiertos]
-  );
-  return actividadesAfectadas.map((a) => ({ id: a.id, cuadroNombre: a.cuadroNombre, trabajo: a.trabajo }));
+  const anterior = ultimos.length > 1 ? { lat: Number(ultimos[1].lat), lng: Number(ultimos[1].lng) } : null;
+
+  const completadas = [];
+  for (const c of cuadros) {
+    const poligono = parsearPoligono_(c.poligono);
+    if (!cubreCuadro_(actual, poligono)) continue;
+    const metrosTramo = (anterior && cubreCuadro_(anterior, poligono)) ? distanciaMetros_(anterior, actual) : 0;
+    const [actividades] = await pool.query(
+      `SELECT id, trabajo, intervalo_surcos, avance_metros FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
+      [c.id]
+    );
+    for (const act of actividades) {
+      const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, c.surcos, act.intervalo_surcos);
+      const nuevoAvance = Number(act.avance_metros) + metrosTramo;
+      const completado = esperado === null ? true : nuevoAvance >= esperado - SURCOS_TOLERANCIA_METROS;
+      if (completado) {
+        await pool.query(
+          `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_id = ?, avance_metros = ? WHERE id = ?`,
+          [avanceId, esperado === null ? nuevoAvance : Math.min(nuevoAvance, esperado), act.id]
+        );
+        completadas.push({ id: act.id, cuadroNombre: c.cuadroNombre, trabajo: act.trabajo });
+      } else if (metrosTramo > 0) {
+        await pool.query('UPDATE huerta_actividades SET avance_metros = ? WHERE id = ?', [nuevoAvance, act.id]);
+      }
+    }
+  }
+  return completadas;
 }
 
 async function getDepartamentosCatalogo(code, nombreUsuario) { return catalogoDepartamentos_.get(code, nombreUsuario); }
@@ -6713,6 +6885,7 @@ module.exports = {
   getAvanceHuerta,
   guardarCuadroHuerta,
   eliminarCuadroHuerta,
+  actualizarSurcosCuadro,
   getCuadrosHuerta,
   guardarActividadHuerta,
   eliminarActividadHuerta,

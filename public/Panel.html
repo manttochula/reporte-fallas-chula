@@ -3397,6 +3397,7 @@
             <button type="button" class="ah-btn-marcar" id="ah-btn-modo-cuadros">🗺️ Dibujar cuadros en Google Maps</button>
           </div>
           <div id="ah-cuadros-vacio" class="avance-aviso" style="display:none; padding:8px 0 0;">Todavía no has dibujado ningún cuadro de esta huerta.</div>
+          <div class="avance-aviso" style="padding:8px 0 0;">Toca "· surcos ✏️" en un cuadro para decirle cuántos surcos tiene de verdad -- así el avance de sus actividades se ve en % conforme el operador los va recorriendo, en vez de solo Pendiente/Completado.</div>
           <div id="ah-cuadros-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0;"></div>
           <div id="ah-actividad-form-wrap" style="display:none; gap:8px; margin:12px 0; flex-wrap:wrap; align-items:flex-end;">
             <div class="maq-field" style="flex:1; min-width:150px; margin-bottom:0;">
@@ -3406,6 +3407,10 @@
             <div class="maq-field" style="flex:2; min-width:180px; margin-bottom:0;">
               <label>Actividad / trabajo</label>
               <input type="text" id="ah-f-actividad-trabajo" placeholder="Ej. Poda">
+            </div>
+            <div class="maq-field" style="flex:0 0 130px; min-width:130px; margin-bottom:0;">
+              <label>Cada cuántos surcos</label>
+              <input type="number" id="ah-f-actividad-intervalo" min="1" step="1" value="1" title="1 = pasa por cada surco. 2 = un implemento que cubre 2 surcos por pasada, y así.">
             </div>
             <button class="maq-save-btn" id="ah-btn-agregar-actividad" style="max-width:190px; flex:none;">Agregar actividad</button>
           </div>
@@ -3418,6 +3423,7 @@
                   <th>Cuadro</th>
                   <th>Actividad</th>
                   <th>Estado</th>
+                  <th>Avance</th>
                   <th>Completado</th>
                   <th></th>
                 </tr>
@@ -6428,8 +6434,11 @@ function ahRenderTabla_(historico){
   resumen.textContent = historico.length + ' registro(s) de avance · ' + totalPuntos + ' punto(s) de GPS en total.';
 }
 
-// Un "chip" compacto por cuadro (nombre + ✕ para borrarlo) -- más rápido
-// de leer que una tabla cuando son varios cuadros chicos.
+// Un "chip" compacto por cuadro (nombre + surcos + ✕ para borrarlo) -- más
+// rápido de leer que una tabla cuando son varios cuadros chicos. El número
+// de surcos (petición de Carlos: medir avance en % en vez de solo
+// Pendiente/Completado) se edita tocando ese mismo texto -- ver
+// ahEditarSurcosCuadro_ más abajo.
 function ahRenderCuadrosChips_(){
   var wrap = document.getElementById('ah-cuadros-chips');
   var vacio = document.getElementById('ah-cuadros-vacio');
@@ -6440,9 +6449,41 @@ function ahRenderCuadrosChips_(){
   }
   vacio.style.display = 'none';
   wrap.innerHTML = AH_CUADROS.map(function(c){
+    var surcosTexto = (c.surcos !== null && c.surcos !== undefined) ? (c.surcos + ' surcos') : 'sin surcos';
     return '<span class="ah-cuadro-chip">' + escapeHtml(c.nombre)
+      + ' <a href="#" data-id="' + c.id + '" data-surcos="' + (c.surcos === null || c.surcos === undefined ? '' : c.surcos) + '" class="ah-cuadro-surcos" title="Definir/cambiar el número de surcos de este cuadro">· ' + surcosTexto + ' ✏️</a>'
       + ' <a href="#" data-id="' + c.id + '" class="ah-cuadro-eliminar" title="Borrar este cuadro">✕</a></span>';
   }).join('');
+}
+
+// Pide (con un prompt, mismo patrón que nombrar un cuadro nuevo) cuántos
+// surcos REALES tiene ese cuadro, y lo guarda. Vacío = quitar el dato (ese
+// cuadro vuelve al criterio de antes: completa con solo pasar por
+// cualquier parte). El % de cualquier actividad pendiente de ese cuadro
+// se recalcula solo en el servidor en cuanto esto se guarda.
+function ahEditarSurcosCuadro_(cuadroId, surcosActual){
+  var entrada = window.prompt('¿Cuántos surcos tiene este cuadro? (déjalo vacío para quitar el dato y volver al criterio de antes)', surcosActual || '');
+  if(entrada === null) return; // canceló
+  var statusEl = document.getElementById('ah-cuadros-status');
+  var huerta = AH_HUERTA_ACTUAL;
+  statusEl.textContent = 'Guardando...';
+  statusEl.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        statusEl.textContent = (result && result.error) || 'No se pudo guardar el número de surcos.';
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      statusEl.textContent = '';
+      statusEl.className = 'maq-modal-status';
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .actualizarSurcosCuadro(ACCESS_CODE, PANEL_USUARIO, cuadroId, entrada.trim());
 }
 
 function ahPoblarSelectActividadCuadro_(){
@@ -6471,10 +6512,19 @@ function ahRenderActividadesTabla_(){
   tablaWrap.style.display = '';
   tbody.innerHTML = AH_ACTIVIDADES.map(function(a){
     var completado = a.estado === 'completado';
+    // Solo se puede medir en % si el CUADRO ya tiene surcos capturados
+    // (ver ahEditarSurcosCuadro_) -- si no, se queda el criterio de
+    // siempre (Pendiente/Completado nada más, sin %).
+    var avanceTexto = '—';
+    if(a.surcos !== null && a.surcos !== undefined){
+      avanceTexto = a.porcentaje + '%';
+      if(a.intervaloSurcos && a.intervaloSurcos > 1) avanceTexto += ' (cada ' + a.intervaloSurcos + ' surcos)';
+    }
     return '<tr>'
       + '<td>' + escapeHtml(a.cuadroNombre || '') + '</td>'
       + '<td>' + escapeHtml(a.trabajo || '') + '</td>'
       + '<td><span class="ah-badge ' + (completado ? 'ah-badge-completado' : 'ah-badge-pendiente') + '">' + (completado ? 'Completado' : 'Pendiente') + '</span></td>'
+      + '<td>' + avanceTexto + '</td>'
       + '<td>' + (a.completadoEn ? new Date(a.completadoEn).toLocaleString('es-MX') : '—') + '</td>'
       + '<td><a href="#" data-id="' + a.id + '" class="ah-actividad-eliminar" title="Borrar esta actividad">✕</a></td>'
       + '</tr>';
@@ -6728,6 +6778,13 @@ document.getElementById('ah-mapa-google-btn-ir').addEventListener('click', funct
 });
 
 document.getElementById('ah-cuadros-chips').addEventListener('click', function(ev){
+  var linkSurcos = ev.target.closest ? ev.target.closest('.ah-cuadro-surcos') : null;
+  if(linkSurcos){
+    ev.preventDefault();
+    var idSurcos = Number(linkSurcos.dataset.id);
+    if(idSurcos) ahEditarSurcosCuadro_(idSurcos, linkSurcos.dataset.surcos);
+    return;
+  }
   var link = ev.target.closest ? ev.target.closest('.ah-cuadro-eliminar') : null;
   if(!link) return;
   ev.preventDefault();
@@ -6756,6 +6813,8 @@ document.getElementById('ah-btn-agregar-actividad').addEventListener('click', fu
   var huerta = AH_HUERTA_ACTUAL;
   var cuadroId = Number(document.getElementById('ah-f-actividad-cuadro').value);
   var trabajo = document.getElementById('ah-f-actividad-trabajo').value.trim();
+  var intervaloInput = document.getElementById('ah-f-actividad-intervalo');
+  var intervalo = Math.max(1, Math.round(Number(intervaloInput.value)) || 1);
   if(!cuadroId){
     statusEl.textContent = 'Marca al menos un cuadro en el mapa antes de agregar una actividad.';
     statusEl.className = 'maq-modal-status show err';
@@ -6779,6 +6838,7 @@ document.getElementById('ah-btn-agregar-actividad').addEventListener('click', fu
         return;
       }
       document.getElementById('ah-f-actividad-trabajo').value = '';
+      intervaloInput.value = '1';
       statusEl.textContent = result.completadaDeInmediato
         ? 'Actividad agregada -- ya se completó (el operador ya había pasado por ese cuadro).'
         : '';
@@ -6790,7 +6850,7 @@ document.getElementById('ah-btn-agregar-actividad').addEventListener('click', fu
       statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
       statusEl.className = 'maq-modal-status show err';
     })
-    .guardarActividadHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, cuadroId, trabajo);
+    .guardarActividadHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, cuadroId, trabajo, intervalo);
 });
 
 document.getElementById('ah-actividades-table-body').addEventListener('click', function(ev){

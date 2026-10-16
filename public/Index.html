@@ -2951,8 +2951,10 @@ function avancePoblarSelectTrabajo_(){
   pendientes.forEach(function(a){
     var opt = document.createElement('option');
     var etiqueta = (a.cuadroNombre || '') + ' — ' + (a.trabajo || '');
-    opt.value = etiqueta;
-    opt.textContent = etiqueta;
+    opt.value = etiqueta; // guarda SIEMPRE el texto limpio (sin %) -- es lo que queda escrito en el histórico de avance_huerta.trabajo
+    // Si Carlos ya capturó cuántos surcos tiene el cuadro, se le muestra el
+    // % que ya lleva esa actividad -- sin que eso cambie lo que se guarda.
+    opt.textContent = (a.surcos !== null && a.surcos !== undefined) ? (etiqueta + ' (' + a.porcentaje + '%)') : etiqueta;
     sel.appendChild(opt);
   });
   // Conserva la selección si sigue existiendo en la lista (por ejemplo,

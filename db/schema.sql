@@ -2339,19 +2339,69 @@ DEALLOCATE PREPARE stmt_alter;
 -- mapa de Google.
 DELETE FROM huerta_cuadros WHERE poligono IS NULL;
 
+-- surcos: número REAL de surcos de ese cuadro (opcional). Petición de
+-- Carlos: medir qué tanto se ha avanzado DENTRO de un cuadro (p.ej. "la
+-- mitad de un surco de 10 = 5%") en vez de marcarlo completado con que el
+-- operador pase por cualquier parte. Si queda NULL (no capturado), ese
+-- cuadro se sigue comportando exactamente como antes: cualquier punto
+-- dentro del polígono completa de inmediato todas sus actividades
+-- pendientes. Ver calcularDistanciaTotalEsperadaMetros_ en handlers.js.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_cuadros' AND column_name = 'surcos'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_cuadros ADD COLUMN surcos INT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- estado: 'pendiente' -> 'completado' (pasa solo, por GPS; ver arriba).
 -- avance_id queda NULL hasta que se completa, y entonces guarda a qué
 -- registro de avance_huerta (qué recorrido) se le atribuye la completada.
+-- intervalo_surcos: cada cuántos surcos del cuadro cuenta esta actividad
+-- en particular como "una pasada" (1 = cada surco, 2 = cada dos surcos,
+-- etc. -- p.ej. un implemento que abarca 2 surcos a la vez solo necesita
+-- la mitad de las pasadas que una actividad que sí requiere pasar surco
+-- por surco). avance_metros: cuántos metros lleva recorridos el operador
+-- DENTRO del cuadro, acumulados entre todas sus sesiones de avance (se
+-- compara contra lo esperado -- ver calcularDistanciaTotalEsperadaMetros_
+-- en handlers.js -- para calcular el % y para completarla sola).
 CREATE TABLE IF NOT EXISTS huerta_actividades (
-  id            INT AUTO_INCREMENT PRIMARY KEY,
-  huerta        VARCHAR(255) NOT NULL,
-  cuadro_id     INT NOT NULL,
-  trabajo       VARCHAR(255) NOT NULL,
-  estado        VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-  creado_por    VARCHAR(255) DEFAULT NULL,
-  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  completado_en DATETIME DEFAULT NULL,
-  avance_id     INT DEFAULT NULL,
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  huerta          VARCHAR(255) NOT NULL,
+  cuadro_id       INT NOT NULL,
+  trabajo         VARCHAR(255) NOT NULL,
+  estado          VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+  intervalo_surcos INT NOT NULL DEFAULT 1,
+  avance_metros   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  creado_por      VARCHAR(255) DEFAULT NULL,
+  creado_en       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  completado_en   DATETIME DEFAULT NULL,
+  avance_id       INT DEFAULT NULL,
   INDEX idx_huerta_actividades_huerta (huerta),
   INDEX idx_huerta_actividades_cuadro (cuadro_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'intervalo_surcos'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN intervalo_surcos INT NOT NULL DEFAULT 1',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'avance_metros'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN avance_metros DECIMAL(10,2) NOT NULL DEFAULT 0',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

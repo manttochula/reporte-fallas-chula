@@ -35,7 +35,7 @@
         </provider>
 
         <!-- Servicio en primer plano que mantiene el GPS capturando el
-             "Avance Huerta" aunque el operador bloquee la pantalla -- ver
+             "Avance Huerta" aunque el operador bloquee la pantalla — ver
              BackgroundLocationService.java. android:foregroundServiceType
              "location" es obligatorio desde Android 14 para este tipo de
              servicio; android:exported="false" porque nadie fuera de esta
@@ -54,18 +54,18 @@
          aunque el operador bloquee la pantalla. En Android (a diferencia de
          iPhone) esto SÍ es posible con una app nativa de verdad usando un
          servicio en primer plano + el permiso de ubicación "Todo el tiempo"
-         -- ver BackgroundLocationPlugin.java / BackgroundLocationService.java. -->
+         — ver BackgroundLocationPlugin.java / BackgroundLocationService.java. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Para la notificación fija ("Registrando avance...") que exige
-         Android mientras el servicio está activo -- obligatorio pedirla
+         Android mientras el servicio está activo — obligatorio pedirla
          en tiempo de ejecución desde Android 13. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Evita que el celular entre en modo de ahorro profundo mientras hay
-         un avance activo y la pantalla está bloqueada -- sin esto, Android
+         un avance activo y la pantalla está bloqueada — sin esto, Android
          podría dejar de darle CPU al servicio entre una lectura de GPS y
          la siguiente. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />

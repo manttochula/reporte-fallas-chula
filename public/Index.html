@@ -1408,6 +1408,7 @@ function aplicarHuerta(datos){
   }
   aplicarHuertasReportar(datos.huertasReportar, huerta);
   poblarSelectHuertaAvance();
+  aplicarPestanasCelularOcultas_(datos.pestanasCelularOcultas);
 }
 
 // --- Buscador de "Usuario" en el login (escribe y te muestra las opciones
@@ -1555,6 +1556,39 @@ function activarPestana(tabActivo, viewActivo){
   [viewForm, viewDiesel, viewMovimientos, viewMisReportes, viewAvance].forEach(function(v){ v.style.display = 'none'; });
   tabActivo.classList.add('active');
   viewActivo.style.display = 'block';
+}
+
+// --- Pestañas del celular que el admin le oculta a este compañero en
+// particular (configurado desde Usuarios en el Panel -- ver
+// pestanas_celular_ocultas en db/schema.sql). Vacío/ausente = las ve
+// todas, igual que siempre -- a nadie que no se configure explícitamente
+// desde Usuarios se le oculta nada. Los ids ('form'/'diesel'/
+// 'movimientos'/'misreportes'/'avance') son los mismos que usa
+// PESTANAS_CELULAR en Panel.html.
+var PESTANAS_CELULAR_MAP_ = {
+  form: tabForm,
+  diesel: tabDiesel,
+  movimientos: tabMovimientos,
+  misreportes: tabMisReportes,
+  avance: tabAvance
+};
+function aplicarPestanasCelularOcultas_(ocultas){
+  var lista = Array.isArray(ocultas) ? ocultas : [];
+  var oculto = {};
+  lista.forEach(function(id){ oculto[id] = true; });
+  Object.keys(PESTANAS_CELULAR_MAP_).forEach(function(id){
+    var tab = PESTANAS_CELULAR_MAP_[id];
+    if(tab) tab.style.display = oculto[id] ? 'none' : '';
+  });
+  // Si a esta persona le ocultaron justo la pestaña que está activa (por
+  // default, Reportar, al entrar), se cambia sola a la primera que sí
+  // pueda ver -- para no dejarla viendo un formulario con ninguna
+  // pestaña resaltada arriba.
+  var activa = document.querySelector('.tab.active');
+  if(activa && oculto[activa.id.replace('tab-', '')]){
+    var primeraVisibleId = Object.keys(PESTANAS_CELULAR_MAP_).find(function(id){ return !oculto[id]; });
+    if(primeraVisibleId) PESTANAS_CELULAR_MAP_[primeraVisibleId].click();
+  }
 }
 
 tabForm.addEventListener('click', function(){

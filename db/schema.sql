@@ -2405,3 +2405,25 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Qué pestañas del celular (Index.html: Reportar/Cargar Diesel/
+-- Movimientos/Mis Reportes/Avance Huerta) NO debe ver esta persona. Es un
+-- permiso aparte de panel_permisos (ese es solo para el Panel de
+-- escritorio) y lo asigna el admin desde Usuarios, igual que
+-- diesel_cuadros_ocultos. Guarda un JSON con los ids de las pestañas
+-- ocultas, por ejemplo ["diesel","movimientos"] (ids: form/diesel/
+-- movimientos/misreportes/avance). NULL o un arreglo vacío significa "las
+-- ve todas" -- así que a nadie que no se configure explícitamente desde
+-- Usuarios se le oculta nada (se sigue viendo exactamente igual que
+-- siempre).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'usuarios' AND column_name = 'pestanas_celular_ocultas'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE usuarios ADD COLUMN pestanas_celular_ocultas TEXT DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

@@ -3529,6 +3529,11 @@
           <div class="mnt-subtext" style="margin:-4px 0 8px;">Desmarca los que esta persona no necesite ver en la pestaña Diesel del Panel — solo aplica si tiene acceso a esa pestaña arriba.</div>
           <div class="usr-huertas-grid" id="usr-diesel-cuadros-grid"></div>
         </div>
+        <div class="usr-permisos-panel" id="usr-pestanas-celular-wrap">
+          <div class="usr-permisos-title">Pestañas del celular que ve (todas marcadas = las ve todas)</div>
+          <div class="mnt-subtext" style="margin:-4px 0 8px;">Desmarca las que esta persona no deba ver en la app/sitio del celular (Reportar, Cargar Diesel, Movimientos, Mis Reportes, Avance Huerta).</div>
+          <div class="usr-huertas-grid" id="usr-pestanas-celular-grid"></div>
+        </div>
         <select id="usr-huerta"><option value="">Sin huerta asignada</option></select>
         <div class="usr-permisos-panel" id="usr-huertas-adicionales-wrap">
           <div class="usr-permisos-title">Huertas adicionales (vacío = solo la huerta de arriba)</div>
@@ -3781,6 +3786,27 @@ function aplicarCuadrosDiesel_(){
   if(!grid) return;
   grid.innerHTML = DZ_CUADROS.map(function(c){
     return '<label class="usr-huerta-check"><input type="checkbox" value="' + c.id + '" checked> ' + escapeHtml(c.label) + '</label>';
+  }).join('');
+})();
+
+// --- Pestañas del celular (Index.html) que cada persona ve: es un
+// permiso APARTE de panel_permisos (ese es solo para este Panel de
+// escritorio) que asigna el admin desde Usuarios, igual que
+// DieselCuadrosOcultos arriba. Los ids son los mismos que usa
+// PESTANAS_CELULAR_MAP_ en Index.html. Vacío = ve todas (default, para
+// no sorprender a nadie que no se haya configurado explícitamente).
+const PESTANAS_CELULAR = [
+  { id: 'form', label: 'Reportar' },
+  { id: 'diesel', label: 'Cargar Diesel' },
+  { id: 'movimientos', label: 'Movimientos' },
+  { id: 'misreportes', label: 'Mis Reportes' },
+  { id: 'avance', label: 'Avance Huerta' },
+];
+(function poblarUsrPestanasCelularGrid_(){
+  const grid = document.getElementById('usr-pestanas-celular-grid');
+  if(!grid) return;
+  grid.innerHTML = PESTANAS_CELULAR.map(function(p){
+    return '<label class="usr-huerta-check"><input type="checkbox" value="' + p.id + '" checked> ' + escapeHtml(p.label) + '</label>';
   }).join('');
 })();
 function nivelPanel(pestana){
@@ -10693,6 +10719,16 @@ function renderUsuarios(usuarios){
       }).join(', ');
       left.appendChild(dieselSpan);
     }
+    if((u.PestanasCelularOcultas || []).length > 0){
+      const pestanasSpan = document.createElement('span');
+      pestanasSpan.className = 'huerta-restr-pill';
+      pestanasSpan.textContent = 'Celular: ' + (PESTANAS_CELULAR.length - u.PestanasCelularOcultas.length) + '/' + PESTANAS_CELULAR.length + ' pestañas';
+      pestanasSpan.title = 'En el celular NO ve: ' + u.PestanasCelularOcultas.map(function(id){
+        const p = PESTANAS_CELULAR.find(function(x){ return x.id === id; });
+        return p ? p.label : id;
+      }).join(', ');
+      left.appendChild(pestanasSpan);
+    }
 
     left.addEventListener('click', function(){
       document.getElementById('usr-nombre').value = u.Nombre;
@@ -10715,6 +10751,10 @@ function renderUsuarios(usuarios){
       const dieselCuadrosOcultosSel = new Set(u.DieselCuadrosOcultos || []);
       document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]').forEach(function(cb){
         cb.checked = !dieselCuadrosOcultosSel.has(cb.value);
+      });
+      const pestanasCelularOcultasSel = new Set(u.PestanasCelularOcultas || []);
+      document.querySelectorAll('#usr-pestanas-celular-grid input[type=checkbox]').forEach(function(cb){
+        cb.checked = !pestanasCelularOcultasSel.has(cb.value);
       });
       const mods = u.Modulos || [];
       document.getElementById('usr-mod-reportar').checked = mods.indexOf('Reportar') !== -1;
@@ -10772,6 +10812,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
   const veCasillaAutomotriz = document.getElementById('usr-f-ve-automotriz').checked;
   const dieselCuadrosOcultos = Array.from(document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]:not(:checked)')).map(function(cb){ return cb.value; });
   const huertasAdicionales = Array.from(document.querySelectorAll('#usr-huertas-adicionales-grid input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
+  const pestanasCelularOcultas = Array.from(document.querySelectorAll('#usr-pestanas-celular-grid input[type=checkbox]:not(:checked)')).map(function(cb){ return cb.value; });
 
   if(!nombre){
     statusEl.textContent = 'Escribe el nombre de la persona.';
@@ -10817,6 +10858,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       document.getElementById('usr-f-ve-automotriz').checked = false;
       document.querySelectorAll('#usr-diesel-cuadros-grid input[type=checkbox]').forEach(function(cb){ cb.checked = true; });
       document.querySelectorAll('#usr-huertas-adicionales-grid input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
+      document.querySelectorAll('#usr-pestanas-celular-grid input[type=checkbox]').forEach(function(cb){ cb.checked = true; });
       cargarUsuarios();
     })
     .withFailureHandler(function(){
@@ -10825,7 +10867,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
       statusEl.className = 'usr-status err';
     })
-    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales);
+    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales, pestanasCelularOcultas);
 });
 
 // --- Rendimiento aceptable por equipo (dentro de la pestaña Diesel) ---

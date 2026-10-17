@@ -2052,13 +2052,17 @@ function datosReportarUsuario_(usuario) {
     huertasReportar: parseHuertasJson_(usuario.huertas_reportar),
     veCasillaSoldadura: !!usuario.ve_casilla_soldadura,
     veCasillaAutomotriz: !!usuario.ve_casilla_automotriz,
+    // Pestañas del celular (Index.html) que esta persona NO debe ver —
+    // ver pestanas_celular_ocultas en db/schema.sql. Vacío/ausente = las
+    // ve todas, igual que siempre.
+    pestanasCelularOcultas: parseHuertasJson_(usuario.pestanas_celular_ocultas),
   };
 }
 
 async function getHuertaPorUsuario(nombre) {
   if (!nombre) return datosReportarUsuario_({});
   const [rows] = await pool.query(
-    'SELECT huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    'SELECT huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
     [nombre]
   );
   return datosReportarUsuario_(rows.length ? rows[0] : {});
@@ -2146,7 +2150,7 @@ function limpiarPanelPermisos_(panelPermisos) {
 
 async function getUsuarios(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'usuarios', 'visualizar');
-  const [rows] = await pool.query('SELECT nombre, huerta, huertas_adicionales, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos FROM usuarios ORDER BY nombre');
+  const [rows] = await pool.query('SELECT nombre, huerta, huertas_adicionales, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos, pestanas_celular_ocultas FROM usuarios ORDER BY nombre');
   return rows
     .filter((r) => r.nombre)
     .map((r) => ({
@@ -2179,6 +2183,7 @@ async function getUsuarios(code, nombreUsuario) {
           return Array.isArray(lista) ? lista : [];
         } catch (err) { return []; }
       })(),
+      PestanasCelularOcultas: parseHuertasJson_(r.pestanas_celular_ocultas),
     }));
 }
 
@@ -2210,7 +2215,11 @@ async function getUsuarios(code, nombreUsuario) {
 // total (la única + estas), cambia qué equipo ve en Reportar/Diesel, de
 // qué huertas ve llegadas pendientes en Movimientos y desde cuál puede
 // registrar una salida.
-async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales) {
+// `pestanasCelularOcultas` (opcional): arreglo de ids de pestaña del
+// celular (ver PESTANAS_CELULAR en Panel.html / pestanas_celular_ocultas
+// en db/schema.sql) que esta persona NO debe ver en Index.html.
+// Vacío/ausente guarda NULL — las ve todas, igual que siempre.
+async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales, pestanasCelularOcultas) {
   await requierePermisoPanel_(code, nombreUsuario, 'usuarios', 'capturar');
   if (!nombre) return { success: false, error: 'Falta el nombre.' };
   const modulosStr = Array.isArray(modulos) ? modulos.join(',') : (modulos || '').toString();
@@ -2234,26 +2243,30 @@ async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, mod
     ? huertasAdicionales.map((h) => (h || '').toString().trim()).filter(Boolean)
     : [];
   const huertasAdicionalesStr = huertasAdicionalesLimpio.length > 0 ? JSON.stringify(huertasAdicionalesLimpio) : null;
+  const pestanasCelularOcultasLimpio = Array.isArray(pestanasCelularOcultas)
+    ? pestanasCelularOcultas.map((p) => (p || '').toString().trim()).filter(Boolean)
+    : [];
+  const pestanasCelularOcultasStr = pestanasCelularOcultasLimpio.length > 0 ? JSON.stringify(pestanasCelularOcultasLimpio) : null;
   try {
     const [existe] = await pool.query('SELECT id, password_hash FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
     if (existe.length === 0) {
       if (!password) return { success: false, error: 'Asigna una contraseña al crear un usuario nuevo.' };
       const hash = await bcrypt.hash(String(password), 10);
       await pool.query(
-        'INSERT INTO usuarios (nombre, huerta, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos, huertas_adicionales) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [nombre, huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr]
+        'INSERT INTO usuarios (nombre, huerta, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos, huertas_adicionales, pestanas_celular_ocultas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [nombre, huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, pestanasCelularOcultasStr]
       );
     } else {
       if (password) {
         const hash = await bcrypt.hash(String(password), 10);
         await pool.query(
-          'UPDATE usuarios SET huerta = ?, password_hash = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ?, huertas_adicionales = ? WHERE id = ?',
-          [huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, existe[0].id]
+          'UPDATE usuarios SET huerta = ?, password_hash = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ?, huertas_adicionales = ?, pestanas_celular_ocultas = ? WHERE id = ?',
+          [huerta || '', hash, modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, pestanasCelularOcultasStr, existe[0].id]
         );
       } else {
         await pool.query(
-          'UPDATE usuarios SET huerta = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ?, huertas_adicionales = ? WHERE id = ?',
-          [huerta || '', modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, existe[0].id]
+          'UPDATE usuarios SET huerta = ?, modulos = ?, panel_permisos = ?, huertas_ordenes = ?, ver_letrero_ord_pend = ?, huertas_reportar = ?, ve_casilla_soldadura = ?, ve_casilla_automotriz = ?, diesel_cuadros_ocultos = ?, huertas_adicionales = ?, pestanas_celular_ocultas = ? WHERE id = ?',
+          [huerta || '', modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, pestanasCelularOcultasStr, existe[0].id]
         );
       }
     }

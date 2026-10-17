@@ -5315,6 +5315,26 @@ async function getRecorridosPorFecha(code, nombreUsuario, huerta, fecha) {
   }));
 }
 
+// Borra TODO el historial de avance (avance_huerta + sus puntos de GPS) de
+// UNA huerta -- petición de Carlos: algunos recorridos viejos quedaron con
+// puntos de GPS muy alejados del mapa real (un brinco del GPS, una prueba,
+// o un recorrido hecho antes de calibrar bien), y al dibujarse se ven como
+// líneas larguísimas cruzando toda la foto. En vez de poder borrar
+// recorrido por recorrido (no hay esa pantalla todavía), esto limpia de un
+// jalón para empezar de cero. NO toca cuadros ni actividades (huerta_cuadros/
+// huerta_actividades) -- solo el historial de recorridos en sí.
+async function eliminarHistoricoAvanceHuerta(code, nombreUsuario, huerta) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  await pool.query(
+    'DELETE FROM avance_huerta_puntos WHERE avance_id IN (SELECT id FROM avance_huerta WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)))',
+    [nombreHuerta]
+  );
+  const [result] = await pool.query('DELETE FROM avance_huerta WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?))', [nombreHuerta]);
+  return { success: true, borrados: result.affectedRows };
+}
+
 // ------------------------------------------------------------
 // Cuadros (lotes numerados) y actividades planeadas por cuadro — ver
 // comentario en db/schema.sql (huerta_cuadros/huerta_actividades) para el
@@ -7172,6 +7192,7 @@ module.exports = {
   getAvanceAbierto,
   getAvanceHuerta,
   getRecorridosPorFecha,
+  eliminarHistoricoAvanceHuerta,
   guardarCuadroHuerta,
   eliminarCuadroHuerta,
   actualizarSurcosCuadro,

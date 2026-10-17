@@ -2483,6 +2483,15 @@
             <div class="buscable-lista" id="maq-f-operador-lista"></div>
           </div>
         </div>
+        <div class="maq-field">
+          <label>Usuario de la app asignado a este equipo</label>
+          <div class="mnt-subtext" style="margin:-2px 0 6px;">Si eliges a alguien aquí, esa persona SOLO podrá elegir este equipo (y los demás que tenga asignados) en toda la app del celular -- Reportar, Cargar Diesel, Movimientos y Avance Huerta. Déjalo vacío para que siga viendo todo el equipo, igual que hasta ahora.</div>
+          <div class="buscable-wrap">
+            <input type="text" id="maq-f-usuario-app-texto" class="buscable-input" placeholder="Escribe para buscar a la persona..." autocomplete="off">
+            <input type="hidden" id="maq-f-usuario-app">
+            <div class="buscable-lista" id="maq-f-usuario-app-lista"></div>
+          </div>
+        </div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-usa-diesel"> Funciona con diesel (tractores y retros: aparece para capturar diesel en el Panel y en campo)</label></div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-usa-gasolina"> Aparece en Combustible Automotriz (autos y camionetas: aparece para capturar su combustible en el Panel)</label></div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-admite-terceros"> Admite reparación con terceros (permite marcar esta unidad en la categoría "Reparaciones con terceros" de Órdenes)</label></div>
@@ -3399,22 +3408,57 @@
           <div id="ah-cuadros-vacio" class="avance-aviso" style="display:none; padding:8px 0 0;">Todavía no has dibujado ningún cuadro de esta huerta.</div>
           <div class="avance-aviso" style="padding:8px 0 0;">Toca "· surcos ✏️" en un cuadro para decirle cuántos surcos tiene de verdad -- así el avance de sus actividades se ve en % conforme el operador los va recorriendo, en vez de solo Pendiente/Completado.</div>
           <div id="ah-cuadros-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0;"></div>
-          <div id="ah-actividad-form-wrap" style="display:none; gap:8px; margin:12px 0; flex-wrap:wrap; align-items:flex-end;">
-            <div class="maq-field" style="flex:1; min-width:150px; margin-bottom:0;">
-              <label>Cuadro</label>
-              <select id="ah-f-actividad-cuadro"></select>
-            </div>
+          <div class="maq-modal-status" id="ah-cuadros-status"></div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
+            <div class="avance-paso" style="margin-bottom:0;">Catálogo de actividades</div>
+          </div>
+          <div class="mnt-subtext" style="margin:-4px 0 8px;">Da de alta cada actividad (con su "cada cuántos surcos") una sola vez aquí, y después asígnala, más abajo, a los cuadros que quieras.</div>
+          <div id="ah-catalogo-form-wrap" style="display:flex; gap:8px; margin:12px 0; flex-wrap:wrap; align-items:flex-end;">
+            <input type="hidden" id="ah-f-catalogo-id">
             <div class="maq-field" style="flex:2; min-width:180px; margin-bottom:0;">
               <label>Actividad / trabajo</label>
-              <input type="text" id="ah-f-actividad-trabajo" placeholder="Ej. Poda">
+              <input type="text" id="ah-f-catalogo-trabajo" placeholder="Ej. Poda">
             </div>
-            <div class="maq-field" style="flex:0 0 130px; min-width:130px; margin-bottom:0;">
+            <div class="maq-field" style="flex:0 0 150px; min-width:150px; margin-bottom:0;">
               <label>Cada cuántos surcos</label>
-              <input type="number" id="ah-f-actividad-intervalo" min="1" step="1" value="1" title="1 = pasa por cada surco. 2 = un implemento que cubre 2 surcos por pasada, y así.">
+              <input type="number" id="ah-f-catalogo-intervalo" min="1" step="1" value="1" title="1 = pasa por cada surco. 2 = un implemento que cubre 2 surcos por pasada, y así.">
             </div>
-            <button class="maq-save-btn" id="ah-btn-agregar-actividad" style="max-width:190px; flex:none;">Agregar actividad</button>
+            <button class="maq-save-btn" id="ah-btn-guardar-catalogo" style="max-width:190px; flex:none;">Agregar al catálogo</button>
+            <button type="button" class="export-btn" id="ah-btn-cancelar-catalogo" style="display:none; max-width:140px; flex:none;">Cancelar edición</button>
           </div>
-          <div class="maq-modal-status" id="ah-cuadros-status"></div>
+          <div class="maq-modal-status" id="ah-catalogo-status"></div>
+          <div id="ah-catalogo-vacio" class="avance-aviso" style="display:none;">Todavía no has dado de alta ninguna actividad en el catálogo.</div>
+          <div class="table-wrap" id="ah-catalogo-tabla-wrap" style="display:none;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Actividad</th>
+                  <th>Cada cuántos surcos</th>
+                  <th></th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ah-catalogo-table-body"></tbody>
+            </table>
+          </div>
+
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
+            <div class="avance-paso" style="margin-bottom:0;">Asignar una actividad a cuadros</div>
+          </div>
+          <div id="ah-asignar-vacio" class="avance-aviso" style="display:none;">Primero da de alta al menos una actividad en el catálogo (arriba) y dibuja al menos un cuadro.</div>
+          <div id="ah-asignar-wrap" style="display:none;">
+            <div class="maq-field" style="max-width:320px;">
+              <label>Actividad del catálogo</label>
+              <select id="ah-f-asignar-catalogo"></select>
+            </div>
+            <div class="mnt-subtext" style="margin:6px 0 4px;">Marca los cuadros a los que quieres asignarla:</div>
+            <div id="ah-asignar-cuadros-grid" class="usr-huertas-grid"></div>
+            <button class="maq-save-btn" id="ah-btn-asignar-cuadros" style="max-width:260px; margin-top:10px;">Asignar a los cuadros marcados</button>
+          </div>
+          <div class="maq-modal-status" id="ah-asignar-status"></div>
+
+          <div class="avance-paso" style="margin-top:20px;">Actividades ya asignadas</div>
           <div id="ah-actividades-vacio" class="avance-aviso" style="display:none;">Todavía no has asignado ninguna actividad.</div>
           <div class="table-wrap" id="ah-actividades-tabla-wrap" style="display:none;">
             <table>
@@ -4081,6 +4125,7 @@ function iniciarPanel(nombre){
   cargarDepartamentosCatalogo();
   cargarTiposUnidadCatalogo();
   cargarOperadoresCatalogo();
+  cargarUsuariosOperadoresApp();
   cargarEmpresasCatalogo();
   cargarProveedoresCombustibleCatalogo();
   try {
@@ -6148,7 +6193,7 @@ function ahEscalaFraccionPorMetro_(cal1, cal2){
   return distMetros > 0 ? (distFraccion / distMetros) : 0;
 }
 
-var AH_RADIO_PINTADO_METROS = 8; // igual que AVANCE_RADIO_PINTADO_METROS en Index.html
+var AH_RADIO_PINTADO_METROS = 1; // igual que AVANCE_RADIO_PINTADO_METROS en Index.html (línea delgada/detallada en vez del trazo grueso de antes)
 var AH_MAPA_INFO = null;
 var AH_HUERTA_ACTUAL = '';
 var AH_HISTORICO_CACHE = [];
@@ -6167,6 +6212,7 @@ var AH_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y}
 var AH_CAL_ARMADO = null; // null | 'a' | 'b'
 var AH_CUADROS = []; // [{id, nombre, poligono: [{lat,lng}, ...]}]
 var AH_ACTIVIDADES = []; // [{id, cuadroId, cuadroNombre, trabajo, estado, creadoEn, completadoEn}]
+var AH_CATALOGO = []; // [{id, trabajo, intervaloSurcos, creadoPor, creadoEn}]
 var AH_GOOGLE_MAP = null; // instancia del mapa de Google (se crea una sola vez, se reutiliza)
 var AH_GOOGLE_POLIGONOS_DIBUJADOS = []; // overlays de los cuadros ya guardados, mostrados de referencia
 // Dibujo manual de un cuadro nuevo -- Google retiró su "Drawing Library"
@@ -6512,16 +6558,70 @@ function ahEditarSurcosCuadro_(cuadroId, surcosActual){
     .actualizarSurcosCuadro(ACCESS_CODE, PANEL_USUARIO, cuadroId, entrada.trim());
 }
 
-function ahPoblarSelectActividadCuadro_(){
-  var sel = document.getElementById('ah-f-actividad-cuadro');
-  sel.innerHTML = '';
-  (AH_CUADROS || []).forEach(function(c){
-    var opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.nombre;
-    sel.appendChild(opt);
-  });
-  document.getElementById('ah-actividad-form-wrap').style.display = (AH_CUADROS && AH_CUADROS.length > 0) ? 'flex' : 'none';
+// --- Catálogo de actividades (petición de Carlos: dar de alta la
+// actividad UNA VEZ aquí, con su "cada cuántos surcos", y después
+// asignarla a los cuadros que quiera de un jalón, en vez de volver a
+// escribirla cada vez) ---
+
+function ahRenderCatalogoTabla_(){
+  var tbody = document.getElementById('ah-catalogo-table-body');
+  var vacio = document.getElementById('ah-catalogo-vacio');
+  var tablaWrap = document.getElementById('ah-catalogo-tabla-wrap');
+  if(!AH_CATALOGO || AH_CATALOGO.length === 0){
+    tbody.innerHTML = '';
+    vacio.style.display = '';
+    tablaWrap.style.display = 'none';
+    return;
+  }
+  vacio.style.display = 'none';
+  tablaWrap.style.display = '';
+  tbody.innerHTML = AH_CATALOGO.map(function(a){
+    return '<tr>'
+      + '<td>' + escapeHtml(a.trabajo || '') + '</td>'
+      + '<td>' + (a.intervaloSurcos > 1 ? ('cada ' + a.intervaloSurcos + ' surcos') : 'cada surco') + '</td>'
+      + '<td><a href="#" data-id="' + a.id + '" class="ah-catalogo-editar" title="Editar">✏️</a></td>'
+      + '<td><a href="#" data-id="' + a.id + '" class="ah-catalogo-eliminar" title="Quitar del catálogo (no afecta lo ya asignado)">✕</a></td>'
+      + '</tr>';
+  }).join('');
+}
+
+function ahPoblarSelectAsignarCatalogo_(){
+  var sel = document.getElementById('ah-f-asignar-catalogo');
+  var valorPrevio = sel.value;
+  sel.innerHTML = (AH_CATALOGO || []).map(function(a){
+    return '<option value="' + a.id + '">' + escapeHtml(a.trabajo)
+      + (a.intervaloSurcos > 1 ? (' (cada ' + a.intervaloSurcos + ' surcos)') : '') + '</option>';
+  }).join('');
+  if(valorPrevio && (AH_CATALOGO || []).some(function(a){ return String(a.id) === valorPrevio; })){
+    sel.value = valorPrevio;
+  }
+}
+
+function ahPoblarAsignarCuadrosGrid_(){
+  var grid = document.getElementById('ah-asignar-cuadros-grid');
+  grid.innerHTML = (AH_CUADROS || []).map(function(c){
+    return '<label class="usr-huerta-check"><input type="checkbox" value="' + c.id + '"> ' + escapeHtml(c.nombre) + '</label>';
+  }).join('');
+}
+
+function ahRenderAsignarSeccion_(){
+  var hayAlgoQueAsignar = (AH_CATALOGO && AH_CATALOGO.length > 0) && (AH_CUADROS && AH_CUADROS.length > 0);
+  document.getElementById('ah-asignar-vacio').style.display = hayAlgoQueAsignar ? 'none' : '';
+  document.getElementById('ah-asignar-wrap').style.display = hayAlgoQueAsignar ? '' : 'none';
+  if(!hayAlgoQueAsignar) return;
+  ahPoblarSelectAsignarCatalogo_();
+  ahPoblarAsignarCuadrosGrid_();
+}
+
+// Deja el formulario del catálogo listo para dar de alta una actividad
+// nueva (se usa al cargar la huerta, tras guardar, y al cancelar una
+// edición).
+function ahLimpiarFormCatalogo_(){
+  document.getElementById('ah-f-catalogo-id').value = '';
+  document.getElementById('ah-f-catalogo-trabajo').value = '';
+  document.getElementById('ah-f-catalogo-intervalo').value = '1';
+  document.getElementById('ah-btn-guardar-catalogo').textContent = 'Agregar al catálogo';
+  document.getElementById('ah-btn-cancelar-catalogo').style.display = 'none';
 }
 
 function ahRenderActividadesTabla_(){
@@ -6559,7 +6659,8 @@ function ahRenderActividadesTabla_(){
 
 function ahRenderCuadrosYActividades_(){
   ahRenderCuadrosChips_();
-  ahPoblarSelectActividadCuadro_();
+  ahRenderCatalogoTabla_();
+  ahRenderAsignarSeccion_();
   ahRenderActividadesTabla_();
   ahRedibujarTodo_();
   ahDibujarPoligonosGoogleExistentes_();
@@ -6572,12 +6673,18 @@ function ahCargarCuadrosYActividades_(huerta){
       google.script.run
         .withSuccessHandler(function(actividades){
           AH_ACTIVIDADES = actividades || [];
-          ahRenderCuadrosYActividades_();
+          google.script.run
+            .withSuccessHandler(function(catalogo){
+              AH_CATALOGO = catalogo || [];
+              ahRenderCuadrosYActividades_();
+            })
+            .withFailureHandler(function(){ AH_CATALOGO = []; ahRenderCuadrosYActividades_(); })
+            .getActividadesCatalogo(ACCESS_CODE, PANEL_USUARIO, huerta);
         })
-        .withFailureHandler(function(){ AH_ACTIVIDADES = []; ahRenderCuadrosYActividades_(); })
+        .withFailureHandler(function(){ AH_ACTIVIDADES = []; AH_CATALOGO = []; ahRenderCuadrosYActividades_(); })
         .getActividadesHuerta(huerta);
     })
-    .withFailureHandler(function(){ AH_CUADROS = []; AH_ACTIVIDADES = []; ahRenderCuadrosYActividades_(); })
+    .withFailureHandler(function(){ AH_CUADROS = []; AH_ACTIVIDADES = []; AH_CATALOGO = []; ahRenderCuadrosYActividades_(); })
     .getCuadrosHuerta(huerta);
 }
 
@@ -6834,18 +6941,13 @@ document.getElementById('ah-cuadros-chips').addEventListener('click', function(e
     .eliminarCuadroHuerta(ACCESS_CODE, PANEL_USUARIO, id);
 });
 
-document.getElementById('ah-btn-agregar-actividad').addEventListener('click', function(){
-  var statusEl = document.getElementById('ah-cuadros-status');
+document.getElementById('ah-btn-guardar-catalogo').addEventListener('click', function(){
+  var statusEl = document.getElementById('ah-catalogo-status');
   var huerta = AH_HUERTA_ACTUAL;
-  var cuadroId = Number(document.getElementById('ah-f-actividad-cuadro').value);
-  var trabajo = document.getElementById('ah-f-actividad-trabajo').value.trim();
-  var intervaloInput = document.getElementById('ah-f-actividad-intervalo');
+  var idActual = document.getElementById('ah-f-catalogo-id').value;
+  var trabajo = document.getElementById('ah-f-catalogo-trabajo').value.trim();
+  var intervaloInput = document.getElementById('ah-f-catalogo-intervalo');
   var intervalo = Math.max(1, Math.round(Number(intervaloInput.value)) || 1);
-  if(!cuadroId){
-    statusEl.textContent = 'Marca al menos un cuadro en el mapa antes de agregar una actividad.';
-    statusEl.className = 'maq-modal-status show err';
-    return;
-  }
   if(!trabajo){
     statusEl.textContent = 'Describe la actividad (por ejemplo: Poda).';
     statusEl.className = 'maq-modal-status show err';
@@ -6863,12 +6965,9 @@ document.getElementById('ah-btn-agregar-actividad').addEventListener('click', fu
         statusEl.className = 'maq-modal-status show err';
         return;
       }
-      document.getElementById('ah-f-actividad-trabajo').value = '';
-      intervaloInput.value = '1';
-      statusEl.textContent = result.completadaDeInmediato
-        ? 'Actividad agregada -- ya se completó (el operador ya había pasado por ese cuadro).'
-        : '';
-      statusEl.className = result.completadaDeInmediato ? 'maq-modal-status show ok' : 'maq-modal-status';
+      statusEl.textContent = '';
+      statusEl.className = 'maq-modal-status';
+      ahLimpiarFormCatalogo_();
       ahCargarCuadrosYActividades_(huerta);
     })
     .withFailureHandler(function(err){
@@ -6876,7 +6975,94 @@ document.getElementById('ah-btn-agregar-actividad').addEventListener('click', fu
       statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
       statusEl.className = 'maq-modal-status show err';
     })
-    .guardarActividadHuerta(ACCESS_CODE, PANEL_USUARIO, huerta, cuadroId, trabajo, intervalo);
+    .guardarActividadCatalogo(ACCESS_CODE, PANEL_USUARIO, idActual || null, huerta, trabajo, intervalo);
+});
+
+document.getElementById('ah-btn-cancelar-catalogo').addEventListener('click', function(){
+  ahLimpiarFormCatalogo_();
+  document.getElementById('ah-catalogo-status').textContent = '';
+  document.getElementById('ah-catalogo-status').className = 'maq-modal-status';
+});
+
+document.getElementById('ah-catalogo-table-body').addEventListener('click', function(ev){
+  var linkEditar = ev.target.closest ? ev.target.closest('.ah-catalogo-editar') : null;
+  if(linkEditar){
+    ev.preventDefault();
+    var idEditar = Number(linkEditar.dataset.id);
+    var actividad = (AH_CATALOGO || []).find(function(a){ return a.id === idEditar; });
+    if(!actividad) return;
+    document.getElementById('ah-f-catalogo-id').value = actividad.id;
+    document.getElementById('ah-f-catalogo-trabajo').value = actividad.trabajo;
+    document.getElementById('ah-f-catalogo-intervalo').value = actividad.intervaloSurcos || 1;
+    document.getElementById('ah-btn-guardar-catalogo').textContent = 'Guardar cambios';
+    document.getElementById('ah-btn-cancelar-catalogo').style.display = '';
+    document.getElementById('ah-f-catalogo-trabajo').focus();
+    return;
+  }
+  var linkEliminar = ev.target.closest ? ev.target.closest('.ah-catalogo-eliminar') : null;
+  if(!linkEliminar) return;
+  ev.preventDefault();
+  var idEliminar = Number(linkEliminar.dataset.id);
+  if(!idEliminar) return;
+  if(!window.confirm('¿Quitar esta actividad del catálogo? Los cuadros a los que ya se le asignó la conservan; solo deja de estar disponible para asignarla de nuevo.')) return;
+  var huerta = AH_HUERTA_ACTUAL;
+  google.script.run
+    .withSuccessHandler(function(result){
+      if(!result || !result.success){
+        document.getElementById('ah-catalogo-status').textContent = (result && result.error) || 'No se pudo quitar del catálogo.';
+        document.getElementById('ah-catalogo-status').className = 'maq-modal-status show err';
+        return;
+      }
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('ah-catalogo-status').textContent = (err && err.message) || 'No se pudo quitar. Revisa tu conexión e intenta de nuevo.';
+      document.getElementById('ah-catalogo-status').className = 'maq-modal-status show err';
+    })
+    .eliminarActividadCatalogo(ACCESS_CODE, PANEL_USUARIO, idEliminar);
+});
+
+document.getElementById('ah-btn-asignar-cuadros').addEventListener('click', function(){
+  var statusEl = document.getElementById('ah-asignar-status');
+  var huerta = AH_HUERTA_ACTUAL;
+  var catalogoId = Number(document.getElementById('ah-f-asignar-catalogo').value);
+  var cuadroIds = Array.from(document.querySelectorAll('#ah-asignar-cuadros-grid input[type=checkbox]:checked')).map(function(cb){ return Number(cb.value); });
+  if(!catalogoId){
+    statusEl.textContent = 'Elige qué actividad del catálogo quieres asignar.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  if(!cuadroIds.length){
+    statusEl.textContent = 'Marca al menos un cuadro.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  var btn = this;
+  btn.disabled = true;
+  statusEl.textContent = 'Asignando...';
+  statusEl.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      if(!result || !result.success){
+        statusEl.textContent = (result && result.error) || 'No se pudo asignar.';
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
+      var partes = [];
+      if(result.creadas) partes.push(result.creadas + (result.creadas === 1 ? ' cuadro asignado' : ' cuadros asignados'));
+      if(result.omitidas) partes.push(result.omitidas + (result.omitidas === 1 ? ' ya la tenía' : ' ya la tenían'));
+      statusEl.textContent = partes.length ? partes.join(', ') + '.' : 'Listo.';
+      statusEl.className = 'maq-modal-status show ok';
+      document.querySelectorAll('#ah-asignar-cuadros-grid input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
+      ahCargarCuadrosYActividades_(huerta);
+    })
+    .withFailureHandler(function(err){
+      btn.disabled = false;
+      statusEl.textContent = (err && err.message) || 'No se pudo asignar. Revisa tu conexión e intenta de nuevo.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .asignarActividadCatalogoACuadros(ACCESS_CODE, PANEL_USUARIO, huerta, catalogoId, cuadroIds);
 });
 
 document.getElementById('ah-actividades-table-body').addEventListener('click', function(ev){
@@ -6911,6 +7097,7 @@ function cargarAvanceHuertaPanel_(huerta){
   AH_CAL_ARMADO = null;
   AH_CUADROS = [];
   AH_ACTIVIDADES = [];
+  AH_CATALOGO = [];
   ahCerrarModalCuadrosGoogle_();
   document.getElementById('ah-sin-huerta').style.display = huerta ? 'none' : '';
   document.getElementById('ah-cargando').style.display = 'none';
@@ -7128,6 +7315,24 @@ function poblarTodosLosSelectsOperador(){
   // <select> — sus opciones se refrescan cada vez que se abre el modal de
   // equipo (ver limpiarModalMaquinaria/abrirModalMaquinaria), así que aquí
   // no hace falta tocarlo.
+}
+
+// Personas con cuenta de acceso a la app (módulo Reportar), para el combo
+// "Usuario de la app asignado" del modal de Maquinaria -- a propósito
+// separado de OPERADORES (ese es el catálogo libre de nombres para
+// Diesel/el operador asignado "de oficina"; este es la lista real de
+// cuentas, para que el filtro de equipo en el celular nunca falle por una
+// mala escritura). Se repuebla el combo cada vez que se abre el modal
+// (igual que maqOperadorCombo), así que aquí no hace falta tocarlo.
+let USUARIOS_OPERADORES_APP = [];
+
+function cargarUsuariosOperadoresApp(){
+  google.script.run
+    .withSuccessHandler(function(nombres){
+      USUARIOS_OPERADORES_APP = (nombres || []).slice().sort(function(a,b){ return a.localeCompare(b, 'es'); });
+    })
+    .withFailureHandler(function(){})
+    .getUsuariosOperadoresApp(ACCESS_CODE, PANEL_USUARIO);
 }
 
 function cargarOperadoresCatalogo(){
@@ -13276,6 +13481,19 @@ function operadoresPermitidos_(valorExtra){
     .map(function(n){ return { value: n, label: n }; });
 }
 
+// Usuario de la app asignado: mismo patrón de combo buscable. `valorExtra`
+// conserva el nombre que el equipo ya traía guardado aunque esa cuenta ya
+// no tenga acceso a Reportar (se le quitó o se borró), para no vaciarlo
+// silenciosamente solo al editar otra cosa del equipo.
+const maqUsuarioAppCombo = crearComboBuscable('maq-f-usuario-app-texto', 'maq-f-usuario-app', 'maq-f-usuario-app-lista');
+
+function usuariosOperadoresAppPermitidos_(valorExtra){
+  const nombres = USUARIOS_OPERADORES_APP.slice();
+  if(valorExtra && nombres.indexOf(valorExtra) === -1) nombres.push(valorExtra);
+  return nombres.sort(function(a,b){ return a.localeCompare(b, 'es'); })
+    .map(function(n){ return { value: n, label: n }; });
+}
+
 // Llena el select de Marca del modal de equipo con el mismo catálogo de
 // marcas que administra la pestaña Refacciones ("Marcas y modelos
 // compatibles"). Si no se han cargado todavía (p.ej. se entró directo a
@@ -13334,6 +13552,8 @@ function limpiarModalMaquinaria(){
   document.getElementById('maq-f-tipo').value = '';
   maqOperadorCombo.setOpciones(operadoresPermitidos_(''));
   maqOperadorCombo.limpiar();
+  maqUsuarioAppCombo.setOpciones(usuariosOperadoresAppPermitidos_(''));
+  maqUsuarioAppCombo.limpiar();
   document.getElementById('maq-f-usa-diesel').checked = false;
   document.getElementById('maq-f-usa-gasolina').checked = false;
   document.getElementById('maq-f-admite-terceros').checked = false;
@@ -13378,6 +13598,8 @@ function abrirModalMaquinaria(registro){
     // catálogo), para no vaciarlo silenciosamente solo por abrir "Editar".
     maqOperadorCombo.setOpciones(operadoresPermitidos_(registro.OperadorAsignado));
     maqOperadorCombo.setValor(registro.OperadorAsignado || '');
+    maqUsuarioAppCombo.setOpciones(usuariosOperadoresAppPermitidos_(registro.UsuarioAsignadoApp));
+    maqUsuarioAppCombo.setValor(registro.UsuarioAsignadoApp || '');
     document.getElementById('maq-f-usa-diesel').checked = !!registro.UsaDiesel;
     document.getElementById('maq-f-usa-gasolina').checked = !!registro.UsaGasolina;
     document.getElementById('maq-f-admite-terceros').checked = !!registro.AdmiteTerceros;
@@ -13489,6 +13711,7 @@ document.getElementById('maq-btn-save').addEventListener('click', function(){
     placa: document.getElementById('maq-f-placa').value.trim(),
     tipoUnidad: document.getElementById('maq-f-tipo').value.trim(),
     operadorAsignado: document.getElementById('maq-f-operador').value,
+    usuarioAsignadoApp: document.getElementById('maq-f-usuario-app').value,
     usaDiesel: document.getElementById('maq-f-usa-diesel').checked,
     usaGasolina: document.getElementById('maq-f-usa-gasolina').checked,
     admiteTerceros: document.getElementById('maq-f-admite-terceros').checked,
@@ -13662,7 +13885,7 @@ function renderCatalogo(){
       <td>${escapeHtml(r.Serie || '—')}</td>
       <td>${escapeHtml(r.Placa || '—')}</td>
       <td>${escapeHtml(r.TipoUnidad || '—')}</td>
-      <td>${escapeHtml(r.OperadorAsignado || '—')}</td>
+      <td>${escapeHtml(r.OperadorAsignado || '—')}${r.UsuarioAsignadoApp ? '<br><span class="mnt-subtext" title="Esta persona solo puede elegir este equipo en la app">📱 ' + escapeHtml(r.UsuarioAsignadoApp) + '</span>' : ''}</td>
       <td>${r.UsaDiesel ? 'Sí' : '—'}</td>
       <td>${r.UsaGasolina ? (r.CombustibleAutomotrizTipo === 'diesel' ? 'Diesel' : 'Gasolina') : '—'}</td>
       <td>${r.AdmiteTerceros ? 'Sí' : '—'}</td>

@@ -2045,7 +2045,21 @@ function huertasEfectivasDeFila_(usuario) {
   });
 }
 
-function datosReportarUsuario_(usuario) {
+// Equipo (maquinaria) asignado específicamente a esta persona por su
+// nombre de usuario de la app (ver maquinaria.usuario_asignado_app en
+// db/schema.sql) — separado del catálogo libre de Operadores. Vacío =
+// esta persona no tiene nada asignado -> en Index.html se sigue viendo
+// todo el equipo, igual que siempre.
+async function equiposAsignadosUsuario_(nombre) {
+  if (!nombre) return [];
+  const [rows] = await pool.query(
+    'SELECT codigo_unidad FROM maquinaria WHERE usuario_asignado_app IS NOT NULL AND LOWER(TRIM(usuario_asignado_app)) = LOWER(TRIM(?))',
+    [nombre]
+  );
+  return rows.map((r) => r.codigo_unidad);
+}
+
+async function datosReportarUsuario_(usuario) {
   return {
     huerta: usuario.huerta || '',
     huertas: huertasEfectivasDeFila_(usuario),
@@ -2056,13 +2070,18 @@ function datosReportarUsuario_(usuario) {
     // ver pestanas_celular_ocultas en db/schema.sql. Vacío/ausente = las
     // ve todas, igual que siempre.
     pestanasCelularOcultas: parseHuertasJson_(usuario.pestanas_celular_ocultas),
+    // Equipo asignado a esta persona (ver equiposAsignadosUsuario_ arriba)
+    // — en Index.html restringe, en TODA la app, qué unidades puede
+    // elegir (Reportar, Diesel, Movimientos, Avance Huerta). Vacío = ve
+    // todo el equipo, igual que siempre.
+    equiposAsignados: await equiposAsignadosUsuario_(usuario.nombre),
   };
 }
 
 async function getHuertaPorUsuario(nombre) {
   if (!nombre) return datosReportarUsuario_({});
   const [rows] = await pool.query(
-    'SELECT huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    'SELECT nombre, huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
     [nombre]
   );
   return datosReportarUsuario_(rows.length ? rows[0] : {});
@@ -2088,7 +2107,7 @@ async function validarUsuario(nombre, password, modulo) {
   if (modulo && !tieneAccesoModulo_(usuario.modulos, modulo)) {
     return { success: false, error: 'Tu usuario no tiene acceso a este módulo.' };
   }
-  const resultado = { success: true, ...datosReportarUsuario_(usuario) };
+  const resultado = { success: true, ...(await datosReportarUsuario_(usuario)) };
   // Para el Panel, además del ok/error del login, ya regresamos de una vez
   // los permisos por pestaña de esta persona — así el frontend sabe qué
   // pestañas mostrarle y en cuáles solo puede ver (sin tener que pedirlos
@@ -2601,6 +2620,7 @@ const MAQUINARIA_SELECT = `
     m.usa_gasolina    AS UsaGasolina,
     m.combustible_automotriz_tipo AS CombustibleAutomotrizTipo,
     m.operador_asignado AS OperadorAsignado,
+    m.usuario_asignado_app AS UsuarioAsignadoApp,
     m.admite_terceros AS AdmiteTerceros
   FROM maquinaria m
   LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
@@ -2665,6 +2685,20 @@ async function getMaquinaria(code, nombreUsuario) {
   });
 }
 
+// Lista de personas con cuenta de acceso a la app (módulo 'Reportar') para
+// el combo "Usuario de la app asignado" del modal de Maquinaria en el
+// Panel — a propósito separada del catálogo libre de Operadores (ver
+// usuario_asignado_app en db/schema.sql): aquí solo aparecen nombres que
+// de verdad existen como cuenta, para que el filtro de equipo en
+// Index.html (equiposAsignadosUsuario_) nunca falle por una mala escritura.
+async function getUsuariosOperadoresApp(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, ['maquinaria', 'catalogo'], 'visualizar');
+  const [rows] = await pool.query('SELECT nombre, modulos FROM usuarios ORDER BY nombre');
+  return rows
+    .filter((r) => r.nombre && tieneAccesoModulo_(r.modulos, 'Reportar'))
+    .map((r) => r.nombre);
+}
+
 async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
   await requierePermisoPanel_(code, nombreUsuario, ['maquinaria', 'catalogo'], 'capturar');
   data = data || {};
@@ -2709,6 +2743,13 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
     // antes de este catálogo), y el nombre a mostrar se resuelve en
     // getMaquinaria a partir de marca_id/modelo_id primero.
     const operadorAsignado = (data.operadorAsignado || '').toString().trim() || null;
+    // A qué USUARIO de la app (cuenta real de Usuarios) se asigna este
+    // equipo — ver usuario_asignado_app en db/schema.sql. Validamos que de
+    // verdad sea una cuenta existente con acceso a 'Reportar' (si ya no lo
+    // es -- se borró o se le quitó el acceso --, se guarda igual para no
+    // sorprender con un valor "corregido" solo al editar otra cosa del
+    // equipo; getUsuariosOperadoresApp ya no se lo ofrecerá para elegir).
+    const usuarioAsignadoApp = (data.usuarioAsignadoApp || '').toString().trim() || null;
     // Admite Reparaciones con terceros (pestaña Órdenes): marca qué equipos
     // pueden usar esa categoría al crear/editar una orden — ver es_terceros
     // en db/schema.sql y la validación en crearOrdenPanel/editarOrden.
@@ -2716,8 +2757,8 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
 
     await pool.query(
       `INSERT INTO maquinaria
-        (codigo_unidad, unidad, departamento, marca_id, modelo_id, anio, color, serie, placa, tipo_unidad, observaciones, usa_diesel, usa_gasolina, combustible_automotriz_tipo, operador_asignado, admite_terceros)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (codigo_unidad, unidad, departamento, marca_id, modelo_id, anio, color, serie, placa, tipo_unidad, observaciones, usa_diesel, usa_gasolina, combustible_automotriz_tipo, operador_asignado, usuario_asignado_app, admite_terceros)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
         unidad = VALUES(unidad), departamento = VALUES(departamento), marca_id = VALUES(marca_id),
         modelo_id = VALUES(modelo_id), anio = VALUES(anio), color = VALUES(color), serie = VALUES(serie),
@@ -2725,6 +2766,7 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
         usa_diesel = VALUES(usa_diesel), usa_gasolina = VALUES(usa_gasolina),
         combustible_automotriz_tipo = VALUES(combustible_automotriz_tipo),
         operador_asignado = VALUES(operador_asignado),
+        usuario_asignado_app = VALUES(usuario_asignado_app),
         admite_terceros = VALUES(admite_terceros)`,
       [
         codigo,
@@ -2742,6 +2784,7 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
         usaGasolina,
         combustibleAutomotrizTipo,
         operadorAsignado,
+        usuarioAsignadoApp,
         admiteTerceros,
       ]
     );
@@ -5470,10 +5513,142 @@ async function getCuadrosHuerta(huerta) {
   return rows.map((r) => ({ id: r.id, nombre: r.nombre, poligono: parsearPoligono_(r.poligono), surcos: r.surcos }));
 }
 
+// ------------------------------------------------------------
+// Catálogo de actividades de Avance Huerta (ver actividades_catalogo en
+// db/schema.sql) -- Carlos da de alta la actividad UNA VEZ (trabajo + cada
+// cuántos surcos) y después la asigna a los cuadros que quiera, de un
+// jalón (ver asignarActividadCatalogoACuadros más abajo), sin tener que
+// volver a escribir el trabajo ni el intervalo por cada cuadro.
+// ------------------------------------------------------------
+
+async function getActividadesCatalogo(code, nombreUsuario, huerta) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return [];
+  const [rows] = await pool.query(
+    'SELECT id, trabajo, intervalo_surcos, creado_por, creado_en FROM actividades_catalogo WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY trabajo',
+    [nombreHuerta]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    trabajo: r.trabajo,
+    intervaloSurcos: r.intervalo_surcos,
+    creadoPor: r.creado_por,
+    creadoEn: r.creado_en,
+  }));
+}
+
+// id vacío/ausente = crear una actividad nueva en el catálogo; con id,
+// edita la que ya existía (cambia trabajo/intervalo para asignaciones
+// FUTURAS -- no toca las filas de huerta_actividades que ya se habían
+// creado con el valor anterior, igual que cualquier catálogo simple de
+// este sistema).
+async function guardarActividadCatalogo(code, nombreUsuario, id, huerta, trabajo, intervaloSurcos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  const trabajoTexto = (trabajo || '').toString().trim();
+  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
+  try {
+    const idNum = Number(id) || null;
+    if (idNum) {
+      await pool.query(
+        'UPDATE actividades_catalogo SET trabajo = ?, intervalo_surcos = ? WHERE id = ? AND LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
+        [trabajoTexto, intervalo, idNum, nombreHuerta]
+      );
+      return { success: true, id: idNum };
+    }
+    const [result] = await pool.query(
+      'INSERT INTO actividades_catalogo (huerta, trabajo, intervalo_surcos, creado_por) VALUES (?, ?, ?, ?)',
+      [nombreHuerta, trabajoTexto, intervalo, (nombreUsuario || '').toString().trim() || null]
+    );
+    return { success: true, id: result.insertId };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+async function eliminarActividadCatalogo(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const idNum = Number(id);
+  if (!idNum) return { success: false, error: 'Falta indicar qué actividad del catálogo borrar.' };
+  // No borra las asignaciones (huerta_actividades) que ya se hubieran
+  // hecho con esta actividad -- solo deja de estar disponible para
+  // asignar de nuevo; cada cuadro sigue viendo lo que ya tenía.
+  await pool.query('DELETE FROM actividades_catalogo WHERE id = ?', [idNum]);
+  return { success: true };
+}
+
+// Crea, para CADA cuadro en cuadroIds, una fila de huerta_actividades a
+// partir de una actividad ya dada de alta en el catálogo -- mismo criterio
+// de avance histórico ya cubierto que guardarActividadHuerta (si el
+// operador ya había recorrido ese cuadro antes de asignarla, la actividad
+// nace con ese avance ya contado, o de una vez "completada" si ya
+// alcanza). Un cuadro que ya tuviera ESA MISMA actividad del catálogo
+// asignada se ignora (se cuenta en "omitidas"), para poder reintentar o
+// agregar más cuadros después sin duplicar por error.
+async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, actividadCatalogoId, cuadroIds) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  const catalogoId = Number(actividadCatalogoId);
+  const lista = Array.isArray(cuadroIds) ? Array.from(new Set(cuadroIds.map((c) => Number(c)).filter(Boolean))) : [];
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  if (!catalogoId) return { success: false, error: 'Falta indicar qué actividad del catálogo asignar.' };
+  if (!lista.length) return { success: false, error: 'Selecciona al menos un cuadro.' };
+  const [catalogo] = await pool.query(
+    'SELECT trabajo, intervalo_surcos FROM actividades_catalogo WHERE id = ? AND LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
+    [catalogoId, nombreHuerta]
+  );
+  if (catalogo.length === 0) return { success: false, error: 'Esa actividad ya no existe en el catálogo.' };
+  const trabajo = catalogo[0].trabajo;
+  const intervalo = catalogo[0].intervalo_surcos;
+
+  const [yaAsignados] = await pool.query(
+    'SELECT cuadro_id FROM huerta_actividades WHERE actividad_catalogo_id = ? AND cuadro_id IN (?)',
+    [catalogoId, lista]
+  );
+  const yaAsignadosSet = new Set(yaAsignados.map((r) => r.cuadro_id));
+
+  let creadas = 0;
+  let omitidas = 0;
+  const errores = [];
+  for (const idCuadro of lista) {
+    if (yaAsignadosSet.has(idCuadro)) { omitidas++; continue; }
+    const [cuadros] = await pool.query('SELECT poligono, surcos FROM huerta_cuadros WHERE id = ?', [idCuadro]);
+    if (cuadros.length === 0) { errores.push('Un cuadro seleccionado ya no existe.'); continue; }
+    try {
+      const [result] = await pool.query(
+        'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por, intervalo_surcos, actividad_catalogo_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [nombreHuerta, idCuadro, trabajo, (nombreUsuario || '').toString().trim() || null, intervalo, catalogoId]
+      );
+      const actividadId = result.insertId;
+      const poligono = parsearPoligono_(cuadros[0].poligono);
+      const historico = await calcularMetrosHistoricosEnPoligono_(nombreHuerta, poligono);
+      const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, cuadros[0].surcos, intervalo);
+      const completadoYa = esperado === null ? historico.cubierto : historico.metros >= esperado - SURCOS_TOLERANCIA_METROS;
+      if (completadoYa) {
+        await pool.query(
+          'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ?, avance_metros = ? WHERE id = ?',
+          ['completado', historico.avanceIdReferencia, esperado === null ? historico.metros : Math.min(historico.metros, esperado), actividadId]
+        );
+      } else if (historico.metros > 0) {
+        await pool.query('UPDATE huerta_actividades SET avance_metros = ? WHERE id = ?', [historico.metros, actividadId]);
+      }
+      creadas++;
+    } catch (err) {
+      errores.push(err.toString());
+    }
+  }
+  return { success: true, creadas, omitidas, errores };
+}
+
 // Acción del Panel (asignar una actividad/trabajo a un cuadro ya
 // dibujado, con cada cuántos surcos cuenta como una pasada para ESA
 // actividad -- ver comentario junto a calcularDistanciaTotalEsperadaMetros_
-// más arriba). Revisa de inmediato el histórico YA guardado de esa huerta
+// más arriba). Se deja esta función de un solo cuadro por compatibilidad;
+// el flujo nuevo desde el Panel es por el catálogo (asignarActividadCatalogoACuadros).
+// Revisa de inmediato el histórico YA guardado de esa huerta
 // (puntos de recorridos anteriores) -- si el operador ya había recorrido
 // parte (o todo) ese cuadro antes de que esta actividad existiera, nace
 // con ese avance ya contado (o de una vez "completado", si ya alcanza).
@@ -5565,7 +5740,7 @@ async function getActividadesHuerta(huerta) {
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
     `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, c.poligono AS cuadroPoligono, c.surcos AS cuadroSurcos,
-            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.creado_en, a.completado_en
+            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.creado_en, a.completado_en, a.actividad_catalogo_id
      FROM huerta_actividades a
      JOIN huerta_cuadros c ON c.id = a.cuadro_id
      WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))
@@ -5592,6 +5767,7 @@ async function getActividadesHuerta(huerta) {
       porcentaje: Math.round(porcentaje),
       creadoEn: r.creado_en,
       completadoEn: r.completado_en,
+      actividadCatalogoId: r.actividad_catalogo_id,
     };
   });
 }
@@ -6863,6 +7039,7 @@ module.exports = {
   editarMovimiento,
   eliminarMovimiento,
   getMaquinaria,
+  getUsuariosOperadoresApp,
   guardarMaquinaria,
   eliminarMaquinaria,
   getResumenHuertas,
@@ -6938,6 +7115,10 @@ module.exports = {
   guardarActividadHuerta,
   eliminarActividadHuerta,
   getActividadesHuerta,
+  getActividadesCatalogo,
+  guardarActividadCatalogo,
+  eliminarActividadCatalogo,
+  asignarActividadCatalogoACuadros,
   getDepartamentosCatalogo,
   guardarDepartamento,
   eliminarDepartamento,

@@ -2427,3 +2427,65 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- A qué USUARIO de la app (cuenta de Usuarios, no el catálogo libre de
+-- Operadores de arriba) está asignado este equipo -- petición de Carlos:
+-- que el operador que entra a la app, en cualquier pestaña (Reportar,
+-- Cargar Diesel, Movimientos, Avance Huerta), solo pueda elegir el equipo
+-- que tiene asignado. Se configura desde Maquinaria (ver
+-- getUsuariosOperadoresApp/guardarMaquinaria en server/handlers.js), eligiendo
+-- de la lista de personas que ya tienen cuenta para entrar a la app -- a
+-- propósito un campo separado de `operador_asignado` (ese es el catálogo
+-- libre que ya existía, para Diesel/Taller, y no necesariamente coincide
+-- con el nombre de usuario de la app). NULL (nadie asignado a ese equipo,
+-- o el operador no tiene ningún equipo con su nombre aquí) significa "sin
+-- restricción" -- ve todo el equipo, igual que siempre (ver
+-- recomputarUnidadesFiltradas en Index.html).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'usuario_asignado_app'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE maquinaria ADD COLUMN usuario_asignado_app VARCHAR(255) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Catálogo de actividades de Avance Huerta -- petición de Carlos: en vez
+-- de escribir el "trabajo" (y su intervalo de surcos) cada vez que se
+-- asigna a un cuadro, se da de alta UNA VEZ en este catálogo (ej. "Poda",
+-- cada 2 surcos) y después se asigna, de un jalón, a los cuadros que se
+-- quieran -- ver getActividadesCatalogo/guardarActividadCatalogo/
+-- asignarActividadCatalogoACuadros en server/handlers.js. El intervalo de
+-- surcos vive aquí, en la actividad del catálogo, no por cada cuadro al
+-- que se asigna (así lo pidió Carlos).
+CREATE TABLE IF NOT EXISTS actividades_catalogo (
+  id               INT AUTO_INCREMENT PRIMARY KEY,
+  huerta           VARCHAR(255) NOT NULL,
+  trabajo          VARCHAR(255) NOT NULL,
+  intervalo_surcos INT NOT NULL DEFAULT 1,
+  creado_por       VARCHAR(255) DEFAULT NULL,
+  creado_en        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_actividades_catalogo_huerta (huerta)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- De qué actividad del catálogo viene esta fila de huerta_actividades (la
+-- asignación concreta a un cuadro). `trabajo`/`intervalo_surcos` en
+-- huerta_actividades se quedan como respaldo (se copian del catálogo al
+-- momento de asignar, y así sigue funcionando todo lo que ya los lee: el
+-- cálculo de avance, la tabla de actividades, etc.) -- NULL = fila vieja,
+-- creada antes de que existiera el catálogo (o asignada sin pasar por él),
+-- se sigue viendo exactamente igual que siempre.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'actividad_catalogo_id'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN actividad_catalogo_id INT DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

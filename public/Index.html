@@ -1302,6 +1302,12 @@ let ubicacionesUnidades = {};
 // que después no deberían aparecer.
 let unidadesDieselPermitidas = new Set();
 
+// Equipo asignado específicamente a esta persona (ver aplicarHuerta) --
+// arreglo de códigos de unidad (maquinaria.usuario_asignado_app). Vacío =
+// no tiene nada asignado -> no restringe nada, ve todo el equipo (filtrado
+// solo por huerta/diesel), igual que siempre.
+let equiposAsignadosUsuario = [];
+
 function recomputarUnidadesFiltradas(){
   // Lista efectiva de huertas contra la que se filtra: las adicionales si
   // ya llegaron, o la huerta única como respaldo mientras tanto.
@@ -1317,7 +1323,6 @@ function recomputarUnidadesFiltradas(){
       return !asignada || lista.indexOf(asignada.trim().toUpperCase()) !== -1;
     });
   }
-  IMPLEMENTOS = UNIDADES.filter(function(u){ return u.l.trim().toUpperCase().startsWith('IA'); });
 
   const baseDiesel = UNIDADES_TODAS.filter(function(u){ return unidadesDieselPermitidas.has(u.v); });
   if(!lista.length){
@@ -1328,6 +1333,18 @@ function recomputarUnidadesFiltradas(){
       return !asignada || lista.indexOf(asignada.trim().toUpperCase()) !== -1;
     });
   }
+
+  // Equipo asignado a esta persona (petición de Carlos): si tiene algo
+  // asignado, restringe -- en TODA la app -- a solo eso, encima del
+  // filtro de huerta/diesel de arriba. Si no tiene nada asignado, no
+  // cambia nada (sigue viendo lo de siempre).
+  if(equiposAsignadosUsuario && equiposAsignadosUsuario.length){
+    const asignadosSet = new Set(equiposAsignadosUsuario);
+    UNIDADES = UNIDADES.filter(function(u){ return asignadosSet.has(u.v); });
+    UNIDADES_DIESEL = UNIDADES_DIESEL.filter(function(u){ return asignadosSet.has(u.v); });
+  }
+
+  IMPLEMENTOS = UNIDADES.filter(function(u){ return u.l.trim().toUpperCase().startsWith('IA'); });
 }
 
 function cargarUbicacionesUnidades(){
@@ -1397,6 +1414,12 @@ function aplicarHuerta(datos){
   var huerta = datos.huerta || '';
   huertaUsuarioActual = huerta;
   huertasUsuarioActual = Array.isArray(datos.huertas) ? datos.huertas : (huerta ? [huerta] : []);
+  // Equipo asignado específicamente a esta persona (ver
+  // maquinaria.usuario_asignado_app en db/schema.sql) -- petición de
+  // Carlos: en toda la app (Reportar/Diesel/Movimientos/Avance Huerta)
+  // solo puede elegir SU equipo. Vacío = no tiene nada asignado -> sigue
+  // viendo todo el equipo, igual que siempre (ver recomputarUnidadesFiltradas).
+  equiposAsignadosUsuario = Array.isArray(datos.equiposAsignados) ? datos.equiposAsignados : [];
   recomputarUnidadesFiltradas();
   poblarHuertaOrigenMov();
   poblarHuertaDestinoMov();
@@ -2689,7 +2712,7 @@ function avanceDistanciaMetros_(p1, p2){
   return Math.sqrt(e*e + n*n);
 }
 
-var AVANCE_RADIO_PINTADO_METROS = 8; // "ancho de pincel" al pintar -- ajustable aquí
+var AVANCE_RADIO_PINTADO_METROS = 1; // "ancho de pincel" al pintar -- ajustable aquí (petición de Carlos: línea delgada/detallada en vez del trazo grueso de antes)
 var AVANCE_DISTANCIA_MINIMA_METROS = 3; // no se guarda un punto nuevo si no se alejó al menos esto del último guardado
 
 var AVANCE_MAPA_INFO = null; // {mapaUrl, calibrado, cal1, cal2} de getMapaHuerta

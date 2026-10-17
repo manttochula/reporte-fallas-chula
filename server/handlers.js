@@ -5265,6 +5265,56 @@ async function getAvanceHuerta(huerta) {
   }));
 }
 
+// Recorridos de UN día específico, con el detalle de tiempo de cada punto
+// -- a diferencia de getAvanceHuerta (todo el histórico, sin horas, para
+// el mapa-foto de "avance acumulado"), esto es para la nueva pantalla de
+// "Ver recorrido": Carlos elige una fecha, ve la lista de quién trabajó
+// ese día (para escoger a cuáles ver, puede elegir varios a la vez) y
+// arrastra una barra de tiempo que va revelando el trazo de cada uno
+// hasta esa hora -- por eso cada punto va con su capturado_en real, y no
+// solo lat/lng como en getAvanceHuerta. Pide permiso de Panel porque,
+// a diferencia de getAvanceHuerta (de la vista de solo-lectura que ya
+// existía), esto es una pantalla nueva.
+async function getRecorridosPorFecha(code, nombreUsuario, huerta, fecha) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  const fechaTexto = (fecha || '').toString().trim(); // 'YYYY-MM-DD'
+  if (!nombreHuerta || !fechaTexto) return [];
+  const [sesiones] = await pool.query(
+    `SELECT id, nombre, trabajo, codigo_unidad, fecha_inicio, fecha_fin FROM avance_huerta
+     WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) AND DATE(fecha_inicio) = ?
+     ORDER BY fecha_inicio`,
+    [nombreHuerta, fechaTexto]
+  );
+  if (sesiones.length === 0) return [];
+  const ids = sesiones.map((s) => s.id);
+  const [puntos] = await pool.query(
+    'SELECT avance_id, lat, lng, capturado_en FROM avance_huerta_puntos WHERE avance_id IN (?) ORDER BY avance_id, capturado_en, id',
+    [ids]
+  );
+  const codigos = Array.from(new Set(sesiones.map((s) => s.codigo_unidad).filter(Boolean)));
+  let equiposPorCodigo = {};
+  if (codigos.length > 0) {
+    const [maquinas] = await pool.query('SELECT codigo_unidad, unidad FROM maquinaria WHERE codigo_unidad IN (?)', [codigos]);
+    maquinas.forEach((m) => { equiposPorCodigo[m.codigo_unidad] = m.unidad; });
+  }
+  const puntosPorSesion = {};
+  puntos.forEach((p) => {
+    if (!puntosPorSesion[p.avance_id]) puntosPorSesion[p.avance_id] = [];
+    puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), capturadoEn: p.capturado_en });
+  });
+  return sesiones.map((s) => ({
+    avanceId: s.id,
+    nombre: s.nombre,
+    trabajo: s.trabajo,
+    codigoUnidad: s.codigo_unidad,
+    equipoUnidad: s.codigo_unidad ? (equiposPorCodigo[s.codigo_unidad] || s.codigo_unidad) : null,
+    fechaInicio: s.fecha_inicio,
+    fechaFin: s.fecha_fin,
+    puntos: puntosPorSesion[s.id] || [],
+  }));
+}
+
 // ------------------------------------------------------------
 // Cuadros (lotes numerados) y actividades planeadas por cuadro — ver
 // comentario en db/schema.sql (huerta_cuadros/huerta_actividades) para el
@@ -7121,6 +7171,7 @@ module.exports = {
   terminarAvance,
   getAvanceAbierto,
   getAvanceHuerta,
+  getRecorridosPorFecha,
   guardarCuadroHuerta,
   eliminarCuadroHuerta,
   actualizarSurcosCuadro,

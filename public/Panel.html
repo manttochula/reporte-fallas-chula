@@ -340,6 +340,18 @@
   .ah-prog-bar-fill{ height:100%; border-radius:5px; background:#8a5a00; transition:width .2s; }
   .ah-prog-bar-fill.ah-prog-completado{ background:#1e7a44; }
   .ah-prog-pct{ font-size:12px; font-weight:700; color:var(--text-dim); white-space:nowrap; }
+  #ah-recorrido-canvas-wrap{ position:relative; width:100%; }
+  #ah-recorrido-img{ width:100%; display:block; border-radius:6px; }
+  #ah-recorrido-canvas{ position:absolute; top:0; left:0; width:100%; height:100%; }
+  .ah-recorrido-sesiones{
+    display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto;
+    border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0;
+  }
+  .ah-recorrido-sesion-item{ display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+  .ah-recorrido-color-chip{ width:12px; height:12px; border-radius:3px; flex:none; display:inline-block; }
+  .ah-recorrido-slider-wrap{ display:flex; align-items:center; gap:10px; margin:14px 0 4px; }
+  #ah-recorrido-slider{ flex:1; }
+  #ah-recorrido-hora{ font-size:12.5px; font-weight:700; color:var(--text-dim); white-space:nowrap; min-width:70px; text-align:right; }
   .ord-summary-row{
     display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px;
     position: sticky; top: 0; z-index: 30; background: var(--bg);
@@ -3405,6 +3417,9 @@
           <a href="#" id="ah-link-recalibrar" style="color:var(--text-dim); font-size:12.5px;">Recalibrar este mapa</a>
         </div>
         <div id="ah-vista-avance">
+          <div style="display:flex; align-items:center; justify-content:flex-end; margin-bottom:10px;">
+            <button type="button" class="ah-btn-marcar" id="ah-btn-ver-recorrido">📍 Ver recorrido por fecha</button>
+          </div>
           <div class="summary" id="ah-resumen"></div>
           <div class="table-wrap">
             <table>
@@ -3552,6 +3567,31 @@
         <div id="ah-mapa-seleccion-canvas"></div>
         <div class="maq-modal-status" id="ah-mapa-seleccion-status"></div>
         <button class="maq-save-btn" id="ah-mapa-seleccion-btn-listo" style="margin-top:10px;">Listo (<span id="ah-mapa-seleccion-conteo">0</span> seleccionados)</button>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="ah-recorrido-overlay">
+      <div class="maq-modal maq-modal-wide">
+        <span class="maq-modal-close" id="ah-recorrido-close">&times;</span>
+        <h3 style="margin-top:0;">Ver recorrido por fecha</h3>
+        <div class="maq-field">
+          <label>Fecha</label>
+          <input type="date" id="ah-recorrido-fecha">
+        </div>
+        <div class="maq-modal-status" id="ah-recorrido-status"></div>
+        <div id="ah-recorrido-sesiones-vacio" class="avance-aviso" style="display:none;">Ese día no hay ningún recorrido registrado en esta huerta.</div>
+        <div class="ah-recorrido-sesiones" id="ah-recorrido-sesiones-lista" style="display:none;"></div>
+        <div id="ah-recorrido-mapa-wrap" style="display:none;">
+          <div id="ah-recorrido-canvas-wrap">
+            <img id="ah-recorrido-img" src="" alt="Mapa de la huerta">
+            <canvas id="ah-recorrido-canvas"></canvas>
+          </div>
+          <div class="ah-recorrido-slider-wrap">
+            <input type="range" id="ah-recorrido-slider" min="0" max="1000" value="1000">
+            <span id="ah-recorrido-hora">--:--</span>
+          </div>
+          <p class="avance-aviso" style="padding:6px 0 0;">Arrastra la barra para ver el recorrido hasta esa hora. Las flechas muestran hacia dónde se movió cada quien.</p>
+        </div>
       </div>
     </div>
 
@@ -6561,6 +6601,252 @@ function ahRenderTabla_(historico){
   tbody.innerHTML = filas.join('');
   resumen.textContent = historico.length + ' registro(s) de avance · ' + totalPuntos + ' punto(s) de GPS en total.';
 }
+
+// ---------------------------------------------------------------
+// "Ver recorrido por fecha" -- petición de Carlos (imagen de referencia de
+// otra app de flotillas: flechas direccionales + selector de fecha + barra
+// de tiempo que se arrastra a mano, SIN "play"). A diferencia de la tabla
+// de arriba (todo el histórico acumulado, sin horas), aquí Carlos: (1)
+// elige cualquier día anterior, (2) ve la lista de quién(es) trabajaron
+// ese día y puede marcar VARIOS a la vez (no solo uno, ni "todos siempre"),
+// y (3) arrastra una barra de tiempo que va revelando el trazo de cada
+// quien hasta esa hora. Reutiliza el mismo mapa-foto calibrado y las
+// mismas fórmulas GPS→pixel que ya existen (ahGpsAPosicionEnMapa_,
+// ahEscalaFraccionPorMetro_) pero sobre SU PROPIO canvas
+// (ah-recorrido-canvas), para no interferir con el canvas del avance
+// acumulado (ah-mapa-canvas) que sigue mostrándose detrás del modal.
+// ---------------------------------------------------------------
+var AH_RECORRIDO_SESIONES = []; // [{avanceId, nombre, trabajo, codigoUnidad, equipoUnidad, fechaInicio, fechaFin, puntos:[{lat,lng,capturadoEn}]}]
+var AH_RECORRIDO_SELECCIONADOS = new Set(); // avanceId de las sesiones marcadas en la lista (multi-selección)
+var AH_RECORRIDO_COLORES = ['#1f6fd6', '#c0392b', '#1e7a44', '#8a5a00', '#8e44ad', '#16a085', '#d35400', '#2c3e50'];
+
+function ahAjustarCanvasRecorrido_(){
+  var img = document.getElementById('ah-recorrido-img');
+  var canvas = document.getElementById('ah-recorrido-canvas');
+  canvas.width = img.clientWidth;
+  canvas.height = img.clientHeight;
+}
+
+// Misma transformación fracción→pixel de ahFraccionAPixelCanvas_, pero
+// recibiendo el id del canvas -- ese otro helper quedó fijo a
+// 'ah-mapa-canvas' y no vale la pena tocarlo (lo sigue usando el resto del
+// avance acumulado) solo para parametrizarlo.
+function ahPosFraccionAPixelEnCanvas_(canvasId, xFrac, yFrac){
+  var canvas = document.getElementById(canvasId);
+  return { x: xFrac * canvas.width, y: yFrac * canvas.width };
+}
+
+function ahColorSesionRecorrido_(avanceId){
+  var idx = (AH_RECORRIDO_SESIONES || []).findIndex(function(s){ return s.avanceId === avanceId; });
+  if(idx < 0) idx = 0;
+  return AH_RECORRIDO_COLORES[idx % AH_RECORRIDO_COLORES.length];
+}
+
+function ahHoraTexto_(ms){
+  if(ms === null || ms === undefined || Number.isNaN(ms)) return '--:--';
+  var d = new Date(ms);
+  var hh = String(d.getHours()).padStart(2, '0');
+  var mm = String(d.getMinutes()).padStart(2, '0');
+  return hh + ':' + mm;
+}
+
+// El mínimo/máximo de TODOS los puntos del día (no solo de los
+// seleccionados) -- así el rango de la barra de tiempo no cambia cada vez
+// que Carlos marca/desmarca una sesión, solo lo que se dibuja.
+function ahRangoTiempoRecorrido_(){
+  var min = null, max = null;
+  (AH_RECORRIDO_SESIONES || []).forEach(function(s){
+    (s.puntos || []).forEach(function(p){
+      var t = new Date(p.capturadoEn).getTime();
+      if(Number.isNaN(t)) return;
+      if(min === null || t < min) min = t;
+      if(max === null || t > max) max = t;
+    });
+  });
+  return { min: min, max: max };
+}
+
+// Flecha pequeña a la mitad de cada tramo, apuntando hacia donde se movió
+// -- para ver el SENTIDO del recorrido con solo mirar el mapa, como en la
+// imagen de referencia que mandó Carlos.
+function ahDibujarFlechaDireccion_(ctx, x1, y1, x2, y2, color, radioPixeles){
+  var dx = x2 - x1, dy = y2 - y1;
+  var dist = Math.hypot(dx, dy);
+  if(dist < 6) return; // tramo muy corto -- no cabe una flecha legible
+  var ang = Math.atan2(dy, dx);
+  var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  var tam = Math.max(5, radioPixeles * 1.8);
+  ctx.save();
+  ctx.translate(mx, my);
+  ctx.rotate(ang);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tam, 0);
+  ctx.lineTo(-tam * 0.6, tam * 0.55);
+  ctx.lineTo(-tam * 0.6, -tam * 0.55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function ahDibujarSegmentoEnCanvas_(canvasId, cal1, cal2, puntoAnterior, puntoNuevo, color){
+  var canvas = document.getElementById(canvasId);
+  var ctx = canvas.getContext('2d');
+  var posNueva = ahGpsAPosicionEnMapa_(cal1, cal2, puntoNuevo.lat, puntoNuevo.lng);
+  if(!posNueva) return;
+  var escala = ahEscalaFraccionPorMetro_(cal1, cal2);
+  var radioPixeles = Math.max(2, AH_RADIO_PINTADO_METROS * escala * canvas.width);
+  var pNueva = ahPosFraccionAPixelEnCanvas_(canvasId, posNueva.x, posNueva.y);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  if(puntoAnterior){
+    var posAnterior = ahGpsAPosicionEnMapa_(cal1, cal2, puntoAnterior.lat, puntoAnterior.lng);
+    if(posAnterior){
+      var pAnterior = ahPosFraccionAPixelEnCanvas_(canvasId, posAnterior.x, posAnterior.y);
+      ctx.lineWidth = radioPixeles * 2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pAnterior.x, pAnterior.y);
+      ctx.lineTo(pNueva.x, pNueva.y);
+      ctx.stroke();
+      ahDibujarFlechaDireccion_(ctx, pAnterior.x, pAnterior.y, pNueva.x, pNueva.y, color, radioPixeles);
+    }
+  }
+  ctx.beginPath();
+  ctx.arc(pNueva.x, pNueva.y, radioPixeles, 0, 2*Math.PI);
+  ctx.fill();
+}
+
+// Vuelve a dibujar el canvas del recorrido: solo las sesiones marcadas en
+// la lista, y solo hasta donde diga la barra de tiempo (lo que esté
+// después se queda sin dibujar -- "se va revelando el camino").
+function ahDibujarRecorridoSeleccionado_(){
+  var canvas = document.getElementById('ah-recorrido-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  var horaEl = document.getElementById('ah-recorrido-hora');
+  if(!AH_MAPA_INFO || !AH_MAPA_INFO.calibrado){ horaEl.textContent = '--:--'; return; }
+  var rango = ahRangoTiempoRecorrido_();
+  if(rango.min === null){ horaEl.textContent = '--:--'; return; }
+  var cal1 = AH_MAPA_INFO.cal1, cal2 = AH_MAPA_INFO.cal2;
+  var slider = document.getElementById('ah-recorrido-slider');
+  var maxSlider = Number(slider.max) || 1000;
+  var frac = maxSlider > 0 ? (Number(slider.value) / maxSlider) : 1;
+  var tiempoLimite = rango.min + (rango.max - rango.min) * frac;
+  horaEl.textContent = ahHoraTexto_(tiempoLimite);
+  (AH_RECORRIDO_SESIONES || []).forEach(function(s){
+    if(!AH_RECORRIDO_SELECCIONADOS.has(s.avanceId)) return;
+    var color = ahColorSesionRecorrido_(s.avanceId);
+    var anterior = null;
+    (s.puntos || []).forEach(function(p){
+      var t = new Date(p.capturadoEn).getTime();
+      if(Number.isNaN(t) || t > tiempoLimite) return;
+      ahDibujarSegmentoEnCanvas_('ah-recorrido-canvas', cal1, cal2, anterior, p, color);
+      anterior = p;
+    });
+  });
+}
+
+function ahRenderRecorridoSesiones_(){
+  var vacio = document.getElementById('ah-recorrido-sesiones-vacio');
+  var lista = document.getElementById('ah-recorrido-sesiones-lista');
+  var mapaWrap = document.getElementById('ah-recorrido-mapa-wrap');
+  if(!AH_RECORRIDO_SESIONES || AH_RECORRIDO_SESIONES.length === 0){
+    vacio.style.display = '';
+    lista.style.display = 'none';
+    mapaWrap.style.display = 'none';
+    lista.innerHTML = '';
+    return;
+  }
+  vacio.style.display = 'none';
+  lista.style.display = '';
+  mapaWrap.style.display = '';
+  lista.innerHTML = AH_RECORRIDO_SESIONES.map(function(s){
+    var color = ahColorSesionRecorrido_(s.avanceId);
+    var horaIni = s.fechaInicio ? ahHoraTexto_(new Date(s.fechaInicio).getTime()) : '--:--';
+    var horaFin = s.fechaFin ? ahHoraTexto_(new Date(s.fechaFin).getTime()) : 'en curso';
+    var checked = AH_RECORRIDO_SELECCIONADOS.has(s.avanceId) ? ' checked' : '';
+    var equipoTexto = s.equipoUnidad ? (' · 🚜 ' + escapeHtml(s.equipoUnidad)) : '';
+    return '<label class="ah-recorrido-sesion-item">'
+      + '<input type="checkbox" class="ah-recorrido-check" data-avance-id="' + s.avanceId + '"' + checked + '>'
+      + '<span class="ah-recorrido-color-chip" style="background:' + color + ';"></span>'
+      + escapeHtml(s.nombre || '') + ' — ' + escapeHtml(s.trabajo || '—') + ' (' + horaIni + '–' + horaFin + ')' + equipoTexto
+      + '</label>';
+  }).join('');
+}
+
+function ahBuscarRecorridoFecha_(){
+  var statusEl = document.getElementById('ah-recorrido-status');
+  var fecha = document.getElementById('ah-recorrido-fecha').value;
+  if(!AH_HUERTA_ACTUAL) return;
+  if(!fecha){
+    statusEl.textContent = 'Elige una fecha.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  statusEl.textContent = 'Buscando...';
+  statusEl.className = 'maq-modal-status show';
+  document.getElementById('ah-recorrido-sesiones-vacio').style.display = 'none';
+  document.getElementById('ah-recorrido-sesiones-lista').style.display = 'none';
+  document.getElementById('ah-recorrido-mapa-wrap').style.display = 'none';
+  google.script.run
+    .withSuccessHandler(function(result){
+      statusEl.textContent = '';
+      statusEl.className = 'maq-modal-status';
+      AH_RECORRIDO_SESIONES = result || [];
+      AH_RECORRIDO_SELECCIONADOS = new Set();
+      ahRenderRecorridoSesiones_();
+      if(AH_RECORRIDO_SESIONES.length > 0){
+        ahAjustarCanvasRecorrido_();
+        var slider = document.getElementById('ah-recorrido-slider');
+        slider.value = slider.max;
+        ahDibujarRecorridoSeleccionado_();
+      }
+    })
+    .withFailureHandler(function(err){
+      statusEl.textContent = (err && err.message) || 'No se pudo cargar el recorrido. Revisa tu conexión.';
+      statusEl.className = 'maq-modal-status show err';
+    })
+    .getRecorridosPorFecha(ACCESS_CODE, PANEL_USUARIO, AH_HUERTA_ACTUAL, fecha);
+}
+
+function ahAbrirModalRecorrido_(){
+  if(!AH_HUERTA_ACTUAL || !AH_MAPA_INFO || !AH_MAPA_INFO.calibrado) return;
+  AH_RECORRIDO_SESIONES = [];
+  AH_RECORRIDO_SELECCIONADOS = new Set();
+  document.getElementById('ah-recorrido-status').textContent = '';
+  document.getElementById('ah-recorrido-status').className = 'maq-modal-status';
+  document.getElementById('ah-recorrido-sesiones-vacio').style.display = 'none';
+  document.getElementById('ah-recorrido-sesiones-lista').style.display = 'none';
+  document.getElementById('ah-recorrido-mapa-wrap').style.display = 'none';
+  var hoy = new Date();
+  var fechaHoy = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  document.getElementById('ah-recorrido-fecha').value = fechaHoy;
+  var img = document.getElementById('ah-recorrido-img');
+  img.onload = ahAjustarCanvasRecorrido_;
+  img.src = AH_MAPA_INFO.mapaUrl;
+  document.getElementById('ah-recorrido-overlay').classList.add('open');
+  ahBuscarRecorridoFecha_();
+}
+
+function ahCerrarModalRecorrido_(){
+  document.getElementById('ah-recorrido-overlay').classList.remove('open');
+}
+
+document.getElementById('ah-btn-ver-recorrido').addEventListener('click', ahAbrirModalRecorrido_);
+document.getElementById('ah-recorrido-close').addEventListener('click', ahCerrarModalRecorrido_);
+document.getElementById('ah-recorrido-overlay').addEventListener('click', function(ev){
+  if(ev.target === document.getElementById('ah-recorrido-overlay')) ahCerrarModalRecorrido_();
+});
+document.getElementById('ah-recorrido-fecha').addEventListener('change', ahBuscarRecorridoFecha_);
+document.getElementById('ah-recorrido-slider').addEventListener('input', ahDibujarRecorridoSeleccionado_);
+document.getElementById('ah-recorrido-sesiones-lista').addEventListener('change', function(ev){
+  var chk = ev.target;
+  if(!chk.classList || !chk.classList.contains('ah-recorrido-check')) return;
+  var id = Number(chk.getAttribute('data-avance-id'));
+  if(chk.checked) AH_RECORRIDO_SELECCIONADOS.add(id); else AH_RECORRIDO_SELECCIONADOS.delete(id);
+  ahDibujarRecorridoSeleccionado_();
+});
 
 // Un "chip" compacto por cuadro (nombre + surcos + ✕ para borrarlo) -- más
 // rápido de leer que una tabla cuando son varios cuadros chicos. El número

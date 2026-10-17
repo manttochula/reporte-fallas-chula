@@ -2864,6 +2864,29 @@ function avanceDibujarMarcaCalibracion_(etiqueta, xFrac, yFrac){
   ctx.fillText(etiqueta, p.x, p.y + 4);
 }
 
+// Flecha pequeña a la mitad de cada tramo, apuntando hacia donde se movió
+// -- misma idea que en el Panel (ahDibujarFlechaDireccion_), para que el
+// operador también vea el sentido de su propio recorrido en el celular.
+function avanceDibujarFlechaDireccion_(ctx, x1, y1, x2, y2, color, radioPixeles){
+  var dx = x2 - x1, dy = y2 - y1;
+  var dist = Math.hypot(dx, dy);
+  if(dist < 6) return; // tramo muy corto -- no cabe una flecha legible
+  var ang = Math.atan2(dy, dx);
+  var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  var tam = Math.max(5, radioPixeles * 1.8);
+  ctx.save();
+  ctx.translate(mx, my);
+  ctx.rotate(ang);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tam, 0);
+  ctx.lineTo(-tam * 0.6, tam * 0.55);
+  ctx.lineTo(-tam * 0.6, -tam * 0.55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function avanceDibujarSegmento_(cal1, cal2, puntoAnterior, puntoNuevo, color){
   var canvas = document.getElementById('avance-mapa-canvas');
   var ctx = canvas.getContext('2d');
@@ -2884,6 +2907,7 @@ function avanceDibujarSegmento_(cal1, cal2, puntoAnterior, puntoNuevo, color){
       ctx.moveTo(pAnterior.x, pAnterior.y);
       ctx.lineTo(pNueva.x, pNueva.y);
       ctx.stroke();
+      avanceDibujarFlechaDireccion_(ctx, pAnterior.x, pAnterior.y, pNueva.x, pNueva.y, color, radioPixeles);
     }
   }
   ctx.beginPath();

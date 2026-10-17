@@ -318,6 +318,26 @@
   .ah-badge-completado{ background:#DDF2E3; color:#1e7a44; }
   .ah-actividad-eliminar{ color:var(--text-dim); text-decoration:none; font-weight:700; cursor:pointer; }
   .ah-actividad-eliminar:hover{ color:#c0392b; }
+  /* Tabla "Actividades ya asignadas" estilo planificador de trabajo: número
+     de prioridad, nombre de cuadro en grande con la actividad como
+     subtítulo, y barra de progreso visual (como Prioridad/Campo/Progreso
+     del planificador de referencia, sin las columnas de Profundidad/Guiado
+     que no aplican aquí). */
+  .ah-prioridad-num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:24px; height:24px; border-radius:6px; background:var(--bg-soft,#F3F3F3);
+    border:1px solid var(--line); font-size:12.5px; font-weight:700; color:var(--text-dim);
+  }
+  .ah-campo-nombre{ font-weight:700; font-size:13.5px; color:var(--text); }
+  .ah-campo-sub{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+  .ah-prog-wrap{ display:flex; align-items:center; gap:8px; min-width:140px; }
+  .ah-prog-bar-track{
+    flex:1; height:8px; border-radius:5px; background:var(--bg-soft,#E7E7E7);
+    overflow:hidden; min-width:70px;
+  }
+  .ah-prog-bar-fill{ height:100%; border-radius:5px; background:#8a5a00; transition:width .2s; }
+  .ah-prog-bar-fill.ah-prog-completado{ background:#1e7a44; }
+  .ah-prog-pct{ font-size:12px; font-weight:700; color:var(--text-dim); white-space:nowrap; }
   .ord-summary-row{
     display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 16px;
     position: sticky; top: 0; z-index: 30; background: var(--bg);
@@ -3464,10 +3484,10 @@
             <table>
               <thead>
                 <tr>
-                  <th>Cuadro</th>
-                  <th>Actividad</th>
+                  <th>Prioridad</th>
+                  <th>Campo</th>
+                  <th>Progreso</th>
                   <th>Estado</th>
-                  <th>Avance</th>
                   <th>Completado</th>
                   <th></th>
                 </tr>
@@ -6636,21 +6656,25 @@ function ahRenderActividadesTabla_(){
   }
   vacio.style.display = 'none';
   tablaWrap.style.display = '';
-  tbody.innerHTML = AH_ACTIVIDADES.map(function(a){
+  tbody.innerHTML = AH_ACTIVIDADES.map(function(a, idx){
     var completado = a.estado === 'completado';
     // Solo se puede medir en % si el CUADRO ya tiene surcos capturados
     // (ver ahEditarSurcosCuadro_) -- si no, se queda el criterio de
-    // siempre (Pendiente/Completado nada más, sin %).
-    var avanceTexto = '—';
-    if(a.surcos !== null && a.surcos !== undefined){
-      avanceTexto = a.porcentaje + '%';
-      if(a.intervaloSurcos && a.intervaloSurcos > 1) avanceTexto += ' (cada ' + a.intervaloSurcos + ' surcos)';
-    }
+    // siempre (Pendiente/Completado nada más, sin %, y la barra se ve
+    // vacía o llena según el estado binario).
+    var tieneSurcos = a.surcos !== null && a.surcos !== undefined;
+    var pct = tieneSurcos ? Math.max(0, Math.min(100, Number(a.porcentaje) || 0)) : (completado ? 100 : 0);
+    var pctTexto = tieneSurcos ? (pct + '%') : (completado ? 'Completado' : '—');
+    var subTrabajo = a.trabajo || '';
+    if(tieneSurcos && a.intervaloSurcos && a.intervaloSurcos > 1) subTrabajo += ' · cada ' + a.intervaloSurcos + ' surcos';
+    // "Prioridad" es nada más el orden en el que se ven en esta lista (de
+    // arriba hacia abajo), al estilo del planificador de trabajo que
+    // mandó Carlos -- no se guarda ni se puede reordenar arrastrando.
     return '<tr>'
-      + '<td>' + escapeHtml(a.cuadroNombre || '') + '</td>'
-      + '<td>' + escapeHtml(a.trabajo || '') + '</td>'
+      + '<td><span class="ah-prioridad-num">' + (idx + 1) + '</span></td>'
+      + '<td><div class="ah-campo-nombre">' + escapeHtml(a.cuadroNombre || '') + '</div>' + (subTrabajo ? '<div class="ah-campo-sub">' + escapeHtml(subTrabajo) + '</div>' : '') + '</td>'
+      + '<td><div class="ah-prog-wrap"><div class="ah-prog-bar-track"><div class="ah-prog-bar-fill' + (completado ? ' ah-prog-completado' : '') + '" style="width:' + pct + '%"></div></div><span class="ah-prog-pct">' + pctTexto + '</span></div></td>'
       + '<td><span class="ah-badge ' + (completado ? 'ah-badge-completado' : 'ah-badge-pendiente') + '">' + (completado ? 'Completado' : 'Pendiente') + '</span></td>'
-      + '<td>' + avanceTexto + '</td>'
       + '<td>' + (a.completadoEn ? new Date(a.completadoEn).toLocaleString('es-MX') : '—') + '</td>'
       + '<td><a href="#" data-id="' + a.id + '" class="ah-actividad-eliminar" title="Borrar esta actividad">✕</a></td>'
       + '</tr>';

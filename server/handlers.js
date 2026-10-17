@@ -5622,19 +5622,14 @@ async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, act
         'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por, intervalo_surcos, actividad_catalogo_id) VALUES (?, ?, ?, ?, ?, ?)',
         [nombreHuerta, idCuadro, trabajo, (nombreUsuario || '').toString().trim() || null, intervalo, catalogoId]
       );
-      const actividadId = result.insertId;
-      const poligono = parsearPoligono_(cuadros[0].poligono);
-      const historico = await calcularMetrosHistoricosEnPoligono_(nombreHuerta, poligono);
-      const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, cuadros[0].surcos, intervalo);
-      const completadoYa = esperado === null ? historico.cubierto : historico.metros >= esperado - SURCOS_TOLERANCIA_METROS;
-      if (completadoYa) {
-        await pool.query(
-          'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ?, avance_metros = ? WHERE id = ?',
-          ['completado', historico.avanceIdReferencia, esperado === null ? historico.metros : Math.min(historico.metros, esperado), actividadId]
-        );
-      } else if (historico.metros > 0) {
-        await pool.query('UPDATE huerta_actividades SET avance_metros = ? WHERE id = ?', [historico.metros, actividadId]);
-      }
+      // A propósito YA NO se revisa el histórico de recorridos de la
+      // huerta para "adelantar" el avance de esta actividad -- petición de
+      // Carlos: antes, si CUALQUIER recorrido viejo (de otra actividad, o
+      // de hace tiempo) había tocado el cuadro, nacía "completada" sola,
+      // lo cual confundía (cuadros marcados completados que en realidad
+      // nadie había trabajado para ESTA actividad). Ahora toda actividad
+      // nueva nace "pendiente" en 0, y solo avanza con los recorridos que
+      // se hagan DE AQUÍ EN ADELANTE (ver marcarCuadrosCompletadosPorPunto_).
       creadas++;
     } catch (err) {
       errores.push(err.toString());
@@ -5648,10 +5643,12 @@ async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, act
 // actividad -- ver comentario junto a calcularDistanciaTotalEsperadaMetros_
 // más arriba). Se deja esta función de un solo cuadro por compatibilidad;
 // el flujo nuevo desde el Panel es por el catálogo (asignarActividadCatalogoACuadros).
-// Revisa de inmediato el histórico YA guardado de esa huerta
-// (puntos de recorridos anteriores) -- si el operador ya había recorrido
-// parte (o todo) ese cuadro antes de que esta actividad existiera, nace
-// con ese avance ya contado (o de una vez "completado", si ya alcanza).
+// Nace "pendiente" en 0 -- a propósito YA NO revisa el histórico de
+// recorridos viejos de la huerta para adelantar el avance (ver el
+// comentario junto a "creadas++" en asignarActividadCatalogoACuadros,
+// mismo motivo: petición de Carlos, le confundía que una actividad recién
+// creada apareciera "completada" sola por un recorrido de otra actividad
+// o de hace tiempo).
 async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, trabajo, intervaloSurcos) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
@@ -5668,56 +5665,10 @@ async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, tra
       'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por, intervalo_surcos) VALUES (?, ?, ?, ?, ?)',
       [nombreHuerta, idCuadro, trabajoTexto, (nombreUsuario || '').toString().trim() || null, intervalo]
     );
-    const actividadId = result.insertId;
-    const poligono = parsearPoligono_(cuadros[0].poligono);
-    const historico = await calcularMetrosHistoricosEnPoligono_(nombreHuerta, poligono);
-    const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, cuadros[0].surcos, intervalo);
-    const completadoYa = esperado === null ? historico.cubierto : historico.metros >= esperado - SURCOS_TOLERANCIA_METROS;
-    if (completadoYa) {
-      await pool.query(
-        'UPDATE huerta_actividades SET estado = ?, completado_en = NOW(), avance_id = ?, avance_metros = ? WHERE id = ?',
-        ['completado', historico.avanceIdReferencia, esperado === null ? historico.metros : Math.min(historico.metros, esperado), actividadId]
-      );
-    } else if (historico.metros > 0) {
-      await pool.query('UPDATE huerta_actividades SET avance_metros = ? WHERE id = ?', [historico.metros, actividadId]);
-    }
-    return { success: true, id: actividadId, completadaDeInmediato: completadoYa };
+    return { success: true, id: result.insertId, completadaDeInmediato: false };
   } catch (err) {
     return { success: false, error: err.toString() };
   }
-}
-
-// Revisa, entre los puntos YA guardados de los recorridos de esa huerta,
-// cuántos metros se recorrieron DENTRO del polígono dado -- mismo
-// criterio que la acumulación en vivo (ver actualizarAvancePorPunto_):
-// solo cuenta el tramo entre 2 puntos consecutivos de UNA MISMA sesión si
-// AMBOS cubren el cuadro (así no se cuenta de golpe la entrada desde
-// fuera). avanceIdReferencia es la sesión del primer punto, en orden
-// cronológico, que ya cubrió el cuadro (para atribuirle la actividad si
-// queda completada de inmediato); cubierto indica si al menos un punto lo
-// cubrió, para el criterio binario de los cuadros sin surcos capturados.
-async function calcularMetrosHistoricosEnPoligono_(huerta, poligono) {
-  if (!poligonoValido_(poligono)) return { metros: 0, avanceIdReferencia: null, cubierto: false };
-  const [puntos] = await pool.query(
-    `SELECT p.avance_id, p.lat, p.lng FROM avance_huerta_puntos p
-     JOIN avance_huerta a ON a.id = p.avance_id
-     WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))
-     ORDER BY p.avance_id, p.capturado_en, p.id`,
-    [huerta]
-  );
-  let metros = 0;
-  let avanceIdReferencia = null;
-  let anterior = null; // { avanceId, lat, lng }
-  for (const p of puntos) {
-    const actual = { lat: Number(p.lat), lng: Number(p.lng) };
-    const cubre = cubreCuadro_(actual, poligono);
-    if (cubre && avanceIdReferencia === null) avanceIdReferencia = p.avance_id;
-    if (cubre && anterior && anterior.avanceId === p.avance_id && cubreCuadro_(anterior, poligono)) {
-      metros += distanciaMetros_(anterior, actual);
-    }
-    anterior = { avanceId: p.avance_id, lat: actual.lat, lng: actual.lng };
-  }
-  return { metros, avanceIdReferencia, cubierto: avanceIdReferencia !== null };
 }
 
 async function eliminarActividadHuerta(code, nombreUsuario, actividadId) {

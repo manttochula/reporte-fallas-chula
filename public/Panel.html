@@ -305,8 +305,10 @@
   }
   .ah-btn-marcar.activo{ background:#E8871E; border-color:#E8871E; color:#1C1E1F; }
   #ah-mapa-google-canvas{ width:100%; height:480px; border-radius:6px; border:1px solid var(--line); }
+  #ah-mapa-seleccion-canvas{ width:100%; height:480px; border-radius:6px; border:1px solid var(--line); }
   .ah-mapa-google-ir{ display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap; }
   .ah-mapa-google-ir input{ flex:1; min-width:220px; }
+  .ah-paso-subtitulo{ font-size:13px; color:var(--text); font-weight:700; margin:4px 0 8px; }
   .ah-cuadro-chip{
     display:inline-flex; align-items:center; gap:6px; background:var(--bg-soft, #F3F3F3);
     border:1px solid var(--line); border-radius:20px; padding:5px 10px 5px 12px; font-size:12.5px; font-weight:600;
@@ -3464,17 +3466,40 @@
           </div>
 
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
-            <div class="avance-paso" style="margin-bottom:0;">Asignar una actividad a cuadros</div>
+            <div class="avance-paso" style="margin-bottom:0;">Planificar trabajo</div>
           </div>
           <div id="ah-asignar-vacio" class="avance-aviso" style="display:none;">Primero da de alta al menos una actividad en el catálogo (arriba) y dibuja al menos un cuadro.</div>
           <div id="ah-asignar-wrap" style="display:none;">
-            <div class="maq-field" style="max-width:320px;">
-              <label>Actividad del catálogo</label>
-              <select id="ah-f-asignar-catalogo"></select>
+
+            <div class="ah-paso-subtitulo">1. Selección de campo</div>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+              <div class="mnt-subtext" style="margin:0;">Marca los cuadros a los que quieres asignar el trabajo:</div>
+              <button type="button" class="export-btn" id="ah-btn-seleccionar-mapa">🗺️ Seleccionar en el mapa</button>
             </div>
-            <div class="mnt-subtext" style="margin:6px 0 4px;">Marca los cuadros a los que quieres asignarla:</div>
             <div id="ah-asignar-cuadros-grid" class="usr-huertas-grid"></div>
-            <button class="maq-save-btn" id="ah-btn-asignar-cuadros" style="max-width:260px; margin-top:10px;">Asignar a los cuadros marcados</button>
+
+            <div class="ah-paso-subtitulo" style="margin-top:18px;">2. Detalle de trabajo</div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+              <div class="maq-field" style="flex:1; min-width:200px;">
+                <label>Actividad del catálogo</label>
+                <select id="ah-f-asignar-catalogo"></select>
+              </div>
+              <div class="maq-field" style="flex:1; min-width:200px;">
+                <label>Equipo (tractor)</label>
+                <select id="ah-f-asignar-equipo"><option value="">Sin asignar (cuenta cualquiera)</option></select>
+              </div>
+              <div class="maq-field" style="flex:1; min-width:200px;">
+                <label>Implemento (apero)</label>
+                <select id="ah-f-asignar-implemento"><option value="">Sin asignar</option></select>
+              </div>
+              <div class="maq-field" style="flex:1; min-width:200px;">
+                <label>Operador</label>
+                <select id="ah-f-asignar-operador"><option value="">Sin asignar (cuenta cualquiera)</option></select>
+              </div>
+            </div>
+            <div class="mnt-subtext" style="margin:2px 0 4px;">Si eliges Equipo y/o Operador, el avance de esta actividad SOLO contará cuando ESE equipo y/o ESE operador hagan el recorrido. Si los dejas en "Sin asignar", cuenta cualquiera, igual que antes.</div>
+
+            <button class="maq-save-btn" id="ah-btn-asignar-cuadros" style="max-width:260px; margin-top:6px;">Registrar actividad</button>
           </div>
           <div class="maq-modal-status" id="ah-asignar-status"></div>
 
@@ -3516,6 +3541,17 @@
         </div>
         <div id="ah-mapa-google-canvas"></div>
         <div class="maq-modal-status" id="ah-mapa-google-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="ah-mapa-seleccion-overlay">
+      <div class="maq-modal maq-modal-wide">
+        <span class="maq-modal-close" id="ah-mapa-seleccion-close">&times;</span>
+        <h3 style="margin-top:0;">Selecciona los cuadros en el mapa</h3>
+        <p class="avance-aviso" style="padding:0 0 4px;">Toca un cuadro para marcarlo o desmarcarlo (se pinta en ámbar). Cuando termines, toca "Listo".</p>
+        <div id="ah-mapa-seleccion-canvas"></div>
+        <div class="maq-modal-status" id="ah-mapa-seleccion-status"></div>
+        <button class="maq-save-btn" id="ah-mapa-seleccion-btn-listo" style="margin-top:10px;">Listo (<span id="ah-mapa-seleccion-conteo">0</span> seleccionados)</button>
       </div>
     </div>
 
@@ -6667,6 +6703,11 @@ function ahRenderActividadesTabla_(){
     var pctTexto = tieneSurcos ? (pct + '%') : (completado ? 'Completado' : '—');
     var subTrabajo = a.trabajo || '';
     if(tieneSurcos && a.intervaloSurcos && a.intervaloSurcos > 1) subTrabajo += ' · cada ' + a.intervaloSurcos + ' surcos';
+    // Equipo/operador asignados en "2. Detalle de trabajo" (si se eligieron
+    // -- son opcionales): se muestran como referencia debajo del cuadro,
+    // igual que la actividad.
+    if(a.equipoCodigo) subTrabajo += ' · 🚜 ' + (a.equipoUnidad || a.equipoCodigo);
+    if(a.operadorNombre) subTrabajo += ' · 👤 ' + a.operadorNombre;
     // "Prioridad" es nada más el orden en el que se ven en esta lista (de
     // arriba hacia abajo), al estilo del planificador de trabajo que
     // mandó Carlos -- no se guarda ni se puede reordenar arrastrando.
@@ -6710,6 +6751,42 @@ function ahCargarCuadrosYActividades_(huerta){
     })
     .withFailureHandler(function(){ AH_CUADROS = []; AH_ACTIVIDADES = []; AH_CATALOGO = []; ahRenderCuadrosYActividades_(); })
     .getCuadrosHuerta(huerta);
+  ahCargarRecursosAsignar_(); // equipos/implementos/operadores para "2. Detalle de trabajo" -- no depende de la huerta en sí, va en paralelo
+}
+
+// Equipo (tractor), implemento (apero) y operador para el paso "2. Detalle
+// de trabajo" al planificar una actividad -- petición de Carlos, al estilo
+// del planificador de John Deere. Pide solo permiso de 'avance_huerta' (ver
+// getRecursosParaAvanceHuerta en server/handlers.js), así que alguien con
+// acceso nada más a esta pantalla también puede planificar sin que le haga
+// falta además permiso de Catálogo/Maquinaria.
+var AH_RECURSOS = { equipos: [], implementos: [], operadores: [] };
+
+function ahCargarRecursosAsignar_(){
+  google.script.run
+    .withSuccessHandler(function(recursos){
+      AH_RECURSOS = recursos || { equipos: [], implementos: [], operadores: [] };
+      ahPoblarSelectsRecursosAsignar_();
+    })
+    .withFailureHandler(function(){ AH_RECURSOS = { equipos: [], implementos: [], operadores: [] }; ahPoblarSelectsRecursosAsignar_(); })
+    .getRecursosParaAvanceHuerta(ACCESS_CODE, PANEL_USUARIO);
+}
+
+function ahPoblarSelectsRecursosAsignar_(){
+  function poblar(selId, lista, textoVacio, esTextoLibre){
+    var sel = document.getElementById(selId);
+    if(!sel) return;
+    var valorPrevio = sel.value;
+    sel.innerHTML = '<option value="">' + textoVacio + '</option>' + (lista || []).map(function(item){
+      var valor = esTextoLibre ? item : item.codigo;
+      var texto = esTextoLibre ? item : (item.unidad || item.codigo);
+      return '<option value="' + escapeHtml(valor) + '">' + escapeHtml(texto) + '</option>';
+    }).join('');
+    if(valorPrevio) sel.value = valorPrevio;
+  }
+  poblar('ah-f-asignar-equipo', AH_RECURSOS.equipos, 'Sin asignar (cuenta cualquiera)', false);
+  poblar('ah-f-asignar-implemento', AH_RECURSOS.implementos, 'Sin asignar', false);
+  poblar('ah-f-asignar-operador', AH_RECURSOS.operadores, 'Sin asignar (cuenta cualquiera)', true);
 }
 
 // GOOGLE MAPS: dibujar los contornos reales de los cuadros ------------------
@@ -6847,6 +6924,90 @@ function ahDibujarPoligonosGoogleExistentes_(){
     return poly;
   });
 }
+
+// --- "1. Selección de campo" por mapa (petición de Carlos, al estilo del
+// planificador de trabajo de John Deere): un modal aparte del de dibujar
+// cuadros, de solo selección -- toca un cuadro para marcarlo/desmarcarlo
+// (se pinta en ámbar), y al tocar "Listo" se refleja en las casillas de
+// ah-asignar-cuadros-grid (no se guarda nada todavía; eso lo hace
+// "Registrar actividad" en el paso 2, igual que si se hubiera marcado a
+// mano desde la lista). Usa el mismo mapa de Google (misma huerta) que el
+// de dibujar, pero su PROPIA instancia -- así no se interfieren los clics
+// de "dibujar cuadro nuevo" con los de "seleccionar cuadros existentes".
+var AH_GOOGLE_MAP_SELECCION = null;
+var AH_GOOGLE_POLIGONOS_SELECCION = [];
+var AH_SELECCION_CUADROS_MAPA = new Set();
+
+function ahInicializarMapaSeleccionSiHaceFalta_(){
+  if(AH_GOOGLE_MAP_SELECCION) return;
+  AH_GOOGLE_MAP_SELECCION = new google.maps.Map(document.getElementById('ah-mapa-seleccion-canvas'), {
+    center: ahCentroInicialMapaGoogle_(),
+    zoom: (AH_MAPA_INFO && AH_MAPA_INFO.calibrado) ? 18 : 5,
+    mapTypeId: 'satellite',
+  });
+}
+
+function ahActualizarConteoSeleccionMapa_(){
+  document.getElementById('ah-mapa-seleccion-conteo').textContent = AH_SELECCION_CUADROS_MAPA.size;
+}
+
+function ahDibujarPoligonosSeleccionables_(){
+  if(!AH_GOOGLE_MAP_SELECCION) return;
+  (AH_GOOGLE_POLIGONOS_SELECCION || []).forEach(function(p){ p.setMap(null); });
+  AH_GOOGLE_POLIGONOS_SELECCION = (AH_CUADROS || []).filter(function(c){ return c.poligono && c.poligono.length >= 3; }).map(function(c){
+    var seleccionado = AH_SELECCION_CUADROS_MAPA.has(c.id);
+    var poly = new google.maps.Polygon({
+      paths: c.poligono,
+      strokeColor: seleccionado ? '#E8871E' : '#4a90d9',
+      fillColor: seleccionado ? '#E8871E' : '#4a90d9',
+      fillOpacity: seleccionado ? 0.45 : 0.18,
+      strokeWeight: 2,
+      clickable: true,
+    });
+    poly.setMap(AH_GOOGLE_MAP_SELECCION);
+    google.maps.event.addListener(poly, 'click', function(){
+      if(AH_SELECCION_CUADROS_MAPA.has(c.id)) AH_SELECCION_CUADROS_MAPA.delete(c.id);
+      else AH_SELECCION_CUADROS_MAPA.add(c.id);
+      ahDibujarPoligonosSeleccionables_();
+      ahActualizarConteoSeleccionMapa_();
+    });
+    return poly;
+  });
+}
+
+function ahAbrirModalSeleccionMapa_(){
+  // Precarga lo que ya estuviera marcado a mano en la lista de casillas.
+  AH_SELECCION_CUADROS_MAPA = new Set(
+    Array.prototype.filter.call(document.querySelectorAll('#ah-asignar-cuadros-grid input[type=checkbox]'), function(cb){ return cb.checked; })
+      .map(function(cb){ return Number(cb.value); })
+  );
+  document.getElementById('ah-mapa-seleccion-status').textContent = '';
+  document.getElementById('ah-mapa-seleccion-status').className = 'maq-modal-status';
+  document.getElementById('ah-mapa-seleccion-overlay').classList.add('open');
+  ahActualizarConteoSeleccionMapa_();
+  ahCargarGoogleMapsSiHaceFalta_(function(){
+    ahInicializarMapaSeleccionSiHaceFalta_();
+    google.maps.event.trigger(AH_GOOGLE_MAP_SELECCION, 'resize');
+    AH_GOOGLE_MAP_SELECCION.setCenter(ahCentroInicialMapaGoogle_());
+    ahDibujarPoligonosSeleccionables_();
+  });
+}
+
+function ahCerrarModalSeleccionMapa_(){
+  document.getElementById('ah-mapa-seleccion-overlay').classList.remove('open');
+}
+
+document.getElementById('ah-btn-seleccionar-mapa').addEventListener('click', ahAbrirModalSeleccionMapa_);
+document.getElementById('ah-mapa-seleccion-close').addEventListener('click', ahCerrarModalSeleccionMapa_);
+document.getElementById('ah-mapa-seleccion-overlay').addEventListener('click', function(ev){
+  if(ev.target === document.getElementById('ah-mapa-seleccion-overlay')) ahCerrarModalSeleccionMapa_();
+});
+document.getElementById('ah-mapa-seleccion-btn-listo').addEventListener('click', function(){
+  document.querySelectorAll('#ah-asignar-cuadros-grid input[type=checkbox]').forEach(function(cb){
+    cb.checked = AH_SELECCION_CUADROS_MAPA.has(Number(cb.value));
+  });
+  ahCerrarModalSeleccionMapa_();
+});
 
 // Se dispara al tocar "✅ Terminar cuadro" con al menos 3 esquinas ya
 // marcadas. window.prompt() para el nombre -- mismo patrón ya usado en el
@@ -7051,6 +7212,9 @@ document.getElementById('ah-btn-asignar-cuadros').addEventListener('click', func
   var huerta = AH_HUERTA_ACTUAL;
   var catalogoId = Number(document.getElementById('ah-f-asignar-catalogo').value);
   var cuadroIds = Array.from(document.querySelectorAll('#ah-asignar-cuadros-grid input[type=checkbox]:checked')).map(function(cb){ return Number(cb.value); });
+  var equipoCodigo = document.getElementById('ah-f-asignar-equipo').value;
+  var implementoCodigo = document.getElementById('ah-f-asignar-implemento').value;
+  var operadorNombre = document.getElementById('ah-f-asignar-operador').value;
   if(!catalogoId){
     statusEl.textContent = 'Elige qué actividad del catálogo quieres asignar.';
     statusEl.className = 'maq-modal-status show err';
@@ -7079,6 +7243,9 @@ document.getElementById('ah-btn-asignar-cuadros').addEventListener('click', func
       statusEl.textContent = partes.length ? partes.join(', ') + '.' : 'Listo.';
       statusEl.className = 'maq-modal-status show ok';
       document.querySelectorAll('#ah-asignar-cuadros-grid input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
+      document.getElementById('ah-f-asignar-equipo').value = '';
+      document.getElementById('ah-f-asignar-implemento').value = '';
+      document.getElementById('ah-f-asignar-operador').value = '';
       ahCargarCuadrosYActividades_(huerta);
     })
     .withFailureHandler(function(err){
@@ -7086,7 +7253,7 @@ document.getElementById('ah-btn-asignar-cuadros').addEventListener('click', func
       statusEl.textContent = (err && err.message) || 'No se pudo asignar. Revisa tu conexión e intenta de nuevo.';
       statusEl.className = 'maq-modal-status show err';
     })
-    .asignarActividadCatalogoACuadros(ACCESS_CODE, PANEL_USUARIO, huerta, catalogoId, cuadroIds);
+    .asignarActividadCatalogoACuadros(ACCESS_CODE, PANEL_USUARIO, huerta, catalogoId, cuadroIds, equipoCodigo, implementoCodigo, operadorNombre);
 });
 
 document.getElementById('ah-actividades-table-body').addEventListener('click', function(ev){

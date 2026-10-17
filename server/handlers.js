@@ -5135,7 +5135,7 @@ async function guardarCalibracionMapaHuerta(nombreUsuario, huerta, cal1, cal2) {
 // submitReporte: basta con haber iniciado sesión en el celular, sin pedir
 // ningún permiso de Panel. Cualquier operador con acceso a esa huerta para
 // Reportar puede marcar su propio avance ahí.
-async function iniciarAvance(huerta, nombre, trabajo, porcentaje) {
+async function iniciarAvance(huerta, nombre, trabajo, porcentaje, codigoUnidad) {
   const nombreHuerta = (huerta || '').toString().trim();
   const nombrePersona = (nombre || '').toString().trim();
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
@@ -5144,10 +5144,16 @@ async function iniciarAvance(huerta, nombre, trabajo, porcentaje) {
   if (porcentajeNum !== null && (Number.isNaN(porcentajeNum) || porcentajeNum < 0 || porcentajeNum > 100)) {
     return { success: false, error: 'El porcentaje debe ser un número entre 0 y 100.' };
   }
+  // codigoUnidad: con qué equipo (tractor) se hace este recorrido -- se usa
+  // para saber si debe acreditarle avance a una actividad planificada con
+  // un equipo específico (ver marcarCuadrosCompletadosPorPunto_). Queda
+  // opcional a nivel servidor (el celular ya lo pide como obligatorio en
+  // esta pantalla, pero una versión vieja de la app que no lo mande no debe
+  // tronar).
   try {
     const [result] = await pool.query(
-      'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio) VALUES (?, ?, ?, ?, NOW())',
-      [nombreHuerta, nombrePersona, (trabajo || '').toString().trim() || null, porcentajeNum]
+      'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio, codigo_unidad) VALUES (?, ?, ?, ?, NOW(), ?)',
+      [nombreHuerta, nombrePersona, (trabajo || '').toString().trim() || null, porcentajeNum, (codigoUnidad || '').toString().trim() || null]
     );
     return { success: true, avanceId: result.insertId };
   } catch (err) {
@@ -5166,7 +5172,7 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   if (!id || typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
     return { success: false, error: 'Datos de ubicación inválidos.' };
   }
-  const [rows] = await pool.query('SELECT huerta, fecha_fin FROM avance_huerta WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT huerta, fecha_fin, nombre, codigo_unidad FROM avance_huerta WHERE id = ?', [id]);
   if (rows.length === 0 || rows[0].fecha_fin !== null) {
     return { success: false, error: 'Este registro de avance ya no está abierto.' };
   }
@@ -5177,7 +5183,7 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   // guardado del punto GPS en sí, que es lo importante de esta llamada.
   let actividadesCompletadas = [];
   try {
-    actividadesCompletadas = await marcarCuadrosCompletadosPorPunto_(rows[0].huerta, id, lat, lng);
+    actividadesCompletadas = await marcarCuadrosCompletadosPorPunto_(rows[0].huerta, id, lat, lng, rows[0].nombre, rows[0].codigo_unidad);
   } catch (err) {
     actividadesCompletadas = [];
   }
@@ -5580,6 +5586,22 @@ async function eliminarActividadCatalogo(code, nombreUsuario, id) {
   return { success: true };
 }
 
+// Catálogo de equipos/implementos/operadores para el paso "Detalle de
+// trabajo" al planificar una actividad (ver asignarActividadCatalogoACuadros
+// más abajo) -- a propósito pide solo permiso de 'avance_huerta' (no
+// 'maquinaria'/'catalogo', como getMaquinaria/getUsuariosOperadoresApp),
+// para que alguien con acceso nada más a Avance Huerta pueda planificar
+// trabajo sin que le haga falta también permiso sobre el Catálogo completo.
+async function getRecursosParaAvanceHuerta(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  const [rows] = await pool.query('SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria ORDER BY unidad');
+  const equipos = rows.filter((r) => !esImplemento_(r.Unidad)).map((r) => ({ codigo: r.CodigoUnidad, unidad: r.Unidad }));
+  const implementos = rows.filter((r) => esImplemento_(r.Unidad)).map((r) => ({ codigo: r.CodigoUnidad, unidad: r.Unidad }));
+  const [usuarios] = await pool.query('SELECT nombre, modulos FROM usuarios ORDER BY nombre');
+  const operadores = usuarios.filter((r) => r.nombre && tieneAccesoModulo_(r.modulos, 'Reportar')).map((r) => r.nombre);
+  return { equipos, implementos, operadores };
+}
+
 // Crea, para CADA cuadro en cuadroIds, una fila de huerta_actividades a
 // partir de una actividad ya dada de alta en el catálogo -- mismo criterio
 // de avance histórico ya cubierto que guardarActividadHuerta (si el
@@ -5588,11 +5610,18 @@ async function eliminarActividadCatalogo(code, nombreUsuario, id) {
 // alcanza). Un cuadro que ya tuviera ESA MISMA actividad del catálogo
 // asignada se ignora (se cuenta en "omitidas"), para poder reintentar o
 // agregar más cuadros después sin duplicar por error.
-async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, actividadCatalogoId, cuadroIds) {
+async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, actividadCatalogoId, cuadroIds, equipoCodigo, implementoCodigo, operadorNombre) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
   const catalogoId = Number(actividadCatalogoId);
   const lista = Array.isArray(cuadroIds) ? Array.from(new Set(cuadroIds.map((c) => Number(c)).filter(Boolean))) : [];
+  // "Detalle de trabajo" (petición de Carlos, al estilo del planificador de
+  // John Deere): equipo/implemento/operador quedan OPCIONALES -- si se
+  // dejan vacíos, el avance de la actividad se sigue acreditando con
+  // cualquier recorrido, igual que antes (ver marcarCuadrosCompletadosPorPunto_).
+  const equipo = (equipoCodigo || '').toString().trim() || null;
+  const implemento = (implementoCodigo || '').toString().trim() || null;
+  const operador = (operadorNombre || '').toString().trim() || null;
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
   if (!catalogoId) return { success: false, error: 'Falta indicar qué actividad del catálogo asignar.' };
   if (!lista.length) return { success: false, error: 'Selecciona al menos un cuadro.' };
@@ -5619,8 +5648,8 @@ async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, act
     if (cuadros.length === 0) { errores.push('Un cuadro seleccionado ya no existe.'); continue; }
     try {
       const [result] = await pool.query(
-        'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por, intervalo_surcos, actividad_catalogo_id) VALUES (?, ?, ?, ?, ?, ?)',
-        [nombreHuerta, idCuadro, trabajo, (nombreUsuario || '').toString().trim() || null, intervalo, catalogoId]
+        'INSERT INTO huerta_actividades (huerta, cuadro_id, trabajo, creado_por, intervalo_surcos, actividad_catalogo_id, equipo_codigo, implemento_codigo, operador_nombre) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [nombreHuerta, idCuadro, trabajo, (nombreUsuario || '').toString().trim() || null, intervalo, catalogoId, equipo, implemento, operador]
       );
       // A propósito YA NO se revisa el histórico de recorridos de la
       // huerta para "adelantar" el avance de esta actividad -- petición de
@@ -5691,9 +5720,14 @@ async function getActividadesHuerta(huerta) {
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
     `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, c.poligono AS cuadroPoligono, c.surcos AS cuadroSurcos,
-            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.creado_en, a.completado_en, a.actividad_catalogo_id
+            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.creado_en, a.completado_en, a.actividad_catalogo_id,
+            a.equipo_codigo, me.unidad AS equipoUnidad,
+            a.implemento_codigo, mi.unidad AS implementoUnidad,
+            a.operador_nombre
      FROM huerta_actividades a
      JOIN huerta_cuadros c ON c.id = a.cuadro_id
+     LEFT JOIN maquinaria me ON me.codigo_unidad = a.equipo_codigo
+     LEFT JOIN maquinaria mi ON mi.codigo_unidad = a.implemento_codigo
      WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?))
      ORDER BY c.nombre, a.creado_en`,
     [nombreHuerta]
@@ -5719,8 +5753,26 @@ async function getActividadesHuerta(huerta) {
       creadoEn: r.creado_en,
       completadoEn: r.completado_en,
       actividadCatalogoId: r.actividad_catalogo_id,
+      equipoCodigo: r.equipo_codigo,
+      equipoUnidad: r.equipoUnidad,
+      implementoCodigo: r.implemento_codigo,
+      implementoUnidad: r.implementoUnidad,
+      operadorNombre: r.operador_nombre,
     };
   });
+}
+
+// asignado = lo que quedó capturado en la actividad (equipo_codigo u
+// operador_nombre); real = lo que trae ESTE recorrido (avance_huerta
+// codigo_unidad/nombre). Si la actividad no pidió nada en especial
+// (asignado vacío), siempre coincide -- así el comportamiento de siempre
+// (cualquier recorrido cuenta) se mantiene para toda actividad sin
+// equipo/operador asignado.
+function coincideConAsignado_(asignado, real) {
+  const a = (asignado || '').toString().trim().toLowerCase();
+  if (!a) return true;
+  const r = (real || '').toString().trim().toLowerCase();
+  return a === r;
 }
 
 // Se llama desde agregarPuntoAvance después de guardar cada punto nuevo
@@ -5735,7 +5787,16 @@ async function getActividadesHuerta(huerta) {
 // surcos capturados, el criterio binario de siempre) la marca completada.
 // Regresa la lista de actividades que se acaban de completar con este
 // punto, para que el celular pueda, si quiere, avisarle algo al operador.
-async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng) {
+//
+// avanceNombre/avanceEquipo: quién y con qué equipo se está haciendo ESTE
+// recorrido (avance_huerta.nombre/.codigo_unidad). Petición de Carlos: si
+// una actividad quedó planificada con un equipo y/o un operador específico
+// (huerta_actividades.equipo_codigo/.operador_nombre, ver "Detalle de
+// trabajo" en el Panel), su avance SOLO debe subir cuando coincide con lo
+// asignado -- si la actividad no tiene equipo y/o operador asignado, ese
+// lado no filtra (sigue contando cualquiera, como siempre). Ver
+// coincideConAsignado_ más abajo.
+async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, avanceNombre, avanceEquipo) {
   const actual = { lat, lng };
   const [cuadros] = await pool.query(
     `SELECT c.id, c.nombre AS cuadroNombre, c.poligono, c.surcos FROM huerta_cuadros c
@@ -5756,10 +5817,11 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng) {
     if (!cubreCuadro_(actual, poligono)) continue;
     const metrosTramo = (anterior && cubreCuadro_(anterior, poligono)) ? distanciaMetros_(anterior, actual) : 0;
     const [actividades] = await pool.query(
-      `SELECT id, trabajo, intervalo_surcos, avance_metros FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
+      `SELECT id, trabajo, intervalo_surcos, avance_metros, equipo_codigo, operador_nombre FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
       [c.id]
     );
     for (const act of actividades) {
+      if (!coincideConAsignado_(act.equipo_codigo, avanceEquipo) || !coincideConAsignado_(act.operador_nombre, avanceNombre)) continue;
       const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, c.surcos, act.intervalo_surcos);
       const nuevoAvance = Number(act.avance_metros) + metrosTramo;
       const completado = esperado === null ? true : nuevoAvance >= esperado - SURCOS_TOLERANCIA_METROS;
@@ -7069,6 +7131,7 @@ module.exports = {
   getActividadesCatalogo,
   guardarActividadCatalogo,
   eliminarActividadCatalogo,
+  getRecursosParaAvanceHuerta,
   asignarActividadCatalogoACuadros,
   getDepartamentosCatalogo,
   guardarDepartamento,

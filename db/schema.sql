@@ -2489,3 +2489,71 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Planificación de trabajo (huerta_actividades): a qué EQUIPO (tractor),
+-- IMPLEMENTO (apero) y OPERADOR se asigna cada actividad -- petición de
+-- Carlos, al estilo del planificador de trabajo de John Deere: 1) elige los
+-- cuadros, 2) "Detalle de trabajo" con equipo/implemento/operador. Los tres
+-- quedan opcionales (NULL = "sin asignar").
+--
+-- equipo_codigo/operador_nombre SÍ afectan cómo se acredita el avance (ver
+-- marcarCuadrosCompletadosPorPunto_ en server/handlers.js): si una
+-- actividad tiene equipo y/o operador asignado, su avance SOLO sube cuando
+-- el recorrido GPS que lo genera (avance_huerta.codigo_unidad/.nombre, ver
+-- abajo) coincide con lo asignado aquí -- si cualquiera de los dos se deja
+-- vacío, ese lado no filtra (cuenta cualquier equipo y/o cualquier
+-- operador), exactamente igual que el comportamiento de siempre.
+-- implemento_codigo es solo informativo, no se usa para filtrar nada.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'equipo_codigo'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN equipo_codigo VARCHAR(50) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'implemento_codigo'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN implemento_codigo VARCHAR(50) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'operador_nombre'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN operador_nombre VARCHAR(255) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- avance_huerta: con qué EQUIPO (tractor) se hizo este recorrido -- lo
+-- elige el operador en su celular al darle "Iniciar" en Avance Huerta,
+-- igual que ya elige equipo en Reportar/Cargar Diesel/Movimientos
+-- (restringido a los equipos que tenga asignados -- ver
+-- maquinaria.usuario_asignado_app). Petición de Carlos: para que una
+-- actividad planificada con equipo/operador asignado (ver arriba) solo
+-- cuente el avance de ESE equipo, hace falta saber con cuál se hizo cada
+-- recorrido. NULL = recorrido de antes de este cambio, o sin equipo
+-- elegido -- no afecta el emparejamiento (ver arriba).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'avance_huerta' AND column_name = 'codigo_unidad'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE avance_huerta ADD COLUMN codigo_unidad VARCHAR(50) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

@@ -348,17 +348,14 @@
   .status.show{ display:block; }
 
   /* --- Avance de huerta --- */
-  .avance-mapa-wrap{
-    position:relative;
+  #avance-mapa-google{
     width:100%;
+    height: 340px;
     border: 1.5px solid var(--line);
     border-radius: 6px;
     overflow:hidden;
     background: var(--panel);
-    touch-action: none; /* evita que el navegador haga scroll/zoom al tocar el mapa para calibrar */
   }
-  .avance-mapa-wrap img{ width:100%; display:block; }
-  .avance-mapa-wrap canvas{ position:absolute; top:0; left:0; width:100%; height:100%; }
   .avance-aviso{
     font-size: 13px;
     color: var(--text-dim);
@@ -865,26 +862,8 @@
 
       <div id="avance-sin-huerta" class="avance-aviso">Selecciona una huerta para ver su mapa de avance.</div>
 
-      <div id="avance-cargando" class="avance-aviso" style="display:none;">Cargando mapa...</div>
-
-      <div id="avance-sin-mapa" class="avance-aviso" style="display:none;">
-        Esta huerta todavía no tiene un mapa subido. Pide que lo suban desde el Panel (Catálogo → Huertas).
-      </div>
-
       <div id="avance-con-mapa" style="display:none;">
-        <div class="avance-mapa-wrap" id="avance-mapa-wrap">
-          <img id="avance-mapa-img" src="" alt="Mapa de la huerta">
-          <canvas id="avance-mapa-canvas"></canvas>
-        </div>
-
-        <div id="avance-panel-calibracion" style="display:none;">
-          <div class="avance-paso">Este mapa todavía no está calibrado. Para calibrarlo, camina a 2 puntos bien separados y reconocibles de la huerta (por ejemplo dos esquinas), y en cada uno toca ese punto en la imagen de arriba y aprieta "Capturar ubicación aquí".</div>
-          <div class="avance-paso" id="avance-calib-estado">Punto A: toca su lugar en la imagen.</div>
-          <button type="button" class="avance-btn-secundario" id="avance-btn-capturar-a" disabled>Capturar mi ubicación en el Punto A</button>
-          <button type="button" class="avance-btn-secundario" id="avance-btn-capturar-b" disabled>Capturar mi ubicación en el Punto B</button>
-          <button type="button" class="submit-btn" id="avance-btn-guardar-calib" disabled style="margin-top:10px;">Guardar calibración</button>
-          <div class="status" id="avance-calib-status"></div>
-        </div>
+        <div id="avance-mapa-google"></div>
 
         <div id="avance-panel-rastreo" style="display:none;">
           <div class="field">
@@ -909,7 +888,6 @@
           <button type="button" class="avance-btn-secundario" id="avance-btn-terminar" style="display:none;">Terminar avance</button>
           <div class="status" id="avance-rastreo-status"></div>
           <div class="avance-paso">Mientras registras tu avance, deja la pantalla encendida y esta página abierta -- si el celular se bloquea o cambias de app, el rastreo se pausa.</div>
-          <div class="avance-paso" id="avance-link-calibrar-wrap" style="display:none;">¿La calibración quedó mal? <span id="avance-link-recalibrar" style="color:var(--steel); text-decoration:underline; cursor:pointer;">Volver a calibrar el mapa</span>.</div>
         </div>
       </div>
     </div>
@@ -2673,42 +2651,36 @@ document.getElementById('btn-submit').onclick = () => {
 // en db/schema.sql (junto a "avance_huerta") para el flujo completo.
 // ============================================================
 
-// Dado 1 par de puntos de calibración (cal1/cal2: {x, y, lat, lng}, con
-// x/y como fracción del ANCHO de la imagen para los 2 ejes) y una
-// coordenada GPS nueva, regresa en qué {x, y} de la imagen debería
-// pintarse -- usando una transformación de similitud (escala + rotación)
-// calculada a partir de la única pareja de puntos conocida. Aproxima
-// grados de latitud/longitud a metros en un plano local (suficientemente
-// preciso para el tamaño de una huerta). Regresa null si cal1 y cal2
-// quedaron prácticamente en el mismo lugar (no se puede calcular nada).
-// Esta misma función (probada aparte con casos conocidos antes de
-// pegarla aquí) se repite igual en Panel.html, para que el Panel pinte el
-// mismo mapa con el mismo criterio.
-function gpsAPosicionEnMapa_(cal1, cal2, lat, lng){
-  var metrosPorGradoLat = 111320;
-  var metrosPorGradoLng = 111320 * Math.cos(cal1.lat * Math.PI / 180);
-  function aMetros(p){ return { e: (p.lng - cal1.lng) * metrosPorGradoLng, n: (p.lat - cal1.lat) * metrosPorGradoLat }; }
-  var m2 = aMetros(cal2);
-  var denom = m2.e * m2.e + m2.n * m2.n;
-  if(denom < 1e-9) return null;
-  var px2 = cal2.x - cal1.x;
-  var py2 = cal2.y - cal1.y;
-  var kRe = (px2 * m2.e - py2 * m2.n) / denom;
-  var kIm = (py2 * m2.e + px2 * m2.n) / denom;
-  var mP = aMetros({ lat: lat, lng: lng });
-  var px = kRe * mP.e + kIm * mP.n;
-  var py = kIm * mP.e - kRe * mP.n;
-  return { x: cal1.x + px, y: cal1.y + py };
-}
+// Mapa de Avance Huerta: Google Maps real (satelital), en vez del sistema
+// viejo de "sube una foto + calibra 2 puntos a mano" -- los cuadros ya son
+// polígonos de GPS real (huerta_cuadros.poligono) y los puntos del
+// recorrido también son GPS real (avance_huerta_puntos), así que ya no
+// hace falta ninguna traducción foto↔pixel ni calibrar nada. Mismo patrón
+// (clave, carga perezosa del script una sola vez) que
+// ahCargarGoogleMapsSiHaceFalta_ en Panel.html.
+var GOOGLE_MAPS_API_KEY = 'AIzaSyCBnjqkULP4ZzGnqGjJU5vs2gr5xFvyG38';
 
-function avanceEscalaFraccionPorMetro_(cal1, cal2){
-  var metrosPorGradoLat = 111320;
-  var metrosPorGradoLng = 111320 * Math.cos(cal1.lat * Math.PI / 180);
-  var e = (cal2.lng - cal1.lng) * metrosPorGradoLng;
-  var n = (cal2.lat - cal1.lat) * metrosPorGradoLat;
-  var distMetros = Math.sqrt(e*e + n*n);
-  var distFraccion = Math.hypot(cal2.x - cal1.x, cal2.y - cal1.y);
-  return distMetros > 0 ? (distFraccion / distMetros) : 0;
+function avanceCargarGoogleMapsSiHaceFalta_(callback){
+  if(window.google && window.google.maps && window.google.maps.Map){
+    callback();
+    return;
+  }
+  if(window.avanceGoogleMapsCargando_){
+    window.avanceGoogleMapsCallbacksPendientes_.push(callback);
+    return;
+  }
+  window.avanceGoogleMapsCargando_ = true;
+  window.avanceGoogleMapsCallbacksPendientes_ = [callback];
+  window.avanceGoogleMapsListo_ = function(){
+    var pendientes = window.avanceGoogleMapsCallbacksPendientes_ || [];
+    window.avanceGoogleMapsCargando_ = false;
+    window.avanceGoogleMapsCallbacksPendientes_ = [];
+    pendientes.forEach(function(fn){ fn(); });
+  };
+  var script = document.createElement('script');
+  script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_MAPS_API_KEY + '&callback=avanceGoogleMapsListo_';
+  script.async = true;
+  document.head.appendChild(script);
 }
 
 function avanceDistanciaMetros_(p1, p2){
@@ -2719,10 +2691,8 @@ function avanceDistanciaMetros_(p1, p2){
   return Math.sqrt(e*e + n*n);
 }
 
-var AVANCE_RADIO_PINTADO_METROS = 1; // "ancho de pincel" al pintar -- ajustable aquí (petición de Carlos: línea delgada/detallada en vez del trazo grueso de antes)
 var AVANCE_DISTANCIA_MINIMA_METROS = 3; // no se guarda un punto nuevo si no se alejó al menos esto del último guardado
 
-var AVANCE_MAPA_INFO = null; // {mapaUrl, calibrado, cal1, cal2} de getMapaHuerta
 var AVANCE_HUERTA_ACTUAL = '';
 var AVANCE_HISTORICO = []; // de getAvanceHuerta: [{avanceId, nombre, trabajo, porcentaje, puntos:[{lat,lng}]}]
 var AVANCE_SESION_ID = null;
@@ -2730,7 +2700,28 @@ var AVANCE_WATCH_ID = null;
 var AVANCE_WAKE_LOCK = null; // ver avanceSolicitarWakeLock_ -- mantiene la pantalla encendida mientras se registra avance
 var AVANCE_ULTIMO_PUNTO = null;
 var AVANCE_PUNTOS_SESION = [];
-var AVANCE_CAL_PENDIENTE = { a: null, b: null }; // cada uno: null | {x,y} | {x,y,lat,lng}
+
+// Instancia del mapa de Google (una sola vez, se reutiliza) + lo que se
+// dibuja encima: los cuadros (polígonos de referencia), un trazo por cada
+// sesión ya terminada del histórico, y el trazo de la sesión EN CURSO
+// (que se va extendiendo punto por punto mientras se registra avance).
+var AVANCE_GOOGLE_MAP = null;
+var AVANCE_POLIGONOS_CUADROS = [];
+var AVANCE_POLYLINES_HISTORICO = [];
+var AVANCE_POLYLINE_ACTUAL = null;
+
+// Flechas de dirección a lo largo de la línea -- icono nativo de Google
+// Maps repetido cada tantos pixeles, en vez de dibujarlas a mano (eso solo
+// hacía falta con el canvas viejo). color: '#4c8dae' para el histórico
+// (tono azulado, como antes) y '#e8871e' para el trazo en curso (mismo
+// ámbar de siempre).
+function avanceIconosFlecha_(color){
+  return [{
+    icon: { path: 'M 0,-3 3,3 -3,3 Z', scale: 1.6, strokeColor: color, fillColor: color, fillOpacity: 1 },
+    offset: '0',
+    repeat: '70px',
+  }];
+}
 
 // ¿Esta página está corriendo dentro de la app nativa de Android (la que
 // se instala como .apk), o en un navegador normal? La app nativa trae un
@@ -2793,12 +2784,9 @@ function avanceDetenerRastreoNativo_(){
 function avanceNuevoPuntoNativo_(lat, lng){
   var nuevo = { lat: lat, lng: lng };
   if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return;
-  var anterior = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
   AVANCE_PUNTOS_SESION.push(nuevo);
   AVANCE_ULTIMO_PUNTO = nuevo;
-  if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
-    avanceDibujarSegmento_(AVANCE_MAPA_INFO.cal1, AVANCE_MAPA_INFO.cal2, anterior, nuevo, 'rgba(232,135,30,0.6)');
-  }
+  avanceActualizarPolylineActual_();
   var chip = document.getElementById('avance-chip-estado');
   if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
 }
@@ -2835,86 +2823,6 @@ function poblarSelectHuertaAvance(){
   }
 }
 
-function avanceFraccionAPixelCanvas_(xFrac, yFrac){
-  var canvas = document.getElementById('avance-mapa-canvas');
-  return { x: xFrac * canvas.width, y: yFrac * canvas.width }; // SIEMPRE * canvas.width en los 2 ejes (ver comentario de x/y en schema.sql)
-}
-
-function avanceAjustarCanvas_(){
-  var img = document.getElementById('avance-mapa-img');
-  var canvas = document.getElementById('avance-mapa-canvas');
-  canvas.width = img.clientWidth;
-  canvas.height = img.clientHeight;
-}
-
-function avanceDibujarMarcaCalibracion_(etiqueta, xFrac, yFrac){
-  var canvas = document.getElementById('avance-mapa-canvas');
-  var ctx = canvas.getContext('2d');
-  var p = avanceFraccionAPixelCanvas_(xFrac, yFrac);
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 10, 0, 2*Math.PI);
-  ctx.fillStyle = 'rgba(232,135,30,0.9)';
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = '#1C1E1F';
-  ctx.stroke();
-  ctx.fillStyle = '#1C1E1F';
-  ctx.font = 'bold 11px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(etiqueta, p.x, p.y + 4);
-}
-
-// Flecha pequeña a la mitad de cada tramo, apuntando hacia donde se movió
-// -- misma idea que en el Panel (ahDibujarFlechaDireccion_), para que el
-// operador también vea el sentido de su propio recorrido en el celular.
-function avanceDibujarFlechaDireccion_(ctx, x1, y1, x2, y2, color, radioPixeles){
-  var dx = x2 - x1, dy = y2 - y1;
-  var dist = Math.hypot(dx, dy);
-  if(dist < 6) return; // tramo muy corto -- no cabe una flecha legible
-  var ang = Math.atan2(dy, dx);
-  var mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-  var tam = Math.max(5, radioPixeles * 1.8);
-  ctx.save();
-  ctx.translate(mx, my);
-  ctx.rotate(ang);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(tam, 0);
-  ctx.lineTo(-tam * 0.6, tam * 0.55);
-  ctx.lineTo(-tam * 0.6, -tam * 0.55);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-function avanceDibujarSegmento_(cal1, cal2, puntoAnterior, puntoNuevo, color){
-  var canvas = document.getElementById('avance-mapa-canvas');
-  var ctx = canvas.getContext('2d');
-  var posNueva = gpsAPosicionEnMapa_(cal1, cal2, puntoNuevo.lat, puntoNuevo.lng);
-  if(!posNueva) return;
-  var escala = avanceEscalaFraccionPorMetro_(cal1, cal2);
-  var radioPixeles = Math.max(2, AVANCE_RADIO_PINTADO_METROS * escala * canvas.width);
-  var pNueva = avanceFraccionAPixelCanvas_(posNueva.x, posNueva.y);
-  ctx.fillStyle = color;
-  ctx.strokeStyle = color;
-  if(puntoAnterior){
-    var posAnterior = gpsAPosicionEnMapa_(cal1, cal2, puntoAnterior.lat, puntoAnterior.lng);
-    if(posAnterior){
-      var pAnterior = avanceFraccionAPixelCanvas_(posAnterior.x, posAnterior.y);
-      ctx.lineWidth = radioPixeles * 2;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(pAnterior.x, pAnterior.y);
-      ctx.lineTo(pNueva.x, pNueva.y);
-      ctx.stroke();
-      avanceDibujarFlechaDireccion_(ctx, pAnterior.x, pAnterior.y, pNueva.x, pNueva.y, color, radioPixeles);
-    }
-  }
-  ctx.beginPath();
-  ctx.arc(pNueva.x, pNueva.y, radioPixeles, 0, 2*Math.PI);
-  ctx.fill();
-}
-
 // 'completado' si TODAS sus actividades ya están completadas (y tiene al
 // menos una), 'pendiente' si tiene alguna sin completar, 'ninguna' si el
 // cuadro todavía no tiene ninguna actividad asignada. Igual que
@@ -2933,160 +2841,102 @@ var AVANCE_COLORES_CUADRO = {
   ninguna: { stroke: '#8a8f94', fill: 'rgba(138,143,148,0.20)' },
 };
 
-// El contorno de cada cuadro -- dibujado por Carlos en Google Maps desde
-// el Panel y guardado en GPS real (c.poligono) -- proyectado sobre esta
-// misma foto con la calibración de la huerta. Así el operador ve en su
-// celular los mismos cuadros, con el mismo color según su avance, que
-// Carlos ve en su Panel.
-function avanceDibujarCuadros_(cal1, cal2){
-  var canvas = document.getElementById('avance-mapa-canvas');
-  var ctx = canvas.getContext('2d');
-  (AVANCE_CUADROS || []).forEach(function(c){
-    var poligono = c.poligono || [];
-    if(poligono.length < 3) return;
-    var puntos = poligono.map(function(v){
-      var pos = gpsAPosicionEnMapa_(cal1, cal2, v.lat, v.lng);
-      return pos ? avanceFraccionAPixelCanvas_(pos.x, pos.y) : null;
-    }).filter(Boolean);
-    if(puntos.length < 3) return;
-    var colores = AVANCE_COLORES_CUADRO[avanceEstadoCuadro_(c.id)];
-    ctx.beginPath();
-    ctx.moveTo(puntos[0].x, puntos[0].y);
-    for(var i = 1; i < puntos.length; i++){ ctx.lineTo(puntos[i].x, puntos[i].y); }
-    ctx.closePath();
-    ctx.fillStyle = colores.fill;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = colores.stroke;
-    ctx.stroke();
+// Inicializa el mapa de Google (satelital) sobre el contenedor
+// 'avance-mapa-google', una sola vez por carga de página -- instancia
+// propia, independiente de cualquier otro mapa que exista en esta misma
+// pantalla (mismo criterio que AH_GOOGLE_MAP / AH_GOOGLE_MAP_SELECCION en
+// el Panel, para que los oyentes de clic de un mapa no se mezclen con los
+// de otro).
+function avanceInicializarMapaSiHaceFalta_(){
+  if(AVANCE_GOOGLE_MAP) return;
+  var centro = { lat: 19.4326, lng: -99.1332 };
+  AVANCE_GOOGLE_MAP = new google.maps.Map(document.getElementById('avance-mapa-google'), {
+    center: centro,
+    zoom: 17,
+    mapTypeId: 'satellite',
+    streetViewControl: false,
+    fullscreenControl: false,
+    mapTypeControl: false,
   });
 }
 
-function avanceDibujarTodoDeNuevo(){
-  var canvas = document.getElementById('avance-mapa-canvas');
-  var ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
-    var cal1 = AVANCE_MAPA_INFO.cal1, cal2 = AVANCE_MAPA_INFO.cal2;
-    avanceDibujarCuadros_(cal1, cal2);
-    AVANCE_HISTORICO.forEach(function(sesion){
-      var anterior = null;
-      (sesion.puntos || []).forEach(function(p){
-        avanceDibujarSegmento_(cal1, cal2, anterior, p, 'rgba(76,141,174,0.45)');
-        anterior = p;
-      });
+// El contorno de cada cuadro -- dibujado por Carlos en Google Maps desde
+// el Panel y guardado en GPS real (c.poligono) -- sobre este mismo mapa,
+// con el mismo color según su avance que Carlos ve en su Panel. Se vuelve
+// a llamar cada vez que cambian los cuadros/actividades de la huerta.
+function avanceDibujarCuadrosGoogle_(){
+  AVANCE_POLIGONOS_CUADROS.forEach(function(p){ p.setMap(null); });
+  AVANCE_POLIGONOS_CUADROS = [];
+  var primerPunto = null;
+  (AVANCE_CUADROS || []).forEach(function(c){
+    var poligono = c.poligono || [];
+    if(poligono.length < 3) return;
+    if(!primerPunto) primerPunto = poligono[0];
+    var colores = AVANCE_COLORES_CUADRO[avanceEstadoCuadro_(c.id)];
+    var pol = new google.maps.Polygon({
+      paths: poligono,
+      strokeColor: colores.stroke,
+      strokeWeight: 2,
+      fillColor: colores.stroke,
+      fillOpacity: 0.22,
+      map: AVANCE_GOOGLE_MAP,
+      clickable: false,
     });
-    var anteriorActual = null;
-    AVANCE_PUNTOS_SESION.forEach(function(p){
-      avanceDibujarSegmento_(cal1, cal2, anteriorActual, p, 'rgba(232,135,30,0.6)');
-      anteriorActual = p;
+    AVANCE_POLIGONOS_CUADROS.push(pol);
+  });
+  if(primerPunto){
+    AVANCE_GOOGLE_MAP.setCenter({ lat: primerPunto.lat, lng: primerPunto.lng });
+  }
+}
+
+// Un Polyline por cada sesión de avance ya cerrada (histórico), con
+// flechitas nativas de Google Maps que marcan el sentido del recorrido
+// (icons + repeat, en vez de dibujar flechas a mano en un canvas).
+function avanceDibujarHistoricoGoogle_(){
+  AVANCE_POLYLINES_HISTORICO.forEach(function(pl){ pl.setMap(null); });
+  AVANCE_POLYLINES_HISTORICO = [];
+  (AVANCE_HISTORICO || []).forEach(function(sesion){
+    var puntos = sesion.puntos || [];
+    if(puntos.length < 2) return;
+    var pl = new google.maps.Polyline({
+      path: puntos.map(function(p){ return { lat: p.lat, lng: p.lng }; }),
+      strokeColor: '#4c8dae',
+      strokeOpacity: 0.65,
+      strokeWeight: 3,
+      icons: avanceIconosFlecha_('#4c8dae'),
+      map: AVANCE_GOOGLE_MAP,
+      clickable: false,
+    });
+    AVANCE_POLYLINES_HISTORICO.push(pl);
+  });
+}
+
+// La sesión que el operador está registrando ahora mismo -- un solo
+// Polyline que se va extendiendo con cada punto nuevo de GPS (se llama
+// desde avanceNuevaPosicion_ / avanceNuevoPuntoNativo_, tanto si el celular
+// está desbloqueado y viendo el mapa como si viene del rastreo nativo en
+// segundo plano).
+function avanceActualizarPolylineActual_(){
+  if(!AVANCE_GOOGLE_MAP) return; // mapa aún no listo (p.ej. llegó un punto nativo antes de que cargara Google Maps) -- se perderá ese punto en pantalla, pero ya quedó guardado en AVANCE_PUNTOS_SESION y en el servidor
+  if(!AVANCE_POLYLINE_ACTUAL){
+    AVANCE_POLYLINE_ACTUAL = new google.maps.Polyline({
+      path: [],
+      strokeColor: '#E8871E',
+      strokeOpacity: 0.85,
+      strokeWeight: 4,
+      icons: avanceIconosFlecha_('#E8871E'),
+      map: AVANCE_GOOGLE_MAP,
+      clickable: false,
     });
   }
-  if(AVANCE_CAL_PENDIENTE.a) avanceDibujarMarcaCalibracion_('A', AVANCE_CAL_PENDIENTE.a.x, AVANCE_CAL_PENDIENTE.a.y);
-  if(AVANCE_CAL_PENDIENTE.b) avanceDibujarMarcaCalibracion_('B', AVANCE_CAL_PENDIENTE.b.x, AVANCE_CAL_PENDIENTE.b.y);
+  AVANCE_POLYLINE_ACTUAL.setPath(AVANCE_PUNTOS_SESION.map(function(p){ return { lat: p.lat, lng: p.lng }; }));
 }
-
-function avanceCalibObjetivoActual_(){
-  if(!AVANCE_CAL_PENDIENTE.a || AVANCE_CAL_PENDIENTE.a.lat === undefined) return 'a';
-  if(!AVANCE_CAL_PENDIENTE.b || AVANCE_CAL_PENDIENTE.b.lat === undefined) return 'b';
-  return null;
-}
-
-function avanceActualizarUiCalibracion_(){
-  var estado = document.getElementById('avance-calib-estado');
-  var btnA = document.getElementById('avance-btn-capturar-a');
-  var btnB = document.getElementById('avance-btn-capturar-b');
-  var btnGuardar = document.getElementById('avance-btn-guardar-calib');
-  var objetivo = avanceCalibObjetivoActual_();
-  btnA.disabled = !(AVANCE_CAL_PENDIENTE.a && AVANCE_CAL_PENDIENTE.a.lat === undefined);
-  btnB.disabled = !(AVANCE_CAL_PENDIENTE.b && AVANCE_CAL_PENDIENTE.b.lat === undefined);
-  btnGuardar.disabled = objetivo !== null;
-  if(objetivo === 'a'){
-    estado.textContent = AVANCE_CAL_PENDIENTE.a ? 'Punto A: estando parado ahí, toca "Capturar ubicación".' : 'Punto A: toca su lugar en la imagen de arriba.';
-  } else if(objetivo === 'b'){
-    estado.textContent = AVANCE_CAL_PENDIENTE.b ? 'Punto B: estando parado ahí, toca "Capturar ubicación".' : 'Punto A listo. Ahora toca el lugar del Punto B en la imagen.';
-  } else {
-    estado.textContent = 'Los 2 puntos están listos. Toca "Guardar calibración".';
-  }
-}
-
-document.getElementById('avance-mapa-wrap').addEventListener('click', function(ev){
-  if(document.getElementById('avance-panel-calibracion').style.display === 'none') return;
-  var objetivo = avanceCalibObjetivoActual_();
-  if(!objetivo) return;
-  if(AVANCE_CAL_PENDIENTE[objetivo]) return; // ya se tocó ese punto -- hay que capturar su ubicación antes de poder tocar el siguiente
-  var rect = this.getBoundingClientRect();
-  var xFrac = (ev.clientX - rect.left) / rect.width;
-  var yFrac = (ev.clientY - rect.top) / rect.width;
-  AVANCE_CAL_PENDIENTE[objetivo] = { x: xFrac, y: yFrac };
-  avanceDibujarTodoDeNuevo();
-  avanceActualizarUiCalibracion_();
-});
-
-function avanceCapturarUbicacionCalibracion_(cual){
-  var statusEl = document.getElementById('avance-calib-status');
-  if(!navigator.geolocation){
-    statusEl.textContent = 'Este celular/navegador no tiene GPS disponible.'; statusEl.className = 'status show err';
-    return;
-  }
-  statusEl.textContent = 'Obteniendo tu ubicación...'; statusEl.className = 'status show';
-  navigator.geolocation.getCurrentPosition(function(pos){
-    AVANCE_CAL_PENDIENTE[cual].lat = pos.coords.latitude;
-    AVANCE_CAL_PENDIENTE[cual].lng = pos.coords.longitude;
-    statusEl.textContent = 'Ubicación capturada (precisión ~' + Math.round(pos.coords.accuracy) + 'm).';
-    statusEl.className = 'status show ok';
-    avanceActualizarUiCalibracion_();
-  }, function(err){
-    statusEl.textContent = 'No se pudo obtener tu ubicación: ' + ((err && err.message) || 'revisa que le hayas dado permiso de ubicación a esta página.');
-    statusEl.className = 'status show err';
-  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-}
-document.getElementById('avance-btn-capturar-a').addEventListener('click', function(){ avanceCapturarUbicacionCalibracion_('a'); });
-document.getElementById('avance-btn-capturar-b').addEventListener('click', function(){ avanceCapturarUbicacionCalibracion_('b'); });
-
-document.getElementById('avance-btn-guardar-calib').addEventListener('click', function(){
-  var btn = this;
-  var statusEl = document.getElementById('avance-calib-status');
-  var huerta = AVANCE_HUERTA_ACTUAL;
-  var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
-  btn.disabled = true;
-  google.script.run
-    .withSuccessHandler(function(result){
-      btn.disabled = false;
-      if(!result || !result.success){
-        statusEl.textContent = (result && result.error) || 'No se pudo guardar la calibración.';
-        statusEl.className = 'status show err';
-        return;
-      }
-      statusEl.textContent = 'Calibración guardada. Ya puedes registrar avance.';
-      statusEl.className = 'status show ok';
-      cargarAvanceHuerta(huerta);
-    })
-    .withFailureHandler(function(err){
-      btn.disabled = false;
-      statusEl.textContent = (err && err.message) || 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.';
-      statusEl.className = 'status show err';
-    })
-    .guardarCalibracionMapaHuerta(nombre, huerta, AVANCE_CAL_PENDIENTE.a, AVANCE_CAL_PENDIENTE.b);
-});
-
-document.getElementById('avance-link-recalibrar').addEventListener('click', function(){
-  avanceDetenerRastreoSiActivo_();
-  AVANCE_CAL_PENDIENTE = { a: null, b: null };
-  document.getElementById('avance-panel-rastreo').style.display = 'none';
-  document.getElementById('avance-link-calibrar-wrap').style.display = 'none';
-  document.getElementById('avance-panel-calibracion').style.display = '';
-  document.getElementById('avance-calib-status').textContent = '';
-  document.getElementById('avance-calib-status').className = 'status';
-  avanceDibujarTodoDeNuevo();
-  avanceActualizarUiCalibracion_();
-});
 
 function avanceCargarHistorico_(){
   google.script.run
     .withSuccessHandler(function(historico){
       AVANCE_HISTORICO = historico || [];
-      avanceDibujarTodoDeNuevo();
+      avanceDibujarHistoricoGoogle_();
     })
     .withFailureHandler(function(){ /* sin red: se queda sin pintar el histórico por ahora, no es grave */ })
     .getAvanceHuerta(AVANCE_HUERTA_ACTUAL);
@@ -3190,6 +3040,7 @@ function avanceReanudarSiHayAbierto_(){
       AVANCE_SESION_ID = abierto.avanceId;
       AVANCE_PUNTOS_SESION = abierto.puntos || [];
       AVANCE_ULTIMO_PUNTO = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
+      avanceActualizarPolylineActual_();
       document.getElementById('avance-btn-iniciar').style.display = 'none';
       document.getElementById('avance-btn-terminar').style.display = '';
       document.getElementById('avance-f-equipo').disabled = true;
@@ -3218,7 +3069,6 @@ function avanceReanudarSiHayAbierto_(){
       var statusEl = document.getElementById('avance-rastreo-status');
       statusEl.textContent = 'Retomamos tu avance que seguía en curso' + (abierto.fechaInicio ? (' (iniciado ' + new Date(abierto.fechaInicio).toLocaleString('es-MX') + ')') : '') + '.';
       statusEl.className = 'status show ok';
-      avanceDibujarTodoDeNuevo();
       if(avanceEsAppNativa_()){
         avanceIniciarRastreoNativo_(abierto.avanceId).catch(function(){
           AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
@@ -3240,71 +3090,49 @@ function avanceCargarCuadrosYActividades_(){
       google.script.run
         .withSuccessHandler(function(actividades){
           AVANCE_ACTIVIDADES = actividades || [];
-          avanceDibujarTodoDeNuevo();
+          avanceDibujarCuadrosGoogle_();
           avancePoblarSelectTrabajo_();
         })
-        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); avancePoblarSelectTrabajo_(); })
+        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avancePoblarSelectTrabajo_(); })
         .getActividadesHuerta(huerta);
     })
-    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarTodoDeNuevo(); avancePoblarSelectTrabajo_(); })
+    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avancePoblarSelectTrabajo_(); })
     .getCuadrosHuerta(huerta);
 }
 
+// Ya no depende de ningún mapa/foto subido ni de ninguna calibración -- el
+// mapa real de Google Maps y los cuadros/avances (todos en GPS real) están
+// disponibles para cualquier huerta de inmediato, así que el panel de
+// rastreo se muestra directo, sin ninguna pantalla intermedia de "este
+// mapa no está calibrado".
 function cargarAvanceHuerta(huerta){
   avanceDetenerRastreoSiActivo_();
   AVANCE_HUERTA_ACTUAL = huerta;
-  AVANCE_MAPA_INFO = null;
   AVANCE_HISTORICO = [];
   AVANCE_PUNTOS_SESION = [];
-  AVANCE_CAL_PENDIENTE = { a: null, b: null };
   AVANCE_CUADROS = [];
   AVANCE_ACTIVIDADES = [];
   document.getElementById('avance-sin-huerta').style.display = huerta ? 'none' : '';
-  document.getElementById('avance-cargando').style.display = 'none';
-  document.getElementById('avance-sin-mapa').style.display = 'none';
   document.getElementById('avance-con-mapa').style.display = 'none';
   if(!huerta) return;
-  document.getElementById('avance-cargando').style.display = '';
-  google.script.run
-    .withSuccessHandler(function(mapa){
-      document.getElementById('avance-cargando').style.display = 'none';
-      if(!mapa || !mapa.mapaUrl){
-        document.getElementById('avance-sin-mapa').style.display = '';
-        return;
-      }
-      AVANCE_MAPA_INFO = mapa;
-      document.getElementById('avance-con-mapa').style.display = '';
-      var img = document.getElementById('avance-mapa-img');
-      img.onload = function(){ avanceAjustarCanvas_(); avanceDibujarTodoDeNuevo(); };
-      img.src = mapa.mapaUrl;
-      if(mapa.calibrado){
-        document.getElementById('avance-panel-calibracion').style.display = 'none';
-        document.getElementById('avance-panel-rastreo').style.display = '';
-        document.getElementById('avance-link-calibrar-wrap').style.display = '';
-        // Mientras llegan las actividades de esta huerta, deja el select en
-        // un estado de "cargando" y el botón deshabilitado -- evita que
-        // parpadee como si no hubiera ninguna pendiente antes de tiempo.
-        document.getElementById('avance-f-trabajo').innerHTML = '<option value="" disabled selected>Cargando actividades...</option>';
-        document.getElementById('avance-f-trabajo-vacio').style.display = 'none';
-        document.getElementById('avance-btn-iniciar').disabled = true;
-        avancePoblarSelectEquipo_();
-        avanceCargarHistorico_();
-        avanceCargarCuadrosYActividades_();
-        avanceReanudarSiHayAbierto_();
-      } else {
-        document.getElementById('avance-panel-calibracion').style.display = '';
-        document.getElementById('avance-panel-rastreo').style.display = 'none';
-        document.getElementById('avance-calib-status').textContent = '';
-        document.getElementById('avance-calib-status').className = 'status';
-        avanceActualizarUiCalibracion_();
-      }
-    })
-    .withFailureHandler(function(){
-      document.getElementById('avance-cargando').style.display = 'none';
-      document.getElementById('avance-sin-mapa').style.display = '';
-      document.getElementById('avance-sin-mapa').textContent = 'No se pudo cargar el mapa. Revisa tu conexión.';
-    })
-    .getMapaHuerta(huerta);
+  document.getElementById('avance-con-mapa').style.display = '';
+  document.getElementById('avance-panel-rastreo').style.display = '';
+  // Mientras llegan las actividades de esta huerta, deja el select en un
+  // estado de "cargando" y el botón deshabilitado -- evita que parpadee
+  // como si no hubiera ninguna pendiente antes de tiempo.
+  document.getElementById('avance-f-trabajo').innerHTML = '<option value="" disabled selected>Cargando actividades...</option>';
+  document.getElementById('avance-f-trabajo-vacio').style.display = 'none';
+  document.getElementById('avance-btn-iniciar').disabled = true;
+  avanceCargarGoogleMapsSiHaceFalta_(function(){
+    avanceInicializarMapaSiHaceFalta_();
+    // Si el usuario ya cambió de huerta (o la quitó) mientras cargaba el
+    // script de Google Maps, no sigas pintando datos de la huerta vieja.
+    if(AVANCE_HUERTA_ACTUAL !== huerta) return;
+    avancePoblarSelectEquipo_();
+    avanceCargarHistorico_();
+    avanceCargarCuadrosYActividades_();
+    avanceReanudarSiHayAbierto_();
+  });
 }
 
 document.getElementById('avance-f-huerta').addEventListener('change', function(){
@@ -3388,7 +3216,11 @@ function avanceDetenerRastreoSiActivo_(){
     document.getElementById('avance-f-trabajo').disabled = false;
     document.getElementById('avance-f-porcentaje').disabled = false;
     document.getElementById('avance-f-porcentaje').value = '';
+    AVANCE_PUNTOS_SESION = [];
+    AVANCE_ULTIMO_PUNTO = null;
+    if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
     avanceCargarCuadrosYActividades_(); // refresca la lista -- el avance que acaba de terminar pudo haber completado solo alguna actividad por el GPS, y ya no debe seguir apareciendo para elegir
+    avanceCargarHistorico_(); // la sesión que acaba de cerrarse ya pasa a formar parte del histórico
     var chip = document.getElementById('avance-chip-estado');
     chip.textContent = 'Sin registrar avance ahora';
     chip.classList.remove('activo');
@@ -3398,12 +3230,9 @@ function avanceDetenerRastreoSiActivo_(){
 function avanceNuevaPosicion_(pos){
   var nuevo = { lat: pos.coords.latitude, lng: pos.coords.longitude };
   if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return;
-  var anterior = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
   AVANCE_PUNTOS_SESION.push(nuevo);
   AVANCE_ULTIMO_PUNTO = nuevo;
-  if(AVANCE_MAPA_INFO && AVANCE_MAPA_INFO.calibrado){
-    avanceDibujarSegmento_(AVANCE_MAPA_INFO.cal1, AVANCE_MAPA_INFO.cal2, anterior, nuevo, 'rgba(232,135,30,0.6)');
-  }
+  avanceActualizarPolylineActual_();
   var chip = document.getElementById('avance-chip-estado');
   if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
   if(AVANCE_SESION_ID){
@@ -3450,6 +3279,7 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
       AVANCE_SESION_ID = result.avanceId;
       AVANCE_ULTIMO_PUNTO = null;
       AVANCE_PUNTOS_SESION = [];
+      if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
       document.getElementById('avance-btn-iniciar').style.display = 'none';
       document.getElementById('avance-btn-terminar').style.display = '';
       document.getElementById('avance-f-equipo').disabled = true;
@@ -3486,12 +3316,10 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
 });
 
 document.getElementById('avance-btn-terminar').addEventListener('click', function(){
-  var idTerminar = AVANCE_SESION_ID;
-  avanceDetenerRastreoSiActivo_(); // ya deja el select de actividad en su placeholder y limpia el porcentaje
+  avanceDetenerRastreoSiActivo_(); // ya deja el select de actividad en su placeholder, limpia el porcentaje y recarga el histórico
   var statusEl = document.getElementById('avance-rastreo-status');
   statusEl.textContent = 'Avance terminado y guardado.';
   statusEl.className = 'status show ok';
-  if(idTerminar) avanceCargarHistorico_();
 });
 </script>
 </body>

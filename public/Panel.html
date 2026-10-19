@@ -6362,6 +6362,51 @@ function ahFiltrarPuntosFueraDeHuerta_(puntos){
   return puntos.filter(function(p){ return p.lat >= latMin && p.lat <= latMax && p.lng >= lngMin && p.lng <= lngMax; });
 }
 
+// El GPS del celular "tiembla" unos metros aunque el tractor vaya
+// perfectamente derecho por un surco -- si se dibuja cada punto tal cual
+// sale un zigzag feo (lo que Carlos comparó con la otra app de flotillas,
+// donde las líneas salen rectas). Se usa el algoritmo de Douglas-Peucker:
+// quita los puntos intermedios que no se alejan más de
+// AH_TOLERANCIA_SUAVIZADO_METROS de la línea recta entre sus vecinos -- el
+// resultado es una ruta más derecha, pero las vueltas reales (cabeceras,
+// cambios de surco) se siguen respetando porque esas sí se alejan lo
+// suficiente de la línea recta como para no recortarse. Mismo criterio que
+// avanceSuavizarTrazo_ en Index.html.
+var AH_TOLERANCIA_SUAVIZADO_METROS = 5;
+function ahDistanciaPerpendicularMetros_(p, a, b){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(a.lat * Math.PI / 180);
+  var bx = (b.lng - a.lng) * metrosPorGradoLng, by = (b.lat - a.lat) * metrosPorGradoLat;
+  var px = (p.lng - a.lng) * metrosPorGradoLng, py = (p.lat - a.lat) * metrosPorGradoLat;
+  var largoCuadrado = bx * bx + by * by;
+  if(largoCuadrado === 0) return Math.sqrt(px * px + py * py); // a y b son el mismo punto
+  var t = (px * bx + py * by) / largoCuadrado;
+  t = Math.max(0, Math.min(1, t));
+  var ex = t * bx, ey = t * by;
+  var dx = px - ex, dy = py - ey;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function ahSuavizarTrazo_(puntos, toleranciaMetros){
+  if(!puntos || puntos.length < 3) return puntos || [];
+  var tol = (toleranciaMetros == null) ? AH_TOLERANCIA_SUAVIZADO_METROS : toleranciaMetros;
+  var mantener = new Array(puntos.length);
+  (function simplificar(inicio, fin){
+    var distanciaMax = 0, indiceMax = -1;
+    for(var i = inicio + 1; i < fin; i++){
+      var d = ahDistanciaPerpendicularMetros_(puntos[i], puntos[inicio], puntos[fin]);
+      if(d > distanciaMax){ distanciaMax = d; indiceMax = i; }
+    }
+    if(distanciaMax > tol && indiceMax !== -1){
+      simplificar(inicio, indiceMax);
+      simplificar(indiceMax, fin);
+    } else {
+      mantener[inicio] = true;
+      mantener[fin] = true;
+    }
+  })(0, puntos.length - 1);
+  return puntos.filter(function(p, i){ return mantener[i]; });
+}
+
 // Un Polyline por cada sesión de avance de AH_HISTORICO_CACHE, con flechas
 // de dirección nativas de Google Maps (reemplaza el dibujo a mano de
 // antes, ahDibujarSegmento_/ahDibujarMarcaCalibracion_ sobre un canvas).
@@ -6371,7 +6416,7 @@ function ahDibujarHistoricoGoogleAvance_(){
   (AH_GOOGLE_MARCADORES_ACTUAL_AVANCE || []).forEach(function(m){ m.setMap(null); });
   AH_GOOGLE_MARCADORES_ACTUAL_AVANCE = [];
   var sesionesLimpias = (AH_HISTORICO_CACHE || []).map(function(s){
-    return { avanceId: s.avanceId, nombre: s.nombre, fechaFin: s.fechaFin, puntos: ahFiltrarPuntosFueraDeHuerta_(s.puntos || []) };
+    return { avanceId: s.avanceId, nombre: s.nombre, fechaFin: s.fechaFin, puntos: ahSuavizarTrazo_(ahFiltrarPuntosFueraDeHuerta_(s.puntos || [])) };
   });
   AH_GOOGLE_POLYLINES_HISTORICO_AVANCE = sesionesLimpias.filter(function(s){ return s.puntos.length >= 2; }).map(function(s){
     var pl = new google.maps.Polyline({
@@ -6548,10 +6593,10 @@ function ahDibujarRecorridoSeleccionado_(){
   (AH_RECORRIDO_SESIONES || []).forEach(function(s){
     if(!AH_RECORRIDO_SELECCIONADOS.has(s.avanceId)) return;
     idsVistos[s.avanceId] = true;
-    var puntosHastaAhora = ahFiltrarPuntosFueraDeHuerta_(s.puntos || []).filter(function(p){
+    var puntosHastaAhora = ahSuavizarTrazo_(ahFiltrarPuntosFueraDeHuerta_(s.puntos || []).filter(function(p){
       var t = new Date(p.capturadoEn).getTime();
       return !Number.isNaN(t) && t <= tiempoLimite;
-    }).map(function(p){ return { lat: p.lat, lng: p.lng }; });
+    })).map(function(p){ return { lat: p.lat, lng: p.lng }; });
     var pl = AH_GOOGLE_POLYLINES_RECORRIDO[s.avanceId];
     if(!pl){
       pl = new google.maps.Polyline({

@@ -2939,11 +2939,55 @@ function avanceFiltrarPuntosFueraDeHuerta_(puntos){
   return puntos.filter(function(p){ return p.lat >= latMin && p.lat <= latMax && p.lng >= lngMin && p.lng <= lngMax; });
 }
 
+// El GPS del celular "tiembla" unos metros aunque el tractor vaya
+// perfectamente derecho por un surco -- si se dibuja cada punto tal cual
+// sale un zigzag feo (lo que Carlos comparó con la otra app de flotillas,
+// donde las líneas salen rectas). Se usa el algoritmo de Douglas-Peucker:
+// quita los puntos intermedios que no se alejan más de
+// AVANCE_TOLERANCIA_SUAVIZADO_METROS de la línea recta entre sus vecinos --
+// el resultado es una ruta más derecha, pero las vueltas reales (cabeceras,
+// cambios de surco) se siguen respetando porque esas sí se alejan lo
+// suficiente de la línea recta como para no recortarse.
+var AVANCE_TOLERANCIA_SUAVIZADO_METROS = 5;
+function avanceDistanciaPerpendicularMetros_(p, a, b){
+  var metrosPorGradoLat = 111320;
+  var metrosPorGradoLng = 111320 * Math.cos(a.lat * Math.PI / 180);
+  var bx = (b.lng - a.lng) * metrosPorGradoLng, by = (b.lat - a.lat) * metrosPorGradoLat;
+  var px = (p.lng - a.lng) * metrosPorGradoLng, py = (p.lat - a.lat) * metrosPorGradoLat;
+  var largoCuadrado = bx * bx + by * by;
+  if(largoCuadrado === 0) return Math.sqrt(px * px + py * py); // a y b son el mismo punto
+  var t = (px * bx + py * by) / largoCuadrado;
+  t = Math.max(0, Math.min(1, t));
+  var ex = t * bx, ey = t * by;
+  var dx = px - ex, dy = py - ey;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function avanceSuavizarTrazo_(puntos, toleranciaMetros){
+  if(!puntos || puntos.length < 3) return puntos || [];
+  var tol = (toleranciaMetros == null) ? AVANCE_TOLERANCIA_SUAVIZADO_METROS : toleranciaMetros;
+  var mantener = new Array(puntos.length);
+  (function simplificar(inicio, fin){
+    var distanciaMax = 0, indiceMax = -1;
+    for(var i = inicio + 1; i < fin; i++){
+      var d = avanceDistanciaPerpendicularMetros_(puntos[i], puntos[inicio], puntos[fin]);
+      if(d > distanciaMax){ distanciaMax = d; indiceMax = i; }
+    }
+    if(distanciaMax > tol && indiceMax !== -1){
+      simplificar(inicio, indiceMax);
+      simplificar(indiceMax, fin);
+    } else {
+      mantener[inicio] = true;
+      mantener[fin] = true;
+    }
+  })(0, puntos.length - 1);
+  return puntos.filter(function(p, i){ return mantener[i]; });
+}
+
 function avanceDibujarHistoricoGoogle_(){
   AVANCE_POLYLINES_HISTORICO.forEach(function(pl){ pl.setMap(null); });
   AVANCE_POLYLINES_HISTORICO = [];
   (AVANCE_HISTORICO || []).forEach(function(sesion){
-    var puntos = avanceFiltrarPuntosFueraDeHuerta_(sesion.puntos || []);
+    var puntos = avanceSuavizarTrazo_(avanceFiltrarPuntosFueraDeHuerta_(sesion.puntos || []));
     if(puntos.length < 2) return;
     var pl = new google.maps.Polyline({
       path: puntos.map(function(p){ return { lat: p.lat, lng: p.lng }; }),
@@ -2977,7 +3021,7 @@ function avanceActualizarPolylineActual_(){
     });
   }
   var puntosLimpios = avanceFiltrarPuntosFueraDeHuerta_(AVANCE_PUNTOS_SESION);
-  AVANCE_POLYLINE_ACTUAL.setPath(puntosLimpios.map(function(p){ return { lat: p.lat, lng: p.lng }; }));
+  AVANCE_POLYLINE_ACTUAL.setPath(avanceSuavizarTrazo_(puntosLimpios).map(function(p){ return { lat: p.lat, lng: p.lng }; }));
   if(puntosLimpios.length > 0){
     var ultimo = puntosLimpios[puntosLimpios.length - 1];
     if(!AVANCE_MARCADOR_ACTUAL){

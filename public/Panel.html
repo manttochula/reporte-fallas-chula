@@ -2429,16 +2429,17 @@
             </select>
             <select id="maq-tipo-filter"><option value="">Todos los tipos</option></select>
             <select id="maq-marca-filter"><option value="">Todas las marcas</option></select>
+            <button type="button" class="export-btn" id="maq-export">Exportar a Excel</button>
           </div>
           <div class="maq-table-wrap">
             <table class="maq-table">
               <thead>
                 <tr>
-                  <th>Huerta</th>
-                  <th>Maquinaria</th>
-                  <th>Modelo / Serie</th>
-                  <th>Estatus</th>
-                  <th>Observaciones</th>
+                  <th data-sort="Huerta">Huerta <span class="arrow"></span></th>
+                  <th data-sort="Maquinaria">Maquinaria <span class="arrow"></span></th>
+                  <th data-sort="ModeloSerie">Modelo / Serie <span class="arrow"></span></th>
+                  <th data-sort="Estatus">Estatus <span class="arrow"></span></th>
+                  <th data-sort="Observaciones">Observaciones <span class="arrow"></span></th>
                 </tr>
               </thead>
               <tbody id="maq-table-body"><tr><td colspan="5"><div class="maq-loading">Cargando...</div></td></tr></tbody>
@@ -13355,6 +13356,23 @@ function dzdRefrescarTrasRenderDiesel_(){
 let ALL_MAQUINARIA = [];
 let ALL_RESUMEN_HUERTAS = [];
 let maqDeptActivo = '';
+// Orden de la tabla "Detalle de maquinaria por huerta" (petición de Carlos:
+// poder ordenar por huerta) -- un solo nivel, clic alterna asc/desc, igual
+// que renderDiesel()/dzSortKey. Usa "data-sort" (no "data-key") en los <th>
+// para no chocar con el listener global de thead th[data-key] que mueve el
+// sortLevels de la tabla de Órdenes.
+let maqSortKey = null;
+let maqSortDir = 1;
+function maqValorOrden_(r, key){
+  switch(key){
+    case 'Huerta': return (r.Huerta || '').toString().toUpperCase();
+    case 'Maquinaria': return (r.Unidad || r.CodigoUnidad || '').toString().toUpperCase();
+    case 'ModeloSerie': return [r.Modelo, r.Serie].filter(function(v){ return v; }).join(' / ').toUpperCase();
+    case 'Estatus': return (r.Estatus || '').toString().toUpperCase();
+    case 'Observaciones': return (r.ObservacionMostrada || '').toString().toUpperCase();
+    default: return '';
+  }
+}
 
 function cargarResumenHuertas(){
   const cardsEl = document.getElementById('maq-cards');
@@ -13642,6 +13660,19 @@ function getMaquinariaFiltrada(){
 function renderMaquinaria(){
   const tbody = document.getElementById('maq-table-body');
   const records = getMaquinariaFiltrada();
+  if(maqSortKey){
+    records.sort(function(a, b){
+      const va = maqValorOrden_(a, maqSortKey), vb = maqValorOrden_(b, maqSortKey);
+      if(va < vb) return -1 * maqSortDir;
+      if(va > vb) return 1 * maqSortDir;
+      return 0;
+    });
+  }
+  document.querySelectorAll('.maq-table thead th .arrow').forEach(function(a){ a.textContent = ''; });
+  if(maqSortKey){
+    const activeTh = document.querySelector('.maq-table thead th[data-sort="' + maqSortKey + '"] .arrow');
+    if(activeTh) activeTh.textContent = maqSortDir === 1 ? '▲' : '▼';
+  }
   if(records.length === 0){
     tbody.innerHTML = '<tr><td colspan="5"><div class="maq-empty">No hay maquinaria que coincida.</div></td></tr>';
     return;
@@ -13687,6 +13718,48 @@ document.getElementById('maq-huerta-filter').addEventListener('change', renderMa
 document.getElementById('maq-estatus-filter').addEventListener('change', renderMaquinaria);
 document.getElementById('maq-tipo-filter').addEventListener('change', renderMaquinaria);
 document.getElementById('maq-marca-filter').addEventListener('change', renderMaquinaria);
+document.querySelectorAll('.maq-table thead th[data-sort]').forEach(function(th){
+  th.addEventListener('click', function(){
+    const key = th.dataset.sort;
+    if(maqSortKey === key){ maqSortDir *= -1; } else { maqSortKey = key; maqSortDir = 1; }
+    renderMaquinaria();
+  });
+});
+
+// Exporta exactamente lo que se ve en la tabla "Detalle de maquinaria por
+// huerta" -- respeta los filtros (búsqueda/huerta/estatus/tipo/marca) y el
+// orden activo (incluido "ordenar por huerta", petición de Carlos) --
+// mismo patrón que maq-modelo-export (ver descargarComoExcel_ arriba).
+document.getElementById('maq-export').addEventListener('click', function(){
+  const records = getMaquinariaFiltrada();
+  if(maqSortKey){
+    records.sort(function(a, b){
+      const va = maqValorOrden_(a, maqSortKey), vb = maqValorOrden_(b, maqSortKey);
+      if(va < vb) return -1 * maqSortDir;
+      if(va > vb) return 1 * maqSortDir;
+      return 0;
+    });
+  }
+  if(records.length === 0){ alert('No hay maquinaria que coincida con los filtros actuales.'); return; }
+  const columnas = [
+    {header:'Huerta', key:'huerta', width:20},
+    {header:'Maquinaria', key:'maquinaria', width:26},
+    {header:'Modelo / Serie', key:'modeloSerie', width:22},
+    {header:'Estatus', key:'estatus', width:16},
+    {header:'Observaciones', key:'observaciones', width:34},
+  ];
+  const filas = records.map(function(r){
+    return {
+      huerta: r.Huerta || '—',
+      maquinaria: (r.Unidad || r.CodigoUnidad || '') + (r.TipoUnidad ? ' (' + r.TipoUnidad + ')' : ''),
+      modeloSerie: [r.Modelo, r.Serie].filter(function(v){ return v; }).join(' / ') || '—',
+      estatus: r.Estatus || '',
+      observaciones: r.ObservacionMostrada || '—',
+    };
+  });
+  descargarComoExcel_('Detalle de maquinaria por huerta', 'Generado el ' + new Date().toLocaleString('es-MX') + ' · ' + filas.length + ' equipos',
+    [{ titulo: 'Maquinaria (' + filas.length + ')', columnas: columnas, filas: filas }], 'maquinaria_por_huerta');
+});
 
 // --- Modal agregar/editar maquinaria ---
 const maqModalOverlay = document.getElementById('maq-modal-overlay');

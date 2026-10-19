@@ -6891,6 +6891,18 @@ function ahRenderCuadrosYActividades_(){
   ahRenderActividadesTabla_();
   ahDibujarCuadrosGoogleAvance_();
   ahDibujarPoligonosGoogleExistentes_();
+  // AH_CUADROS llega por su cuenta (esta cadena de 3 llamadas al servidor),
+  // por separado del histórico de avance (que se pide en paralelo desde
+  // cargarAvanceHuertaPanel_). Si el histórico se alcanza a dibujar ANTES
+  // de que lleguen los cuadros (lo más común, porque esta cadena es más
+  // lenta: son 3 idas y vueltas al servidor en vez de 1), se queda pintado
+  // con el filtro de geocerca desactivado (sin cuadros no hay con qué
+  // comparar) y ya no se vuelve a corregir solo. Por eso, en cuanto
+  // AH_CUADROS termina de cargar, hay que volver a dibujar el histórico
+  // acumulado para que el filtro/suavizado se aplique de verdad. Esta
+  // carrera de condición era la causa real de que Carlos siguiera viendo
+  // el recorrido "salirse" de la huerta incluso después del primer fix.
+  ahDibujarHistoricoGoogleAvance_();
 }
 
 function ahCargarCuadrosYActividades_(huerta){

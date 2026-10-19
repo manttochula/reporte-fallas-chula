@@ -3036,6 +3036,23 @@ function avanceActualizarPolylineActual_(){
   }
 }
 
+// AVANCE_CUADROS llega por su cuenta en otra llamada al servidor
+// (avanceCargarCuadrosYActividades_), por separado del histórico/trazo en
+// curso -- puede llegar antes o después, según qué tan rápido conteste el
+// servidor cada vez. Si el histórico se alcanza a dibujar ANTES de que
+// lleguen los cuadros, se queda pintado con el filtro de geocerca
+// desactivado (sin cuadros no hay con qué comparar -- avanceFiltrarPuntosFueraDeHuerta_
+// deja todo tal cual) y ya no se vuelve a corregir solo. Por eso, en cuanto
+// AVANCE_CUADROS termina de cargar (llegue como llegue: con cuadros reales
+// o vacío por un error), hay que volver a dibujar el histórico y el trazo
+// en curso para que si ya hay cuadros, el filtro/suavizado se aplique de
+// verdad. Esta carrera de condición era la causa real de que Carlos viera
+// el recorrido "salirse" de la huerta incluso después del primer fix.
+function avanceRedibujarTrazosConCuadros_(){
+  avanceDibujarHistoricoGoogle_();
+  avanceActualizarPolylineActual_();
+}
+
 function avanceCargarHistorico_(){
   google.script.run
     .withSuccessHandler(function(historico){
@@ -3195,12 +3212,13 @@ function avanceCargarCuadrosYActividades_(){
         .withSuccessHandler(function(actividades){
           AVANCE_ACTIVIDADES = actividades || [];
           avanceDibujarCuadrosGoogle_();
+          avanceRedibujarTrazosConCuadros_();
           avancePoblarSelectTrabajo_();
         })
-        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avancePoblarSelectTrabajo_(); })
+        .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avanceRedibujarTrazosConCuadros_(); avancePoblarSelectTrabajo_(); })
         .getActividadesHuerta(huerta);
     })
-    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avancePoblarSelectTrabajo_(); })
+    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avanceRedibujarTrazosConCuadros_(); avancePoblarSelectTrabajo_(); })
     .getCuadrosHuerta(huerta);
 }
 

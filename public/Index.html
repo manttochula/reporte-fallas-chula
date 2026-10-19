@@ -2861,6 +2861,29 @@ var AVANCE_COLORES_CUADRO = {
   ninguna: { stroke: '#8a8f94', fill: 'rgba(138,143,148,0.20)' },
 };
 
+// Petición de Carlos: en vez de elegir "CUADRO X — Actividad" uno por uno,
+// el operador elige solo el TIPO de actividad (p.ej. "Poda") en
+// avance-f-trabajo y de ahí puede recorrer de corrido TODOS los cuadros
+// que todavía la necesiten, sin reiniciar el avance en cada uno -- el
+// acreditado de metros por cuadro YA es automático según por dónde pasa el
+// GPS (marcarCuadrosCompletadosPorPunto_ en el servidor, no depende de qué
+// diga este texto), así que lo único nuevo aquí es resaltar en el mapa
+// cuáles cuadros siguen pendientes de esa actividad en especial, para que
+// sepa a cuáles ir.
+// AVANCE_COLOR_RESALTADO: azul fuerte, el cuadro SÍ necesita la actividad
+// elegida. AVANCE_COLOR_ATENUADO: gris apagado, el resto (ya se completó
+// ahí, o le toca otra actividad), mientras haya una actividad elegida.
+var AVANCE_COLOR_RESALTADO = '#1565c0';
+var AVANCE_COLOR_ATENUADO = '#c9ccd1';
+function avanceCuadrosPendientesParaTrabajo_(trabajo){
+  var pendientes = {};
+  if(!trabajo) return pendientes;
+  (AVANCE_ACTIVIDADES || []).forEach(function(a){
+    if(a.estado !== 'completado' && a.trabajo === trabajo) pendientes[a.cuadroId] = true;
+  });
+  return pendientes;
+}
+
 // Inicializa el mapa de Google (satelital) sobre el contenedor
 // 'avance-mapa-google', una sola vez por carga de página -- instancia
 // propia, independiente de cualquier otro mapa que exista en esta misma
@@ -2888,17 +2911,36 @@ function avanceDibujarCuadrosGoogle_(){
   AVANCE_POLIGONOS_CUADROS.forEach(function(p){ p.setMap(null); });
   AVANCE_POLIGONOS_CUADROS = [];
   var primerPunto = null;
+  var selTrabajoEl = document.getElementById('avance-f-trabajo');
+  var trabajoElegido = selTrabajoEl ? selTrabajoEl.value : '';
+  // Con una actividad elegida, el color dice OTRA cosa: ya no es el
+  // estatus general del cuadro (que puede tener varias actividades
+  // distintas), sino nada más si a ESE cuadro todavía le falta ESTA
+  // actividad en especial -- resaltado si sí, apagado si no (ya la
+  // terminó, o nunca la tuvo). Sin ninguna actividad elegida, se ve el
+  // color de estatus de siempre.
+  var pendientesDelTrabajo = trabajoElegido ? avanceCuadrosPendientesParaTrabajo_(trabajoElegido) : null;
   (AVANCE_CUADROS || []).forEach(function(c){
     var poligono = c.poligono || [];
     if(poligono.length < 3) return;
     if(!primerPunto) primerPunto = poligono[0];
-    var colores = AVANCE_COLORES_CUADRO[avanceEstadoCuadro_(c.id)];
+    var color, opacidad, grosor;
+    if(pendientesDelTrabajo){
+      var esElResaltado = !!pendientesDelTrabajo[c.id];
+      color = esElResaltado ? AVANCE_COLOR_RESALTADO : AVANCE_COLOR_ATENUADO;
+      opacidad = esElResaltado ? 0.4 : 0.12;
+      grosor = esElResaltado ? 3 : 1.5;
+    } else {
+      color = AVANCE_COLORES_CUADRO[avanceEstadoCuadro_(c.id)].stroke;
+      opacidad = 0.22;
+      grosor = 2;
+    }
     var pol = new google.maps.Polygon({
       paths: poligono,
-      strokeColor: colores.stroke,
-      strokeWeight: 2,
-      fillColor: colores.stroke,
-      fillOpacity: 0.22,
+      strokeColor: color,
+      strokeWeight: grosor,
+      fillColor: color,
+      fillOpacity: opacidad,
       map: AVANCE_GOOGLE_MAP,
       clickable: false,
     });
@@ -3073,11 +3115,28 @@ function avanceCargarHistorico_(){
 // siguen PENDIENTES (una vez completada, ya no tiene caso elegirla de
 // nuevo); si la huerta todavía no tiene ninguna pendiente, se oculta el
 // select y se avisa que hace falta que Carlos las cargue primero.
+// Petición de Carlos: elegir el TIPO de actividad (p.ej. "Poda"), no un
+// cuadro específico uno por uno -- aquí se arma la lista de qué tipos de
+// actividad siguen teniendo AL MENOS UN cuadro pendiente en esta huerta, y
+// cuántos. El texto que queda seleccionado (p.ej. "Poda") es justo lo que
+// se guarda en avance_huerta.trabajo al iniciar -- el acreditado de avance
+// por cuadro no depende de este texto en absoluto (ver
+// avanceCuadrosPendientesParaTrabajo_/marcarCuadrosCompletadosPorPunto_),
+// así que cambiar el formato aquí no afecta ese acreditado.
 function avancePoblarSelectTrabajo_(){
   var sel = document.getElementById('avance-f-trabajo');
   var vacio = document.getElementById('avance-f-trabajo-vacio');
   var btnIniciar = document.getElementById('avance-btn-iniciar');
-  var pendientes = (AVANCE_ACTIVIDADES || []).filter(function(a){ return a.estado !== 'completado'; });
+  var conteoPorTrabajo = {};
+  var ordenTrabajo = [];
+  (AVANCE_ACTIVIDADES || []).forEach(function(a){
+    if(a.estado === 'completado') return;
+    if(!Object.prototype.hasOwnProperty.call(conteoPorTrabajo, a.trabajo)){
+      conteoPorTrabajo[a.trabajo] = 0;
+      ordenTrabajo.push(a.trabajo);
+    }
+    conteoPorTrabajo[a.trabajo]++;
+  });
   var valorAnterior = sel.value;
   sel.innerHTML = '';
   var placeholder = document.createElement('option');
@@ -3086,27 +3145,30 @@ function avancePoblarSelectTrabajo_(){
   placeholder.selected = true;
   placeholder.textContent = 'Selecciona una actividad';
   sel.appendChild(placeholder);
-  pendientes.forEach(function(a){
+  ordenTrabajo.forEach(function(trabajo){
     var opt = document.createElement('option');
-    var etiqueta = (a.cuadroNombre || '') + ' — ' + (a.trabajo || '');
-    opt.value = etiqueta; // guarda SIEMPRE el texto limpio (sin %) -- es lo que queda escrito en el histórico de avance_huerta.trabajo
-    // Si Carlos ya capturó cuántos surcos tiene el cuadro, se le muestra el
-    // % que ya lleva esa actividad -- sin que eso cambie lo que se guarda.
-    opt.textContent = (a.surcos !== null && a.surcos !== undefined) ? (etiqueta + ' (' + a.porcentaje + '%)') : etiqueta;
+    opt.value = trabajo;
+    var n = conteoPorTrabajo[trabajo];
+    opt.textContent = trabajo + ' (' + n + ' cuadro' + (n === 1 ? '' : 's') + ' pendiente' + (n === 1 ? '' : 's') + ')';
     sel.appendChild(opt);
   });
   // Conserva la selección si sigue existiendo en la lista (por ejemplo,
-  // tras un refresco que no cambió nada).
+  // tras un refresco que no cambió nada, o que sí cambió pero esta
+  // actividad en particular sigue teniendo cuadros pendientes).
   if(valorAnterior){
     var opciones = sel.querySelectorAll('option');
     for(var i = 0; i < opciones.length; i++){
       if(opciones[i].value === valorAnterior){ sel.selectedIndex = i; break; }
     }
   }
-  var hayPendientes = pendientes.length > 0;
+  var hayPendientes = ordenTrabajo.length > 0;
   sel.style.display = hayPendientes ? '' : 'none';
   vacio.style.display = hayPendientes ? 'none' : '';
   if(!sel.disabled) btnIniciar.disabled = !hayPendientes; // no tocar el disabled si ya hay un avance en curso
+  // La lista de actividades pudo haber cambiado (p.ej. alguna se acaba de
+  // completar) -- hay que refrescar también qué cuadros quedan resaltados
+  // en el mapa para la que esté elegida ahora.
+  avanceDibujarCuadrosGoogle_();
 }
 
 // Equipo con el que se va a hacer ESTE recorrido (petición de Carlos: para
@@ -3182,6 +3244,7 @@ function avanceReanudarSiHayAbierto_(){
           selTrabajo.appendChild(optResumen);
         }
         selTrabajo.value = abierto.trabajo;
+        avanceDibujarCuadrosGoogle_(); // para que el resaltado del mapa ya refleje la actividad retomada, sin esperar al próximo punto de GPS
       }
       if(abierto.porcentaje !== null && abierto.porcentaje !== undefined) document.getElementById('avance-f-porcentaje').value = abierto.porcentaje;
       var chip = document.getElementById('avance-chip-estado');
@@ -3259,6 +3322,13 @@ function cargarAvanceHuerta(huerta){
 
 document.getElementById('avance-f-huerta').addEventListener('change', function(){
   cargarAvanceHuerta(this.value);
+});
+
+// Petición de Carlos: al elegir manualmente una actividad (antes de iniciar
+// el recorrido) el mapa debe resaltar de una vez los cuadros que todavía la
+// tienen pendiente, sin esperar a que lleguen datos nuevos del servidor.
+document.getElementById('avance-f-trabajo').addEventListener('change', function(){
+  avanceDibujarCuadrosGoogle_();
 });
 
 // Petición de Carlos: que el operador pueda iniciar su avance, guardar el
@@ -3359,7 +3429,17 @@ function avanceNuevaPosicion_(pos){
   var chip = document.getElementById('avance-chip-estado');
   if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
   if(AVANCE_SESION_ID){
-    google.script.run.withSuccessHandler(function(){}).withFailureHandler(function(){}).agregarPuntoAvance(AVANCE_SESION_ID, nuevo.lat, nuevo.lng);
+    google.script.run
+      .withSuccessHandler(function(resultado){
+        // Si con este punto el servidor acaba de completar alguna
+        // actividad solo (detectado por el GPS, ver
+        // marcarCuadrosCompletadosPorPunto_), refresca cuadros/actividades
+        // para que ese cuadro deje de verse resaltado de inmediato -- sin
+        // que el operador tenga que parar ni hacer nada.
+        if(resultado && resultado.actividadesCompletadas && resultado.actividadesCompletadas.length > 0) avanceCargarCuadrosYActividades_();
+      })
+      .withFailureHandler(function(){})
+      .agregarPuntoAvance(AVANCE_SESION_ID, nuevo.lat, nuevo.lng);
   }
 }
 

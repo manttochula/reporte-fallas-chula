@@ -3376,6 +3376,7 @@
       <div id="ah-cargando" class="avance-aviso" style="display:none;">Cargando...</div>
       <div id="ah-con-mapa" style="display:none;">
         <div id="ah-mapa-google-avance"></div>
+        <div class="ah-recorrido-sesiones" id="ah-leyenda-equipos" style="display:none;"></div>
         <div style="margin:6px 0 14px;">
           <a href="#" id="ah-link-borrar-historico" style="color:#c0392b; font-size:12.5px;">🗑️ Borrar todo el historial de avance</a>
         </div>
@@ -3389,6 +3390,7 @@
               <thead>
                 <tr>
                   <th>Operador</th>
+                  <th>Equipo</th>
                   <th>Trabajo</th>
                   <th>%</th>
                   <th>Inicio</th>
@@ -6407,6 +6409,23 @@ function ahSuavizarTrazo_(puntos, toleranciaMetros){
   return puntos.filter(function(p, i){ return mantener[i]; });
 }
 
+// Petición de Carlos: cuando hay más de un equipo trabajando a la vez en la
+// misma huerta, poder distinguir de quién es cada línea en el mapa
+// acumulado, con la posibilidad de ver solo una en especial. Mismo color
+// por sesión que ya usa "Ver recorrido por fecha" (AH_RECORRIDO_COLORES,
+// reutilizado aquí) y mismo patrón de lista-con-checkbox para elegir
+// cuáles se ven (ahRenderLeyendaHistorico_, más abajo).
+var AH_HISTORICO_OCULTOS = new Set(); // avanceId de las sesiones que Carlos ocultó a mano -- vacío = se ven todas
+function ahColorSesionHistorico_(avanceId){
+  var idx = (AH_HISTORICO_CACHE || []).findIndex(function(s){ return s.avanceId === avanceId; });
+  if (idx < 0) idx = 0;
+  return AH_RECORRIDO_COLORES[idx % AH_RECORRIDO_COLORES.length];
+}
+function ahEtiquetaSesionHistorico_(s){
+  var base = s.nombre || 'Operador';
+  return s.equipoUnidad ? (base + ' · 🚜 ' + s.equipoUnidad) : base;
+}
+
 // Un Polyline por cada sesión de avance de AH_HISTORICO_CACHE, con flechas
 // de dirección nativas de Google Maps (reemplaza el dibujo a mano de
 // antes, ahDibujarSegmento_/ahDibujarMarcaCalibracion_ sobre un canvas).
@@ -6415,35 +6434,93 @@ function ahDibujarHistoricoGoogleAvance_(){
   (AH_GOOGLE_POLYLINES_HISTORICO_AVANCE || []).forEach(function(pl){ pl.setMap(null); });
   (AH_GOOGLE_MARCADORES_ACTUAL_AVANCE || []).forEach(function(m){ m.setMap(null); });
   AH_GOOGLE_MARCADORES_ACTUAL_AVANCE = [];
-  var sesionesLimpias = (AH_HISTORICO_CACHE || []).map(function(s){
-    return { avanceId: s.avanceId, nombre: s.nombre, fechaFin: s.fechaFin, puntos: ahSuavizarTrazo_(ahFiltrarPuntosFueraDeHuerta_(s.puntos || [])) };
-  });
+  // AH_HISTORICO_OCULTOS: las sesiones que Carlos desmarcó en la leyenda
+  // (o aisló con "ver solo este") no se dibujan -- así puede ver un equipo
+  // en especial sin el resto estorbando.
+  var sesionesLimpias = (AH_HISTORICO_CACHE || [])
+    .filter(function(s){ return !AH_HISTORICO_OCULTOS.has(s.avanceId); })
+    .map(function(s){
+      return {
+        avanceId: s.avanceId,
+        nombre: s.nombre,
+        equipoUnidad: s.equipoUnidad,
+        fechaFin: s.fechaFin,
+        color: ahColorSesionHistorico_(s.avanceId),
+        puntos: ahSuavizarTrazo_(ahFiltrarPuntosFueraDeHuerta_(s.puntos || [])),
+      };
+    });
   AH_GOOGLE_POLYLINES_HISTORICO_AVANCE = sesionesLimpias.filter(function(s){ return s.puntos.length >= 2; }).map(function(s){
     var pl = new google.maps.Polyline({
       path: s.puntos.map(function(p){ return { lat: p.lat, lng: p.lng }; }),
-      strokeColor: '#4c8dae',
-      strokeOpacity: 0.65,
+      strokeColor: s.color,
+      strokeOpacity: 0.7,
       strokeWeight: 3,
-      icons: ahIconosFlecha_('#4c8dae'),
+      icons: ahIconosFlecha_(s.color),
       clickable: false,
     });
     pl.setMap(AH_GOOGLE_MAP_AVANCE);
     return pl;
   });
   // Sesiones todavía EN CURSO (fechaFin vacía): un ícono de tractor en la
-  // punta más reciente de su trazo, para que Carlos vea de un vistazo
-  // dónde está cada quien AHORA, no solo por dónde ya pasó -- igual que
-  // la otra app de flotillas que mandó de ejemplo.
+  // punta más reciente de su trazo, del mismo color que su línea (y que su
+  // renglón en la leyenda), para que Carlos vea de un vistazo dónde está
+  // cada quien AHORA, no solo por dónde ya pasó -- igual que la otra app
+  // de flotillas que mandó de ejemplo.
   AH_GOOGLE_MARCADORES_ACTUAL_AVANCE = sesionesLimpias.filter(function(s){ return !s.fechaFin && s.puntos.length > 0; }).map(function(s){
     var ultimo = s.puntos[s.puntos.length - 1];
     var marcador = new google.maps.Marker(Object.assign({
       position: { lat: ultimo.lat, lng: ultimo.lng },
       map: AH_GOOGLE_MAP_AVANCE,
-      title: (s.nombre || 'Operador') + ' · en curso',
-    }, ahIconoTractor_('#E8871E')));
+      title: ahEtiquetaSesionHistorico_(s) + ' · en curso',
+    }, ahIconoTractor_(s.color)));
     return marcador;
   });
+  ahRenderLeyendaHistorico_();
 }
+
+// Lista debajo del mapa con un renglón por sesión (igual de nombre/equipo
+// y color que su línea), una casilla para mostrarla u ocultarla, y un
+// enlace "ver solo este" para aislar una de un tirón sin tener que
+// desmarcar todas las demás a mano.
+function ahRenderLeyendaHistorico_(){
+  var cont = document.getElementById('ah-leyenda-equipos');
+  if(!cont) return;
+  var sesiones = AH_HISTORICO_CACHE || [];
+  if(sesiones.length === 0){
+    cont.style.display = 'none';
+    cont.innerHTML = '';
+    return;
+  }
+  cont.style.display = '';
+  cont.innerHTML = sesiones.slice().reverse().map(function(s){
+    var color = ahColorSesionHistorico_(s.avanceId);
+    var checked = AH_HISTORICO_OCULTOS.has(s.avanceId) ? '' : ' checked';
+    var enCurso = !s.fechaFin ? ' · en curso' : '';
+    return '<label class="ah-recorrido-sesion-item">'
+      + '<input type="checkbox" class="ah-historico-check" data-avance-id="' + s.avanceId + '"' + checked + '>'
+      + '<span class="ah-recorrido-color-chip" style="background:' + color + ';"></span>'
+      + '<span style="flex:1;">' + escapeHtml(ahEtiquetaSesionHistorico_(s)) + enCurso + '</span>'
+      + '<a href="#" class="ah-historico-solo-este" data-avance-id="' + s.avanceId + '" style="font-size:12px; color:var(--text-dim);">ver solo este</a>'
+      + '</label>';
+  }).join('');
+}
+
+document.getElementById('ah-leyenda-equipos').addEventListener('change', function(ev){
+  var chk = ev.target;
+  if(!chk.classList || !chk.classList.contains('ah-historico-check')) return;
+  var id = Number(chk.getAttribute('data-avance-id'));
+  if(chk.checked) AH_HISTORICO_OCULTOS.delete(id);
+  else AH_HISTORICO_OCULTOS.add(id);
+  ahDibujarHistoricoGoogleAvance_();
+});
+document.getElementById('ah-leyenda-equipos').addEventListener('click', function(ev){
+  var link = ev.target.closest ? ev.target.closest('.ah-historico-solo-este') : null;
+  if(!link) return;
+  ev.preventDefault();
+  var id = Number(link.getAttribute('data-avance-id'));
+  AH_HISTORICO_OCULTOS = new Set((AH_HISTORICO_CACHE || []).map(function(s){ return s.avanceId; }).filter(function(aid){ return aid !== id; }));
+  ahDibujarHistoricoGoogleAvance_();
+});
 
 // 'completado' si TODAS sus actividades ya están completadas (y tiene al
 // menos una), 'pendiente' si tiene alguna sin completar, 'ninguna' si el
@@ -6490,7 +6567,7 @@ function ahRenderTabla_(historico){
   var tbody = document.getElementById('ah-table-body');
   var resumen = document.getElementById('ah-resumen');
   if(!historico || historico.length === 0){
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);">Todavía no hay avance registrado en esta huerta.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);">Todavía no hay avance registrado en esta huerta.</td></tr>';
     resumen.textContent = '';
     return;
   }
@@ -6499,6 +6576,7 @@ function ahRenderTabla_(historico){
     totalPuntos += (s.puntos || []).length;
     return '<tr>'
       + '<td>' + escapeHtml(s.nombre || '') + '</td>'
+      + '<td>' + (s.equipoUnidad ? ('🚜 ' + escapeHtml(s.equipoUnidad)) : '—') + '</td>'
       + '<td>' + escapeHtml(s.trabajo || '—') + '</td>'
       + '<td>' + (s.porcentaje !== null && s.porcentaje !== undefined ? s.porcentaje + '%' : '—') + '</td>'
       + '<td>' + (s.fechaInicio ? new Date(s.fechaInicio).toLocaleString('es-MX') : '—') + '</td>'
@@ -7468,6 +7546,7 @@ document.getElementById('ah-actividades-table-body').addEventListener('click', f
 function cargarAvanceHuertaPanel_(huerta){
   AH_HUERTA_ACTUAL = huerta;
   AH_HISTORICO_CACHE = [];
+  AH_HISTORICO_OCULTOS = new Set(); // no arrastrar a la huerta nueva lo que Carlos ocultó en la anterior
   AH_CUADROS = [];
   AH_ACTIVIDADES = [];
   AH_CATALOGO = [];

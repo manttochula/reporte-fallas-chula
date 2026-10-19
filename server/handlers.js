@@ -5240,7 +5240,7 @@ async function getAvanceHuerta(huerta) {
   const nombreHuerta = (huerta || '').toString().trim();
   if (!nombreHuerta) return [];
   const [sesiones] = await pool.query(
-    'SELECT id, nombre, trabajo, porcentaje, fecha_inicio, fecha_fin FROM avance_huerta WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY fecha_inicio',
+    'SELECT id, nombre, trabajo, porcentaje, fecha_inicio, fecha_fin, codigo_unidad FROM avance_huerta WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY fecha_inicio',
     [nombreHuerta]
   );
   if (sesiones.length === 0) return [];
@@ -5254,6 +5254,16 @@ async function getAvanceHuerta(huerta) {
     if (!puntosPorSesion[p.avance_id]) puntosPorSesion[p.avance_id] = [];
     puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng) });
   });
+  // codigoUnidad/equipoUnidad: petición de Carlos -- quiere saber con QUÉ
+  // equipo (tractor) se hizo cada recorrido cuando hay varios en la misma
+  // huerta, para distinguirlos en el mapa de "Avance Huerta". Mismo join
+  // con maquinaria que ya usa getRecorridosPorFecha.
+  const codigos = Array.from(new Set(sesiones.map((s) => s.codigo_unidad).filter(Boolean)));
+  let equiposPorCodigo = {};
+  if (codigos.length > 0) {
+    const [maquinas] = await pool.query('SELECT codigo_unidad, unidad FROM maquinaria WHERE codigo_unidad IN (?)', [codigos]);
+    maquinas.forEach((m) => { equiposPorCodigo[m.codigo_unidad] = m.unidad; });
+  }
   return sesiones.map((s) => ({
     avanceId: s.id,
     nombre: s.nombre,
@@ -5261,6 +5271,8 @@ async function getAvanceHuerta(huerta) {
     porcentaje: s.porcentaje !== null ? Number(s.porcentaje) : null,
     fechaInicio: s.fecha_inicio,
     fechaFin: s.fecha_fin,
+    codigoUnidad: s.codigo_unidad || null,
+    equipoUnidad: s.codigo_unidad ? (equiposPorCodigo[s.codigo_unidad] || null) : null,
     puntos: puntosPorSesion[s.id] || [],
   }));
 }

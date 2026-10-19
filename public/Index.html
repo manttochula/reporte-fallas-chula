@@ -2709,6 +2709,26 @@ var AVANCE_GOOGLE_MAP = null;
 var AVANCE_POLIGONOS_CUADROS = [];
 var AVANCE_POLYLINES_HISTORICO = [];
 var AVANCE_POLYLINE_ACTUAL = null;
+var AVANCE_MARCADOR_ACTUAL = null; // ícono "aquí estoy ahora" en la punta del trazo en curso -- petición de Carlos, para que se vea como el ícono de tractor de su otra app
+
+// Círculo de color con un tractor adentro, al estilo de la otra app de
+// flotillas que mandó Carlos de ejemplo -- un google.maps.Marker con un
+// símbolo circular como ícono y el tractor como "label" encima, sin
+// necesitar ningún archivo de imagen aparte.
+function avanceIconoTractor_(color){
+  return {
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 12,
+      fillColor: color,
+      fillOpacity: 1,
+      strokeColor: '#ffffff',
+      strokeWeight: 2,
+    },
+    label: { text: '🚜', fontSize: '13px' },
+    zIndex: 999,
+  };
+}
 
 // Flechas de dirección a lo largo de la línea -- icono nativo de Google
 // Maps repetido cada tantos pixeles, en vez de dibujarlas a mano (eso solo
@@ -2892,11 +2912,38 @@ function avanceDibujarCuadrosGoogle_(){
 // Un Polyline por cada sesión de avance ya cerrada (histórico), con
 // flechitas nativas de Google Maps que marcan el sentido del recorrido
 // (icons + repeat, en vez de dibujar flechas a mano en un canvas).
+// El GPS del celular a veces manda un punto disparatado (el típico "se fue
+// kilómetros al desierto y regresó" -- normalmente justo al prender el GPS,
+// antes de que agarre bien la señal, o por rebote de la señal/"multipath").
+// Ya que los cuadros de la huerta son el contorno real de GPS (dibujado a
+// mano por Carlos), cualquier punto que caiga muy lejos de ellos casi
+// seguro es ruido, no que el tractor de verdad haya salido de la huerta --
+// así que para DIBUJAR el recorrido se recorta a un rectángulo que cubre
+// todos los cuadros más un margen generoso (para no cortar el camino justo
+// en el borde, cabeceras, zona de carga, etc.). Esto NO borra el punto de
+// la base de datos, solo deja de pintarlo. Si la huerta todavía no tiene
+// ningún cuadro dibujado, no hay con qué comparar y se deja todo tal cual.
+var AVANCE_MARGEN_GEOCERCA_METROS = 300;
+function avanceFiltrarPuntosFueraDeHuerta_(puntos){
+  var lats = [], lngs = [];
+  (AVANCE_CUADROS || []).forEach(function(c){
+    (c.poligono || []).forEach(function(v){ lats.push(v.lat); lngs.push(v.lng); });
+  });
+  if(lats.length === 0) return puntos; // sin cuadros todavía -- no hay referencia, no se filtra nada
+  var latMin = Math.min.apply(null, lats), latMax = Math.max.apply(null, lats);
+  var lngMin = Math.min.apply(null, lngs), lngMax = Math.max.apply(null, lngs);
+  var latCentral = (latMin + latMax) / 2;
+  var deltaLat = AVANCE_MARGEN_GEOCERCA_METROS / 111320;
+  var deltaLng = AVANCE_MARGEN_GEOCERCA_METROS / (111320 * Math.cos(latCentral * Math.PI / 180));
+  latMin -= deltaLat; latMax += deltaLat; lngMin -= deltaLng; lngMax += deltaLng;
+  return puntos.filter(function(p){ return p.lat >= latMin && p.lat <= latMax && p.lng >= lngMin && p.lng <= lngMax; });
+}
+
 function avanceDibujarHistoricoGoogle_(){
   AVANCE_POLYLINES_HISTORICO.forEach(function(pl){ pl.setMap(null); });
   AVANCE_POLYLINES_HISTORICO = [];
   (AVANCE_HISTORICO || []).forEach(function(sesion){
-    var puntos = sesion.puntos || [];
+    var puntos = avanceFiltrarPuntosFueraDeHuerta_(sesion.puntos || []);
     if(puntos.length < 2) return;
     var pl = new google.maps.Polyline({
       path: puntos.map(function(p){ return { lat: p.lat, lng: p.lng }; }),
@@ -2929,7 +2976,20 @@ function avanceActualizarPolylineActual_(){
       clickable: false,
     });
   }
-  AVANCE_POLYLINE_ACTUAL.setPath(AVANCE_PUNTOS_SESION.map(function(p){ return { lat: p.lat, lng: p.lng }; }));
+  var puntosLimpios = avanceFiltrarPuntosFueraDeHuerta_(AVANCE_PUNTOS_SESION);
+  AVANCE_POLYLINE_ACTUAL.setPath(puntosLimpios.map(function(p){ return { lat: p.lat, lng: p.lng }; }));
+  if(puntosLimpios.length > 0){
+    var ultimo = puntosLimpios[puntosLimpios.length - 1];
+    if(!AVANCE_MARCADOR_ACTUAL){
+      AVANCE_MARCADOR_ACTUAL = new google.maps.Marker(Object.assign({
+        position: ultimo,
+        map: AVANCE_GOOGLE_MAP,
+        title: 'Tu ubicación actual',
+      }, avanceIconoTractor_('#E8871E')));
+    } else {
+      AVANCE_MARCADOR_ACTUAL.setPosition(ultimo);
+    }
+  }
 }
 
 function avanceCargarHistorico_(){
@@ -3219,6 +3279,7 @@ function avanceDetenerRastreoSiActivo_(){
     AVANCE_PUNTOS_SESION = [];
     AVANCE_ULTIMO_PUNTO = null;
     if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
+    if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }
     avanceCargarCuadrosYActividades_(); // refresca la lista -- el avance que acaba de terminar pudo haber completado solo alguna actividad por el GPS, y ya no debe seguir apareciendo para elegir
     avanceCargarHistorico_(); // la sesión que acaba de cerrarse ya pasa a formar parte del histórico
     var chip = document.getElementById('avance-chip-estado');
@@ -3280,6 +3341,7 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
       AVANCE_ULTIMO_PUNTO = null;
       AVANCE_PUNTOS_SESION = [];
       if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
+      if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }
       document.getElementById('avance-btn-iniciar').style.display = 'none';
       document.getElementById('avance-btn-terminar').style.display = '';
       document.getElementById('avance-f-equipo').disabled = true;

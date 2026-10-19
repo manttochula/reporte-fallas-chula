@@ -3483,8 +3483,15 @@
           </div>
           <div class="maq-modal-status" id="ah-asignar-status"></div>
 
-          <div class="avance-paso" style="margin-top:20px;">Actividades ya asignadas</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
+            <div class="avance-paso" style="margin-bottom:0;">Actividades ya asignadas</div>
+            <div class="maq-field" style="margin-bottom:0; min-width:220px;">
+              <label for="ah-f-actividades-filtro-trabajo">Filtrar por actividad</label>
+              <select id="ah-f-actividades-filtro-trabajo"><option value="">Todas las actividades</option></select>
+            </div>
+          </div>
           <div id="ah-actividades-vacio" class="avance-aviso" style="display:none;">Todavía no has asignado ninguna actividad.</div>
+          <div id="ah-actividades-filtro-vacio" class="avance-aviso" style="display:none;">Ninguna actividad asignada coincide con el filtro.</div>
           <div class="table-wrap" id="ah-actividades-tabla-wrap" style="display:none;">
             <table>
               <thead>
@@ -6231,6 +6238,9 @@ var AH_HISTORICO_CACHE = [];
 var AH_CUADROS = []; // [{id, nombre, poligono: [{lat,lng}, ...]}]
 var AH_ACTIVIDADES = []; // [{id, cuadroId, cuadroNombre, trabajo, estado, creadoEn, completadoEn}]
 var AH_CATALOGO = []; // [{id, trabajo, intervaloSurcos, creadoPor, creadoEn}]
+// Petición de Carlos: poder filtrar la tabla de "Actividades ya asignadas"
+// por actividad -- '' (vacío) = sin filtro, se ven todas.
+var AH_ACTIVIDADES_FILTRO_TRABAJO = '';
 var AH_GOOGLE_MAP = null; // instancia del mapa de Google (se crea una sola vez, se reutiliza)
 var AH_GOOGLE_POLIGONOS_DIBUJADOS = []; // overlays de los cuadros ya guardados, mostrados de referencia
 // Dibujo manual de un cuadro nuevo -- Google retiró su "Drawing Library"
@@ -6920,19 +6930,53 @@ function ahLimpiarFormCatalogo_(){
   document.getElementById('ah-btn-cancelar-catalogo').style.display = 'none';
 }
 
+// Puebla el <select> de "Filtrar por actividad" con los tipos de
+// actividad (a.trabajo) que de verdad tienen algo asignado en esta
+// huerta -- deduplicados, en el orden en que aparecen. Si la actividad
+// que Carlos tenía elegida ya no está en la lista nueva (p.ej. borró la
+// última actividad de ese tipo), se regresa a "Todas las actividades" en
+// vez de quedarse en un filtro fantasma.
+function ahPoblarFiltroActividadesTrabajo_(){
+  var sel = document.getElementById('ah-f-actividades-filtro-trabajo');
+  var trabajos = [];
+  (AH_ACTIVIDADES || []).forEach(function(a){
+    if(trabajos.indexOf(a.trabajo) === -1) trabajos.push(a.trabajo);
+  });
+  if(AH_ACTIVIDADES_FILTRO_TRABAJO && trabajos.indexOf(AH_ACTIVIDADES_FILTRO_TRABAJO) === -1){
+    AH_ACTIVIDADES_FILTRO_TRABAJO = '';
+  }
+  sel.innerHTML = '<option value="">Todas las actividades</option>' + trabajos.map(function(t){
+    return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>';
+  }).join('');
+  sel.value = AH_ACTIVIDADES_FILTRO_TRABAJO;
+}
+
 function ahRenderActividadesTabla_(){
   var tbody = document.getElementById('ah-actividades-table-body');
   var vacio = document.getElementById('ah-actividades-vacio');
+  var filtroVacio = document.getElementById('ah-actividades-filtro-vacio');
   var tablaWrap = document.getElementById('ah-actividades-tabla-wrap');
+  ahPoblarFiltroActividadesTrabajo_();
   if(!AH_ACTIVIDADES || AH_ACTIVIDADES.length === 0){
     tbody.innerHTML = '';
     vacio.style.display = '';
+    filtroVacio.style.display = 'none';
     tablaWrap.style.display = 'none';
     return;
   }
+  var lista = AH_ACTIVIDADES_FILTRO_TRABAJO
+    ? AH_ACTIVIDADES.filter(function(a){ return a.trabajo === AH_ACTIVIDADES_FILTRO_TRABAJO; })
+    : AH_ACTIVIDADES;
   vacio.style.display = 'none';
+  if(lista.length === 0){
+    tbody.innerHTML = '';
+    filtroVacio.style.display = '';
+    tablaWrap.style.display = 'none';
+    return;
+  }
+  filtroVacio.style.display = 'none';
   tablaWrap.style.display = '';
-  tbody.innerHTML = AH_ACTIVIDADES.map(function(a, idx){
+  tbody.innerHTML = lista.map(function(a, idx){
     var completado = a.estado === 'completado';
     // Solo se puede medir en % si el CUADRO ya tiene surcos capturados
     // (ver ahEditarSurcosCuadro_) -- si no, se queda el criterio de
@@ -7514,6 +7558,11 @@ document.getElementById('ah-btn-asignar-cuadros').addEventListener('click', func
     .asignarActividadCatalogoACuadros(ACCESS_CODE, PANEL_USUARIO, huerta, catalogoId, cuadroIds, equipoCodigo, implementoCodigo, operadorNombre);
 });
 
+document.getElementById('ah-f-actividades-filtro-trabajo').addEventListener('change', function(){
+  AH_ACTIVIDADES_FILTRO_TRABAJO = this.value;
+  ahRenderActividadesTabla_();
+});
+
 document.getElementById('ah-actividades-table-body').addEventListener('click', function(ev){
   var link = ev.target.closest ? ev.target.closest('.ah-actividad-eliminar') : null;
   if(!link) return;
@@ -7550,6 +7599,7 @@ function cargarAvanceHuertaPanel_(huerta){
   AH_CUADROS = [];
   AH_ACTIVIDADES = [];
   AH_CATALOGO = [];
+  AH_ACTIVIDADES_FILTRO_TRABAJO = ''; // no arrastrar a la huerta nueva el filtro que se había elegido en la anterior
   ahCerrarModalCuadrosGoogle_();
   document.getElementById('ah-sin-huerta').style.display = huerta ? 'none' : '';
   document.getElementById('ah-cargando').style.display = 'none';

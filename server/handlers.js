@@ -5345,6 +5345,235 @@ async function getRecorridosPorFecha(code, nombreUsuario, huerta, fecha) {
   }));
 }
 
+// ------------------------------------------------------------
+// Avance por RANGO de fechas y horas + RALENTÍ (petición de Carlos,
+// oct-2026): "si estoy viendo hoy a las 5 pm, quiero ver cuánto avanzó de
+// las 7 am a las 12 pm", también para varios días seguidos, y saber
+// cuánto tiempo estuvo el tractor detenido (ralentí = prendido pero sin
+// avanzar; para nosotros: el tractor no avanza).
+//
+// El celular solo guarda un punto cuando el tractor se movió >= 3 m, así
+// que estando parado no llegan puntos (o llegan unos pocos por el
+// "bailoteo" del GPS). Una PARADA es cuando el tractor se queda dentro de
+// RALENTI_RADIO_METROS de un punto durante al menos los minutos que elija
+// Carlos (editable en el Panel); dura desde ese punto hasta el primer
+// punto que ya salió del radio (o hasta que se terminó el recorrido). No
+// se sabe si el motor estaba prendido: es "no avanzó con el recorrido
+// abierto". Un hueco largo SIN quedarse en el mismo lugar (se movió pero no
+// llegaron puntos, p.ej. sin señal) no es ralentí: se cuenta aparte como
+// "sin señal".
+//
+// ventanas: [[inicioMs, finMs], ...] en milisegundos absolutos -- el Panel
+// las arma con la hora LOCAL de Carlos (p.ej. 7:00-12:00 de cada día del
+// rango), así no importa en qué zona horaria corra el servidor.
+const RALENTI_RADIO_METROS = 25;
+const RALENTI_VELOCIDAD_MAX = 0.3; // m/s -- por debajo de esto, entre 2 puntos, "no avanzó"
+const RALENTI_MINUTOS_DEFAULT = 2;
+const HUECO_SIN_SENAL_MS = 10 * 60 * 1000; // un hueco > 10 min moviéndose = sin señal, no "en movimiento"
+
+function validarVentanasRango_(ventanas) {
+  if (!Array.isArray(ventanas) || ventanas.length === 0) return null;
+  if (ventanas.length > 62) return null;
+  const limpias = [];
+  for (const v of ventanas) {
+    if (!Array.isArray(v) || v.length !== 2) return null;
+    const a = Number(v[0]);
+    const b = Number(v[1]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a || b - a > 25 * 3600 * 1000) return null;
+    limpias.push([a, b]);
+  }
+  limpias.sort((x, y) => x[0] - y[0]);
+  if (limpias[limpias.length - 1][1] - limpias[0][0] > 63 * 24 * 3600 * 1000) return null;
+  return limpias;
+}
+
+function minutosRalentiValidos_(m) {
+  const n = Number(m);
+  if (!Number.isFinite(n) || n <= 0) return RALENTI_MINUTOS_DEFAULT;
+  return Math.min(240, Math.max(0.5, n));
+}
+
+// Cálculo puro (sin base de datos), para poder probarlo aparte.
+// sesiones: [{avanceId, nombre, trabajo, codigoUnidad, equipoUnidad,
+//             fechaInicio, fechaFin, puntos:[{lat, lng, t (ms)}]}]
+// cuadros: [{id, nombre, poligono, surcos}]
+// ahoraMs: para un recorrido todavía abierto, hasta cuándo puede durar
+// una parada al final.
+function calcularResumenRango_(sesiones, cuadros, ventanas, minutosRalenti, ahoraMs) {
+  const umbralMs = minutosRalentiValidos_(minutosRalenti) * 60 * 1000;
+  const grupos = {};
+  const orden = [];
+  const sesionesSalida = [];
+  const cuadrosValidos = (cuadros || []).map((c) => ({ ...c, poligono: parsearPoligono_(c.poligono) }))
+    .filter((c) => c.poligono.length >= 3);
+
+  for (const ses of sesiones || []) {
+    // Por equipo; si el recorrido no tiene equipo asignado, por operador
+    // (así se acumula entre varios recorridos/días de la misma persona).
+    const clave = ses.codigoUnidad ? ('equipo:' + ses.codigoUnidad)
+      : (ses.nombre ? ('operador:' + ses.nombre) : ('sesion:' + ses.avanceId));
+    if (!grupos[clave]) {
+      grupos[clave] = {
+        clave, codigoUnidad: ses.codigoUnidad || null, equipoUnidad: ses.equipoUnidad || null,
+        nombres: [], trabajos: [], avanceIds: [], metros: 0, movimientoMs: 0, ralentiMs: 0, sinSenalMs: 0,
+        paradas: [], pasadasPorCuadro: {},
+      };
+      orden.push(clave);
+    }
+    const g = grupos[clave];
+    if (ses.nombre && !g.nombres.includes(ses.nombre)) g.nombres.push(ses.nombre);
+    if (ses.trabajo && !g.trabajos.includes(ses.trabajo)) g.trabajos.push(ses.trabajo);
+    g.avanceIds.push(ses.avanceId);
+    const todos = (ses.puntos || []).filter((p) => Number.isFinite(p.t)).sort((a, b) => a.t - b.t);
+    const finSesionMs = ses.fechaFin ? new Date(ses.fechaFin).getTime() : ahoraMs;
+    const puntosSalida = [];
+
+    for (const [va, vb] of ventanas) {
+      const pts = todos.filter((p) => p.t >= va && p.t <= vb);
+      if (pts.length === 0) continue;
+      pts.forEach((p) => puntosSalida.push(p));
+      // Distancia y pasadas: en tramos de >= 15 m (igual que el avance de
+      // los cuadros), para que el bailoteo del GPS no infle los km.
+      for (const [pa, pb] of tramosDeRecorrido_(pts)) {
+        g.metros += distanciaMetros_(pa, pb);
+        for (const c of cuadrosValidos) {
+          const tr = avanceDeTramo_(pa, pb, c.poligono);
+          if (tr.pasadas > 0) g.pasadasPorCuadro[c.id] = (g.pasadasPorCuadro[c.id] || 0) + tr.pasadas;
+        }
+      }
+      // Paradas (ralentí). Cada par de puntos seguidos se clasifica:
+      // - "parado": se desplazó <= RALENTI_RADIO_METROS a menos de
+      //   RALENTI_VELOCIDAD_MAX (el GPS "bailando" con el tractor quieto
+      //   manda puntos a pocos metros, minutos de diferencia);
+      // - "sin señal": hueco > 10 min y SÍ apareció en otro lado;
+      // - "en movimiento": todo lo demás.
+      // Una racha de pares "parado" seguidos (sin alejarse más de
+      // RALENTI_RADIO_METROS de donde empezó) que dura al menos el mínimo de
+      // minutos elegido es UNA parada; las más cortas (vueltas, maniobras)
+      // cuentan como movimiento. Si el recorrido se cerró (o sigue abierto)
+      // con el tractor quieto en su último punto, ese tiempo final también
+      // cuenta.
+      const finVentanaSesion = Math.min(vb, Number.isFinite(finSesionMs) ? finSesionMs : vb);
+      const serie = pts.slice();
+      const ultimo = serie[serie.length - 1];
+      if (finVentanaSesion > ultimo.t) serie.push({ lat: ultimo.lat, lng: ultimo.lng, t: finVentanaSesion, virtual: true });
+      let racha = null; // {inicioIdx, finIdx}
+      const cerrarRacha = () => {
+        if (!racha) return;
+        const a = serie[racha.inicioIdx];
+        const b = serie[racha.finIdx];
+        const dur = b.t - a.t;
+        if (dur >= umbralMs) {
+          g.paradas.push({ lat: a.lat, lng: a.lng, inicio: a.t, fin: b.t, minutos: Math.round((dur / 60000) * 10) / 10 });
+          g.ralentiMs += dur;
+        } else {
+          g.movimientoMs += dur;
+        }
+        racha = null;
+      };
+      for (let k = 1; k < serie.length; k++) {
+        const a = serie[k - 1];
+        const b = serie[k];
+        const dt = b.t - a.t;
+        if (dt <= 0) continue;
+        const d = distanciaMetros_(a, b);
+        const parado = d <= RALENTI_RADIO_METROS && d / (dt / 1000) < RALENTI_VELOCIDAD_MAX
+          && (!racha || distanciaMetros_(serie[racha.inicioIdx], b) <= RALENTI_RADIO_METROS);
+        if (parado) {
+          if (!racha) racha = { inicioIdx: k - 1, finIdx: k };
+          else racha.finIdx = k;
+          continue;
+        }
+        cerrarRacha();
+        if (b.virtual) continue;
+        if (dt > HUECO_SIN_SENAL_MS) g.sinSenalMs += dt;
+        else g.movimientoMs += dt;
+      }
+      cerrarRacha();
+    }
+    sesionesSalida.push({ ...ses, puntos: puntosSalida.map((p) => ({ lat: p.lat, lng: p.lng, capturadoEn: new Date(p.t) })) });
+  }
+
+  const nombreCuadro = {};
+  const surcosCuadro = {};
+  cuadrosValidos.forEach((c) => { nombreCuadro[c.id] = c.nombre; surcosCuadro[c.id] = c.surcos; });
+  const resultadoGrupos = orden.map((clave) => {
+    const g = grupos[clave];
+    const cuadrosLista = Object.keys(g.pasadasPorCuadro).map((id) => {
+      const pasadas = g.pasadasPorCuadro[id];
+      const surcos = surcosCuadro[id] === null || surcosCuadro[id] === undefined ? null : Number(surcosCuadro[id]);
+      return {
+        cuadroId: Number(id), cuadro: nombreCuadro[id], surcos,
+        pasadas: Math.round(pasadas * 100) / 100,
+        porcentaje: surcos ? Math.round(Math.min(100, (pasadas / surcos) * 100) * 100) / 100 : null,
+      };
+    }).filter((c) => c.pasadas >= 0.01)
+      .sort((a, b) => String(a.cuadro).localeCompare(String(b.cuadro), 'es', { numeric: true }));
+    return {
+      clave: g.clave, codigoUnidad: g.codigoUnidad, equipoUnidad: g.equipoUnidad,
+      nombres: g.nombres, trabajos: g.trabajos, avanceIds: g.avanceIds,
+      km: Math.round((g.metros / 1000) * 100) / 100,
+      minutosMovimiento: Math.round(g.movimientoMs / 60000),
+      minutosRalenti: Math.round(g.ralentiMs / 60000),
+      minutosSinSenal: Math.round(g.sinSenalMs / 60000),
+      paradas: g.paradas.sort((a, b) => a.inicio - b.inicio),
+      cuadros: cuadrosLista,
+    };
+  });
+  return { grupos: resultadoGrupos, sesiones: sesionesSalida, minutosRalenti: minutosRalentiValidos_(minutosRalenti) };
+}
+
+// Acción del Panel. filtros (opcional): {operador, trabajo} -- los mismos
+// filtros "Operador"/"Actividad" del mapa de Avance de huerta.
+async function getAvancePorRango(code, nombreUsuario, huerta, ventanas, minutosRalenti, filtros) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  const nombreHuerta = (huerta || '').toString().trim();
+  if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
+  const vs = validarVentanasRango_(ventanas);
+  if (!vs) return { success: false, error: 'El rango de fechas/horas no es válido (máximo 62 días, y la hora "hasta" debe ser después de la hora "desde").' };
+  const desde = new Date(vs[0][0]);
+  const hasta = new Date(vs[vs.length - 1][1]);
+  const [sesiones] = await pool.query(
+    `SELECT id, nombre, trabajo, codigo_unidad, fecha_inicio, fecha_fin FROM avance_huerta
+     WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) AND fecha_inicio <= ? AND (fecha_fin IS NULL OR fecha_fin >= ?)
+     ORDER BY fecha_inicio, id`,
+    [nombreHuerta, hasta, desde]
+  );
+  const f = filtros || {};
+  const operador = (f.operador || '').toString().trim();
+  const trabajo = normalizarTrabajoAvance_(f.trabajo);
+  const elegidas = sesiones.filter((x) => (!operador || x.nombre === operador)
+    && (!trabajo || normalizarTrabajoAvance_(x.trabajo) === trabajo));
+  const [cuadros] = await pool.query(
+    'SELECT id, nombre, poligono, surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
+    [nombreHuerta]
+  );
+  if (elegidas.length === 0) return { success: true, grupos: [], sesiones: [], minutosRalenti: minutosRalentiValidos_(minutosRalenti) };
+  const ids = elegidas.map((x) => x.id);
+  const [puntos] = await pool.query(
+    'SELECT avance_id, lat, lng, capturado_en FROM avance_huerta_puntos WHERE avance_id IN (?) AND capturado_en BETWEEN ? AND ? ORDER BY avance_id, capturado_en, id',
+    [ids, desde, hasta]
+  );
+  const codigos = Array.from(new Set(elegidas.map((x) => x.codigo_unidad).filter(Boolean)));
+  const equipos = {};
+  if (codigos.length) {
+    const [maq] = await pool.query('SELECT codigo_unidad, unidad FROM maquinaria WHERE codigo_unidad IN (?)', [codigos]);
+    maq.forEach((m) => { equipos[m.codigo_unidad] = m.unidad; });
+  }
+  const porSesion = {};
+  puntos.forEach((p) => {
+    if (!porSesion[p.avance_id]) porSesion[p.avance_id] = [];
+    porSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), t: new Date(p.capturado_en).getTime() });
+  });
+  const datos = elegidas.map((x) => ({
+    avanceId: x.id, nombre: x.nombre, trabajo: normalizarTrabajoAvance_(x.trabajo),
+    codigoUnidad: x.codigo_unidad, equipoUnidad: x.codigo_unidad ? (equipos[x.codigo_unidad] || x.codigo_unidad) : null,
+    fechaInicio: x.fecha_inicio, fechaFin: x.fecha_fin, puntos: porSesion[x.id] || [],
+  })).filter((x) => x.puntos.length > 0);
+  const r = calcularResumenRango_(datos, cuadros, vs, minutosRalenti, Date.now());
+  return { success: true, ...r };
+}
+
 // Borra TODO el historial de avance (avance_huerta + sus puntos de GPS) de
 // UNA huerta -- petición de Carlos: algunos recorridos viejos quedaron con
 // puntos de GPS muy alejados del mapa real (un brinco del GPS, una prueba,
@@ -7593,6 +7822,9 @@ module.exports = {
   tramosDeRecorrido_,
   margenCompletado_,
   normalizarTrabajoAvance_,
+  getAvancePorRango,
+  calcularResumenRango_,
+  validarVentanasRango_,
   getProveedores,
   guardarProveedor,
   eliminarProveedor,

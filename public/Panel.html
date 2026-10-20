@@ -339,6 +339,20 @@
   }
   .ah-recorrido-sesion-item{ display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
   .ah-recorrido-color-chip{ width:12px; height:12px; border-radius:3px; flex:none; display:inline-block; }
+  /* Rango de horas + ralentí (Avance de huerta) */
+  .ah-rango-campos{ display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .ah-rango-campos .maq-field{ margin-bottom:0; }
+  .ah-rango-campos input[type=time], .ah-rango-campos input[type=date]{ min-width:120px; }
+  .ah-rango-campos input[type=number]{ width:90px; }
+  .ah-resumen-rango{ margin:10px 0 14px; }
+  .ah-resumen-rango table{ width:100%; border-collapse:collapse; font-size:12.5px; min-width:760px; } /* las tablas del Panel traen min-width:1200px; esta cabe en menos */
+  .ah-resumen-rango th{ text-align:left; color:var(--text-dim); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .ah-resumen-rango td{ padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--text); }
+  .ah-resumen-rango .ah-rr-num{ font-family:'IBM Plex Mono', monospace; white-space:nowrap; }
+  .ah-resumen-rango .ah-rr-ralenti{ color:var(--amber); font-weight:700; }
+  .ah-resumen-rango .ah-rr-sub{ color:var(--text-dim); font-size:11.5px; margin-top:2px; }
+  .ah-resumen-rango details summary{ cursor:pointer; color:var(--text-dim); font-size:11.5px; margin-top:3px; }
+  .ah-resumen-rango-titulo{ font-size:13px; font-weight:700; color:var(--text); margin:0 0 6px; }
   .ah-recorrido-slider-wrap{ display:flex; align-items:center; gap:10px; margin:14px 0 4px; }
   #ah-recorrido-slider{ flex:1; }
   #ah-recorrido-hora{ font-size:12.5px; font-weight:700; color:var(--text-dim); white-space:nowrap; min-width:70px; text-align:right; }
@@ -3388,10 +3402,25 @@
             <select id="ah-f-historico-trabajo"><option value="">Todas las actividades</option></select>
           </div>
         </div>
-        <div class="avance-aviso" style="padding:0 0 8px;">El mapa muestra los movimientos de HOY: una sola línea por equipo (si lo usó más de un operador en el día, se ve como un solo recorrido). Para ver otro día, usa "📍 Ver recorrido por fecha" más abajo.</div>
+        <div class="ah-rango-campos">
+          <div class="maq-field">
+            <label for="ah-f-hoy-desde">Desde (hora)</label>
+            <input type="time" id="ah-f-hoy-desde" value="00:00">
+          </div>
+          <div class="maq-field">
+            <label for="ah-f-hoy-hasta">Hasta (hora)</label>
+            <input type="time" id="ah-f-hoy-hasta" value="23:59">
+          </div>
+          <div class="maq-field">
+            <label for="ah-f-hoy-ralenti">Ralentí desde (min)</label>
+            <input type="number" id="ah-f-hoy-ralenti" min="0.5" max="240" step="0.5" value="2">
+          </div>
+        </div>
+        <div class="avance-aviso" style="padding:0 0 8px;">El mapa muestra los movimientos de HOY en el horario elegido: una sola línea por equipo (si lo usó más de un operador en el día, se ve como un solo recorrido). Los puntos ⏸ son paradas (ralentí: el tractor no avanzó). Para otros días, usa "📍 Ver recorrido por fecha" más abajo.</div>
         <div id="ah-mapa-google-avance"></div>
         <div id="ah-historico-vacio" class="avance-aviso" style="display:none;">Sin movimientos registrados hoy en esta huerta.</div>
         <div class="ah-recorrido-sesiones" id="ah-leyenda-equipos" style="display:none;"></div>
+        <div class="ah-resumen-rango" id="ah-resumen-rango-hoy"></div>
         <div style="margin:6px 0 14px;">
           <a href="#" id="ah-link-borrar-historico" style="color:#c0392b; font-size:12.5px;">🗑️ Borrar todo el historial de avance</a>
         </div>
@@ -3561,10 +3590,29 @@
       <div class="maq-modal maq-modal-wide">
         <span class="maq-modal-close" id="ah-recorrido-close">&times;</span>
         <h3 style="margin-top:0;">Ver recorrido por fecha</h3>
-        <div class="maq-field">
-          <label>Fecha</label>
-          <input type="date" id="ah-recorrido-fecha">
+        <div class="ah-rango-campos">
+          <div class="maq-field">
+            <label for="ah-recorrido-fecha">Del día</label>
+            <input type="date" id="ah-recorrido-fecha">
+          </div>
+          <div class="maq-field">
+            <label for="ah-recorrido-fecha-hasta">Al día</label>
+            <input type="date" id="ah-recorrido-fecha-hasta">
+          </div>
+          <div class="maq-field">
+            <label for="ah-recorrido-h-desde">Desde (hora)</label>
+            <input type="time" id="ah-recorrido-h-desde" value="00:00">
+          </div>
+          <div class="maq-field">
+            <label for="ah-recorrido-h-hasta">Hasta (hora)</label>
+            <input type="time" id="ah-recorrido-h-hasta" value="23:59">
+          </div>
+          <div class="maq-field">
+            <label for="ah-recorrido-ralenti">Ralentí desde (min)</label>
+            <input type="number" id="ah-recorrido-ralenti" min="0.5" max="240" step="0.5" value="2">
+          </div>
         </div>
+        <p class="avance-aviso" style="padding:0 0 8px;">Para varios días, el horario se aplica a cada día (p. ej. del 15 al 19, de 7:00 a 12:00). Máximo 62 días.</p>
         <div class="maq-modal-status" id="ah-recorrido-status"></div>
         <div id="ah-recorrido-sesiones-vacio" class="avance-aviso" style="display:none;">Ese día no hay ningún recorrido registrado en esta huerta.</div>
         <div class="ah-recorrido-sesiones" id="ah-recorrido-sesiones-lista" style="display:none;"></div>
@@ -3574,8 +3622,9 @@
             <input type="range" id="ah-recorrido-slider" min="0" max="1000" value="1000">
             <span id="ah-recorrido-hora">--:--</span>
           </div>
-          <p class="avance-aviso" style="padding:6px 0 0;">Arrastra la barra para ver el recorrido hasta esa hora. Las flechas muestran hacia dónde se movió cada quien.</p>
+          <p class="avance-aviso" style="padding:6px 0 0;">Arrastra la barra para ver el recorrido hasta esa hora. Las flechas muestran hacia dónde se movió cada quien; los puntos ⏸ son paradas (ralentí).</p>
         </div>
+        <div class="ah-resumen-rango" id="ah-recorrido-resumen"></div>
       </div>
     </div>
 
@@ -6455,6 +6504,209 @@ function ahSuavizarTrazo_(puntos, toleranciaMetros){
 // quitar el "ver solo este" por sesión y dejar nada más dos filtros
 // (Operador, Actividad), con el mapa mostrando por default solo los
 // movimientos de HOY -- para otro día ya existe "Ver recorrido por fecha".
+// ---------------------------------------------------------------
+// Rango de horas/días + RALENTÍ -- petición de Carlos (oct-2026): "si
+// estoy viendo hoy a las 5 pm, quiero ver cuánto avanzó de las 7 am a las
+// 12 pm", también para varios días, y cuánto tiempo estuvo el tractor
+// detenido (ralentí). El cálculo lo hace el servidor (getAvancePorRango en
+// handlers.js); aquí se arman las ventanas de tiempo con la hora LOCAL de
+// quien ve el Panel y se muestra el resultado.
+// ---------------------------------------------------------------
+var AH_RALENTI_MIN_DEFAULT = 2;
+
+// fechaDesde/fechaHasta: 'YYYY-MM-DD'; horaDesde/horaHasta: 'HH:MM'. Una
+// ventana [inicioMs, finMs] por cada día del rango con ese horario (hora
+// local). null si algo no es válido (fechas al revés, hora "hasta" antes
+// de "desde", o más de 62 días).
+function ahVentanasRango_(fechaDesde, fechaHasta, horaDesde, horaHasta){
+  var mf = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var mh = /^(\d{2}):(\d{2})$/;
+  var fd = mf.exec(fechaDesde || ''), fh = mf.exec(fechaHasta || fechaDesde || '');
+  var hd = mh.exec(horaDesde || '00:00'), hh = mh.exec(horaHasta || '23:59');
+  if(!fd || !fh || !hd || !hh) return null;
+  var minDesde = Number(hd[1]) * 60 + Number(hd[2]);
+  var minHasta = Number(hh[1]) * 60 + Number(hh[2]);
+  if(minHasta <= minDesde) return null;
+  var dia = new Date(Number(fd[1]), Number(fd[2]) - 1, Number(fd[3]));
+  var ultimo = new Date(Number(fh[1]), Number(fh[2]) - 1, Number(fh[3]));
+  if(ultimo < dia) return null;
+  var ventanas = [];
+  while(dia <= ultimo){
+    if(ventanas.length >= 62) return null;
+    var a = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), Math.floor(minDesde / 60), minDesde % 60, 0, 0).getTime();
+    // "Hasta 12:00" incluye todo el minuto 12:00 (y 23:59 llega al final del día).
+    var b = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), Math.floor(minHasta / 60), minHasta % 60, 59, 999).getTime();
+    ventanas.push([a, b]);
+    dia = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate() + 1);
+  }
+  return ventanas;
+}
+
+// El mínimo de minutos para contar ralentí es editable y se recuerda en
+// este navegador (lo comparten el mapa de hoy y "Ver recorrido").
+function ahMinutosRalentiGuardados_(){
+  try {
+    var v = Number(window.localStorage.getItem('ah_ralenti_min'));
+    if(Number.isFinite(v) && v > 0) return v;
+  } catch(e) {}
+  return AH_RALENTI_MIN_DEFAULT;
+}
+function ahGuardarMinutosRalenti_(v){
+  var n = Number(v);
+  if(!Number.isFinite(n) || n <= 0) n = AH_RALENTI_MIN_DEFAULT;
+  n = Math.min(240, Math.max(0.5, n));
+  try { window.localStorage.setItem('ah_ralenti_min', String(n)); } catch(e) {}
+  ['ah-f-hoy-ralenti', 'ah-recorrido-ralenti'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el && Number(el.value) !== n) el.value = n;
+  });
+  return n;
+}
+
+function ahDuracionTexto_(minutos){
+  var m = Math.max(0, Math.round(Number(minutos) || 0));
+  if(m < 60) return m + ' min';
+  var h = Math.floor(m / 60);
+  var r = m % 60;
+  return h + ' h' + (r ? (' ' + r + ' min') : '');
+}
+
+function ahFechaHoraCorta_(ms, conFecha){
+  var d = new Date(ms);
+  var hora = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  if(!conFecha) return hora;
+  return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + hora;
+}
+
+function ahEtiquetaGrupoRango_(g){
+  var quien = (g.nombres || []).join(', ');
+  if(g.equipoUnidad) return '🚜 ' + g.equipoUnidad + (quien ? (' · ' + quien) : '');
+  return quien || 'Operador';
+}
+
+// Tabla de resumen por equipo: km, tiempo en movimiento, ralentí
+// acumulado (con el detalle de cada parada), sin señal, y pasadas por
+// cuadro. colorDe(g) -> color del renglón (el mismo de su línea en el mapa).
+function ahHtmlResumenRango_(resp, titulo, colorDe, varios){
+  var grupos = (resp && resp.grupos) || [];
+  var html = '<div class="ah-resumen-rango-titulo">' + escapeHtml(titulo) + '</div>';
+  if(grupos.length === 0) return html + '<div class="avance-aviso" style="padding:0;">Sin movimientos en ese horario.</div>';
+  var minRal = resp.minutosRalenti || AH_RALENTI_MIN_DEFAULT;
+  html += '<div class="table-wrap"><table><thead><tr>'
+    + '<th>Equipo / operador</th><th>Km</th><th>En movimiento</th><th>Ralentí (≥ ' + minRal + ' min)</th><th>Sin señal</th><th>Avance por cuadro</th>'
+    + '</tr></thead><tbody>';
+  html += grupos.map(function(g){
+    var color = colorDe ? colorDe(g) : '#9A9D9E';
+    var paradas = g.paradas || [];
+    var detalleParadas = paradas.length ? ('<details><summary>' + paradas.length + ' parada' + (paradas.length === 1 ? '' : 's') + '</summary>'
+      + paradas.map(function(p){
+        return '<div class="ah-rr-sub">⏸ ' + ahFechaHoraCorta_(p.inicio, varios) + '–' + ahFechaHoraCorta_(p.fin, false) + ' · ' + ahDuracionTexto_(p.minutos) + '</div>';
+      }).join('') + '</details>') : '<div class="ah-rr-sub">sin paradas</div>';
+    var cuadros = (g.cuadros || []).map(function(c){
+      var pct = (c.porcentaje !== null && c.porcentaje !== undefined) ? (' · ' + Number(Number(c.porcentaje).toFixed(2)) + '%') : '';
+      return '<div>' + escapeHtml(c.cuadro || '') + ': <span class="ah-rr-num">' + Number(Number(c.pasadas).toFixed(2)) + '</span> pasadas' + pct + '</div>';
+    }).join('') || '<span class="ah-rr-sub">—</span>';
+    var trabajos = (g.trabajos || []).length ? ('<div class="ah-rr-sub">' + escapeHtml(g.trabajos.join(', ')) + '</div>') : '';
+    return '<tr>'
+      + '<td><span class="ah-recorrido-color-chip" style="background:' + color + ';margin-right:6px;"></span>' + escapeHtml(ahEtiquetaGrupoRango_(g)) + trabajos + '</td>'
+      + '<td class="ah-rr-num">' + Number(g.km).toFixed(2) + '</td>'
+      + '<td class="ah-rr-num">' + ahDuracionTexto_(g.minutosMovimiento) + '</td>'
+      + '<td><span class="ah-rr-num ah-rr-ralenti">' + ahDuracionTexto_(g.minutosRalenti) + '</span>' + detalleParadas + '</td>'
+      + '<td class="ah-rr-num">' + ahDuracionTexto_(g.minutosSinSenal) + '</td>'
+      + '<td>' + cuadros + '</td>'
+      + '</tr>';
+  }).join('');
+  return html + '</tbody></table></div>';
+}
+
+// Un marcador ⏸ por parada (círculo ámbar; más grande entre más dura),
+// con el detalle al pasar el mouse o al tocarlo.
+function ahDibujarParadasEnMapa_(mapa, grupos, marcadoresAnteriores, varios){
+  (marcadoresAnteriores || []).forEach(function(m){ m.setMap(null); });
+  if(!mapa || typeof google === 'undefined' || !google.maps) return [];
+  var info = null;
+  var nuevos = [];
+  (grupos || []).forEach(function(g){
+    (g.paradas || []).forEach(function(p){
+      var texto = '⏸ ' + ahEtiquetaGrupoRango_(g) + ' · ' + ahFechaHoraCorta_(p.inicio, varios) + '–' + ahFechaHoraCorta_(p.fin, false) + ' (' + ahDuracionTexto_(p.minutos) + ')';
+      var m = new google.maps.Marker({
+        position: { lat: p.lat, lng: p.lng },
+        map: mapa,
+        title: texto,
+        label: { text: '⏸', color: '#1C1E1F', fontSize: '11px', fontWeight: '700' },
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: Math.min(16, 8 + Math.sqrt(Number(p.minutos) || 0)),
+          fillColor: '#E8871E', fillOpacity: 0.95, strokeColor: '#1C1E1F', strokeWeight: 1.5,
+        },
+        zIndex: 5,
+      });
+      if(google.maps.InfoWindow && m.addListener){
+        m.addListener('click', function(){
+          if(!info) info = new google.maps.InfoWindow();
+          info.setContent('<div style="color:#1C1E1F;font-size:12.5px;">' + escapeHtml(texto) + '</div>');
+          info.open(mapa, m);
+        });
+      }
+      nuevos.push(m);
+    });
+  });
+  return nuevos;
+}
+
+// ---------- Mapa de HOY ----------
+var AH_RANGO_HOY = null; // {diaCompleto, puntosPorSesion:{avanceId:[...]}, grupos:[...], minutosRalenti}
+var AH_RANGO_HOY_TOKEN = 0;
+var AH_GOOGLE_PARADAS_AVANCE = [];
+
+function ahHorarioHoy_(){
+  var desde = (document.getElementById('ah-f-hoy-desde') || {}).value || '00:00';
+  var hasta = (document.getElementById('ah-f-hoy-hasta') || {}).value || '23:59';
+  return { desde: desde, hasta: hasta, diaCompleto: desde === '00:00' && hasta === '23:59' };
+}
+
+// Mismo color que la línea de ese equipo en el mapa (sin equipo, el mapa
+// agrupa por recorrido: se usa el del primero).
+function ahColorGrupoRangoHoy_(g){
+  if(g.codigoUnidad) return ahColorGrupoHistorico_('equipo:' + g.codigoUnidad);
+  return (g.avanceIds && g.avanceIds.length) ? ahColorGrupoHistorico_('sesion:' + g.avanceIds[0]) : '#9A9D9E';
+}
+
+function ahCargarRangoHoy_(){
+  var cont = document.getElementById('ah-resumen-rango-hoy');
+  if(!AH_HUERTA_ACTUAL || !cont) return;
+  var horario = ahHorarioHoy_();
+  var hoy = ahFechaLocalHoy_();
+  var ventanas = ahVentanasRango_(hoy, hoy, horario.desde, horario.hasta);
+  if(!ventanas){
+    cont.innerHTML = '<div class="maq-modal-status show err">La hora "hasta" debe ser después de la hora "desde".</div>';
+    return;
+  }
+  var token = ++AH_RANGO_HOY_TOKEN;
+  var huerta = AH_HUERTA_ACTUAL;
+  cont.innerHTML = '<div class="avance-aviso" style="padding:0;">Calculando avance y ralentí...</div>';
+  google.script.run
+    .withSuccessHandler(function(resp){
+      if(token !== AH_RANGO_HOY_TOKEN || huerta !== AH_HUERTA_ACTUAL) return; // ya se pidió otro rango
+      if(!resp || resp.success === false){
+        cont.innerHTML = '<div class="maq-modal-status show err">' + escapeHtml((resp && resp.error) || 'No se pudo calcular el avance.') + '</div>';
+        return;
+      }
+      var porSesion = {};
+      (resp.sesiones || []).forEach(function(s){ porSesion[s.avanceId] = s.puntos || []; });
+      AH_RANGO_HOY = { diaCompleto: horario.diaCompleto, puntosPorSesion: porSesion, grupos: resp.grupos || [], minutosRalenti: resp.minutosRalenti };
+      ahDibujarHistoricoGoogleAvance_();
+      var titulo = 'Resumen de hoy, ' + horario.desde + ' a ' + horario.hasta;
+      cont.innerHTML = ahHtmlResumenRango_(resp, titulo, ahColorGrupoRangoHoy_, false);
+    })
+    .withFailureHandler(function(err){
+      if(token !== AH_RANGO_HOY_TOKEN) return;
+      cont.innerHTML = '<div class="maq-modal-status show err">' + escapeHtml((err && err.message) || 'No se pudo calcular el avance. Revisa tu conexión.') + '</div>';
+    })
+    .getAvancePorRango(ACCESS_CODE, PANEL_USUARIO, huerta, ventanas, ahMinutosRalentiGuardados_(),
+      { operador: AH_HISTORICO_FILTRO_OPERADOR, trabajo: AH_HISTORICO_FILTRO_TRABAJO });
+}
+
 var AH_HISTORICO_FILTRO_OPERADOR = ''; // '' = todos los operadores
 var AH_HISTORICO_FILTRO_TRABAJO = ''; // '' = todas las actividades
 
@@ -6500,12 +6752,20 @@ function ahColorGrupoHistorico_(clave){
 // de Operador y/o Actividad elegido (vacío = sin filtrar esa parte).
 function ahSesionesHistoricoFiltradas_(){
   var hoy = ahFechaLocalHoy_();
-  return (AH_HISTORICO_CACHE || []).filter(function(s){
+  var lista = (AH_HISTORICO_CACHE || []).filter(function(s){
     if(ahFechaLocalDe_(s.fechaInicio) !== hoy) return false;
     if(AH_HISTORICO_FILTRO_OPERADOR && s.nombre !== AH_HISTORICO_FILTRO_OPERADOR) return false;
     if(AH_HISTORICO_FILTRO_TRABAJO && s.trabajo !== AH_HISTORICO_FILTRO_TRABAJO) return false;
     return true;
   });
+  // Con un horario elegido (no el día completo), cada recorrido se dibuja
+  // solo con sus puntos de ese horario (los regresa getAvancePorRango).
+  if(AH_RANGO_HOY && !AH_RANGO_HOY.diaCompleto){
+    lista = lista.map(function(s){
+      return Object.assign({}, s, { puntos: AH_RANGO_HOY.puntosPorSesion[s.avanceId] || [] });
+    });
+  }
+  return lista;
 }
 
 // Agrupa las sesiones ya filtradas por equipo: concatena los puntos de
@@ -6611,6 +6871,7 @@ function ahDibujarHistoricoGoogleAvance_(){
     return marcador;
   });
   ahRenderLeyendaHistorico_(grupos);
+  AH_GOOGLE_PARADAS_AVANCE = ahDibujarParadasEnMapa_(AH_GOOGLE_MAP_AVANCE, AH_RANGO_HOY ? AH_RANGO_HOY.grupos : [], AH_GOOGLE_PARADAS_AVANCE, false);
 }
 
 // Lista debajo del mapa con un renglón por EQUIPO (color + nombre +
@@ -6639,10 +6900,19 @@ function ahRenderLeyendaHistorico_(grupos){
 document.getElementById('ah-f-historico-operador').addEventListener('change', function(){
   AH_HISTORICO_FILTRO_OPERADOR = this.value;
   ahDibujarHistoricoGoogleAvance_();
+  ahCargarRangoHoy_();
 });
 document.getElementById('ah-f-historico-trabajo').addEventListener('change', function(){
   AH_HISTORICO_FILTRO_TRABAJO = this.value;
   ahDibujarHistoricoGoogleAvance_();
+  ahCargarRangoHoy_();
+});
+(function(){ var el = document.getElementById('ah-f-hoy-ralenti'); if(el) el.value = ahMinutosRalentiGuardados_(); })();
+document.getElementById('ah-f-hoy-desde').addEventListener('change', ahCargarRangoHoy_);
+document.getElementById('ah-f-hoy-hasta').addEventListener('change', ahCargarRangoHoy_);
+document.getElementById('ah-f-hoy-ralenti').addEventListener('change', function(){
+  ahGuardarMinutosRalenti_(this.value);
+  ahCargarRangoHoy_();
 });
 
 // 'completado' si TODAS sus actividades ya están completadas (y tiene al
@@ -6728,6 +6998,9 @@ var AH_RECORRIDO_SELECCIONADOS = new Set(); // avanceId de las sesiones marcadas
 var AH_RECORRIDO_COLORES = ['#1f6fd6', '#c0392b', '#1e7a44', '#8a5a00', '#8e44ad', '#16a085', '#d35400', '#2c3e50'];
 var AH_GOOGLE_MAP_RECORRIDO = null;
 var AH_GOOGLE_POLYLINES_RECORRIDO = {}; // avanceId -> google.maps.Polyline
+var AH_RECORRIDO_RESPUESTA = null; // respuesta completa de getAvancePorRango (grupos con ralentí/avance)
+var AH_RECORRIDO_VARIOS_DIAS = false; // el rango elegido abarca más de un día (se muestran fechas además de horas)
+var AH_GOOGLE_PARADAS_RECORRIDO = [];
 
 function ahInicializarMapaRecorridoSiHaceFalta_(){
   if(AH_GOOGLE_MAP_RECORRIDO) return;
@@ -6789,7 +7062,7 @@ function ahDibujarRecorridoSeleccionado_(){
   var maxSlider = Number(slider.max) || 1000;
   var frac = maxSlider > 0 ? (Number(slider.value) / maxSlider) : 1;
   var tiempoLimite = rango.min + (rango.max - rango.min) * frac;
-  horaEl.textContent = ahHoraTexto_(tiempoLimite);
+  horaEl.textContent = AH_RECORRIDO_VARIOS_DIAS ? ahFechaHoraCorta_(tiempoLimite, true) : ahHoraTexto_(tiempoLimite);
   var idsVistos = {};
   (AH_RECORRIDO_SESIONES || []).forEach(function(s){
     if(!AH_RECORRIDO_SELECCIONADOS.has(s.avanceId)) return;
@@ -6839,7 +7112,7 @@ function ahRenderRecorridoSesiones_(){
   mapaWrap.style.display = '';
   lista.innerHTML = AH_RECORRIDO_SESIONES.map(function(s){
     var color = ahColorSesionRecorrido_(s.avanceId);
-    var horaIni = s.fechaInicio ? ahHoraTexto_(new Date(s.fechaInicio).getTime()) : '--:--';
+    var horaIni = s.fechaInicio ? (AH_RECORRIDO_VARIOS_DIAS ? ahFechaHoraCorta_(new Date(s.fechaInicio).getTime(), true) : ahHoraTexto_(new Date(s.fechaInicio).getTime())) : '--:--';
     var horaFin = s.fechaFin ? ahHoraTexto_(new Date(s.fechaFin).getTime()) : 'en curso';
     var checked = AH_RECORRIDO_SELECCIONADOS.has(s.avanceId) ? ' checked' : '';
     var equipoTexto = s.equipoUnidad ? (' · 🚜 ' + escapeHtml(s.equipoUnidad)) : '';
@@ -6851,25 +7124,50 @@ function ahRenderRecorridoSesiones_(){
   }).join('');
 }
 
+// Busca los recorridos del RANGO elegido (uno o varios días, con el mismo
+// horario cada día) con getAvancePorRango -- además de los puntos para el
+// mapa, trae el resumen por equipo (km, ralentí acumulado, paradas,
+// pasadas por cuadro).
 function ahBuscarRecorridoFecha_(){
   var statusEl = document.getElementById('ah-recorrido-status');
+  var resumenEl = document.getElementById('ah-recorrido-resumen');
   var fecha = document.getElementById('ah-recorrido-fecha').value;
+  var fechaHastaEl = document.getElementById('ah-recorrido-fecha-hasta');
   if(!AH_HUERTA_ACTUAL) return;
   if(!fecha){
     statusEl.textContent = 'Elige una fecha.';
     statusEl.className = 'maq-modal-status show err';
     return;
   }
+  // "Al día" vacío o antes de "Del día": se toma un solo día.
+  if(!fechaHastaEl.value || fechaHastaEl.value < fecha) fechaHastaEl.value = fecha;
+  var fechaHasta = fechaHastaEl.value;
+  var horaDesde = document.getElementById('ah-recorrido-h-desde').value || '00:00';
+  var horaHasta = document.getElementById('ah-recorrido-h-hasta').value || '23:59';
+  var ventanas = ahVentanasRango_(fecha, fechaHasta, horaDesde, horaHasta);
+  if(!ventanas){
+    statusEl.textContent = 'Revisa el rango: la hora "hasta" debe ser después de la hora "desde", y máximo 62 días.';
+    statusEl.className = 'maq-modal-status show err';
+    return;
+  }
+  AH_RECORRIDO_VARIOS_DIAS = ventanas.length > 1;
   statusEl.textContent = 'Buscando...';
   statusEl.className = 'maq-modal-status show';
+  if(resumenEl) resumenEl.innerHTML = '';
   document.getElementById('ah-recorrido-sesiones-vacio').style.display = 'none';
   document.getElementById('ah-recorrido-sesiones-lista').style.display = 'none';
   document.getElementById('ah-recorrido-mapa-wrap').style.display = 'none';
   google.script.run
-    .withSuccessHandler(function(result){
+    .withSuccessHandler(function(resp){
+      if(resp && resp.success === false){
+        statusEl.textContent = resp.error || 'No se pudo cargar el recorrido.';
+        statusEl.className = 'maq-modal-status show err';
+        return;
+      }
       statusEl.textContent = '';
       statusEl.className = 'maq-modal-status';
-      AH_RECORRIDO_SESIONES = result || [];
+      AH_RECORRIDO_RESPUESTA = resp || { grupos: [], sesiones: [] };
+      AH_RECORRIDO_SESIONES = AH_RECORRIDO_RESPUESTA.sesiones || [];
       AH_RECORRIDO_SELECCIONADOS = new Set();
       ahRenderRecorridoSesiones_();
       if(AH_RECORRIDO_SESIONES.length > 0){
@@ -6877,12 +7175,20 @@ function ahBuscarRecorridoFecha_(){
         slider.value = slider.max;
         ahDibujarRecorridoSeleccionado_();
       }
+      AH_GOOGLE_PARADAS_RECORRIDO = ahDibujarParadasEnMapa_(AH_GOOGLE_MAP_RECORRIDO, AH_RECORRIDO_RESPUESTA.grupos, AH_GOOGLE_PARADAS_RECORRIDO, AH_RECORRIDO_VARIOS_DIAS);
+      if(resumenEl && AH_RECORRIDO_SESIONES.length > 0){
+        var titulo = 'Resumen ' + (AH_RECORRIDO_VARIOS_DIAS ? ('del ' + fecha + ' al ' + fechaHasta) : ('del ' + fecha)) + ', ' + horaDesde + ' a ' + horaHasta
+          + (AH_RECORRIDO_VARIOS_DIAS ? ' cada día (acumulado)' : '');
+        resumenEl.innerHTML = ahHtmlResumenRango_(AH_RECORRIDO_RESPUESTA, titulo, function(g){
+          return (g.avanceIds && g.avanceIds.length) ? ahColorSesionRecorrido_(g.avanceIds[0]) : '#9A9D9E';
+        }, AH_RECORRIDO_VARIOS_DIAS);
+      }
     })
     .withFailureHandler(function(err){
       statusEl.textContent = (err && err.message) || 'No se pudo cargar el recorrido. Revisa tu conexión.';
       statusEl.className = 'maq-modal-status show err';
     })
-    .getRecorridosPorFecha(ACCESS_CODE, PANEL_USUARIO, AH_HUERTA_ACTUAL, fecha);
+    .getAvancePorRango(ACCESS_CODE, PANEL_USUARIO, AH_HUERTA_ACTUAL, ventanas, ahMinutosRalentiGuardados_(), null);
 }
 
 function ahAbrirModalRecorrido_(){
@@ -6897,6 +7203,11 @@ function ahAbrirModalRecorrido_(){
   var hoy = new Date();
   var fechaHoy = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
   document.getElementById('ah-recorrido-fecha').value = fechaHoy;
+  document.getElementById('ah-recorrido-fecha-hasta').value = fechaHoy;
+  document.getElementById('ah-recorrido-ralenti').value = ahMinutosRalentiGuardados_();
+  AH_RECORRIDO_RESPUESTA = null;
+  AH_GOOGLE_PARADAS_RECORRIDO = ahDibujarParadasEnMapa_(null, [], AH_GOOGLE_PARADAS_RECORRIDO, false);
+  document.getElementById('ah-recorrido-resumen').innerHTML = '';
   document.getElementById('ah-recorrido-overlay').classList.add('open');
   ahCargarGoogleMapsSiHaceFalta_(function(){
     ahInicializarMapaRecorridoSiHaceFalta_();
@@ -6916,6 +7227,14 @@ document.getElementById('ah-recorrido-overlay').addEventListener('click', functi
   if(ev.target === document.getElementById('ah-recorrido-overlay')) ahCerrarModalRecorrido_();
 });
 document.getElementById('ah-recorrido-fecha').addEventListener('change', ahBuscarRecorridoFecha_);
+document.getElementById('ah-recorrido-fecha-hasta').addEventListener('change', ahBuscarRecorridoFecha_);
+document.getElementById('ah-recorrido-h-desde').addEventListener('change', ahBuscarRecorridoFecha_);
+document.getElementById('ah-recorrido-h-hasta').addEventListener('change', ahBuscarRecorridoFecha_);
+document.getElementById('ah-recorrido-ralenti').addEventListener('change', function(){
+  ahGuardarMinutosRalenti_(this.value);
+  ahBuscarRecorridoFecha_();
+  ahCargarRangoHoy_(); // el mismo mínimo aplica también al mapa de hoy
+});
 document.getElementById('ah-recorrido-slider').addEventListener('input', ahDibujarRecorridoSeleccionado_);
 document.getElementById('ah-recorrido-sesiones-lista').addEventListener('change', function(ev){
   var chk = ev.target;
@@ -7719,6 +8038,9 @@ function cargarAvanceHuertaPanel_(huerta){
   AH_HISTORICO_CACHE = [];
   AH_HISTORICO_FILTRO_OPERADOR = ''; // no arrastrar a la huerta nueva los filtros del mapa de la anterior
   AH_HISTORICO_FILTRO_TRABAJO = '';
+  AH_RANGO_HOY = null;
+  AH_RANGO_HOY_TOKEN++;
+  (function(){ var c = document.getElementById('ah-resumen-rango-hoy'); if(c) c.innerHTML = ''; })();
   AH_CUADROS = [];
   AH_ACTIVIDADES = [];
   AH_CATALOGO = [];
@@ -7744,6 +8066,7 @@ function cargarAvanceHuertaPanel_(huerta){
         AH_HISTORICO_CACHE = historico || [];
         ahRenderTabla_(AH_HISTORICO_CACHE);
         ahDibujarHistoricoGoogleAvance_();
+        ahCargarRangoHoy_();
       })
       .withFailureHandler(function(){ ahRenderTabla_([]); ahDibujarHistoricoGoogleAvance_(); })
       .getAvanceHuerta(huerta);

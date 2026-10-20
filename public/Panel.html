@@ -297,8 +297,11 @@
   .ah-mapa-google-ir{ display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap; }
   .ah-mapa-google-ir input{ flex:1; min-width:220px; }
   .ah-paso-subtitulo{ font-size:13px; color:var(--text); font-weight:700; margin:4px 0 8px; }
+  /* Fondo y texto con las variables del tema oscuro del Panel. Antes usaba
+     una variable "bg-soft" que no existe aquí, con respaldo gris claro: quedaba
+     fondo claro con el texto claro del tema y el nombre del cuadro no se leía. */
   .ah-cuadro-chip{
-    display:inline-flex; align-items:center; gap:6px; background:var(--bg-soft, #F3F3F3);
+    display:inline-flex; align-items:center; gap:6px; background:var(--panel-2); color:var(--text);
     border:1px solid var(--line); border-radius:20px; padding:5px 10px 5px 12px; font-size:12.5px; font-weight:600;
   }
   .ah-cuadro-chip a{ color:var(--text-dim); text-decoration:none; font-weight:700; padding:0 2px; }
@@ -315,14 +318,14 @@
      que no aplican aquí). */
   .ah-prioridad-num{
     display:inline-flex; align-items:center; justify-content:center;
-    width:24px; height:24px; border-radius:6px; background:var(--bg-soft,#F3F3F3);
-    border:1px solid var(--line); font-size:12.5px; font-weight:700; color:var(--text-dim);
+    width:24px; height:24px; border-radius:6px; background:var(--panel-2);
+    border:1px solid var(--line); font-size:12.5px; font-weight:700; color:var(--text);
   }
   .ah-campo-nombre{ font-weight:700; font-size:13.5px; color:var(--text); }
   .ah-campo-sub{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
   .ah-prog-wrap{ display:flex; align-items:center; gap:8px; min-width:140px; }
   .ah-prog-bar-track{
-    flex:1; height:8px; border-radius:5px; background:var(--bg-soft,#E7E7E7);
+    flex:1; height:8px; border-radius:5px; background:var(--line);
     overflow:hidden; min-width:70px;
   }
   .ah-prog-bar-fill{ height:100%; border-radius:5px; background:#8a5a00; transition:width .2s; }

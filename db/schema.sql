@@ -239,6 +239,20 @@ CREATE TABLE IF NOT EXISTS maquinaria (
   INDEX idx_maquinaria_departamento (departamento)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- color_mapa (oct-2026): color ('#rrggbb') con el que se dibuja el
+-- recorrido de ese equipo en el mapa de Avance de huerta, elegido por
+-- Carlos desde el Panel. NULL = color automático.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'color_mapa'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE maquinaria ADD COLUMN color_mapa VARCHAR(7) NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- ------------------------------------------------------------
 -- Diesel entregado a cada huerta (a granel, por el encargado de diesel),
 -- para poder calcular cuánto le queda disponible a cada huerta:

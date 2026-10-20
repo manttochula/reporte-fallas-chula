@@ -6204,14 +6204,75 @@ async function eliminarActividadCatalogo(code, nombreUsuario, id) {
 // 'maquinaria'/'catalogo', como getMaquinaria/getUsuariosOperadoresApp),
 // para que alguien con acceso nada más a Avance Huerta pueda planificar
 // trabajo sin que le haga falta también permiso sobre el Catálogo completo.
+// ------------------------------------------------------------
+// Equipos para Avance de huerta -- petición de Carlos (oct-2026): "para
+// seleccionar los equipos para el avance huerta sea únicamente tractores y
+// retroexcavadora". Se decide con el TIPO DE UNIDAD capturado en
+// Maquinaria (maquinaria.tipo_unidad: "Tractor", "Retro",
+// "Retroexcavadora"... sin importar mayúsculas). Protección: si NINGÚN
+// equipo tiene todavía tipo Tractor/Retro capturado, se regresa la lista
+// de antes (todo lo que no es implemento) para no dejar a nadie sin poder
+// iniciar su recorrido -- `filtradoPorTipo` dice cuál de los 2 casos fue.
+function esEquipoAvanceHuerta_(tipoUnidad) {
+  return /tractor|retro/i.test((tipoUnidad || '').toString());
+}
+
+async function equiposAvanceHuerta_() {
+  const [rows] = await pool.query(
+    'SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, tipo_unidad AS TipoUnidad, color_mapa AS ColorMapa FROM maquinaria ORDER BY unidad'
+  );
+  const porTipo = rows.filter((r) => esEquipoAvanceHuerta_(r.TipoUnidad));
+  const filtradoPorTipo = porTipo.length > 0;
+  const lista = filtradoPorTipo ? porTipo : rows.filter((r) => !esImplemento_(r.Unidad));
+  const colores = {};
+  rows.forEach((r) => { if (colorMapaValido_(r.ColorMapa)) colores[r.CodigoUnidad] = r.ColorMapa.toLowerCase(); });
+  return {
+    filtradoPorTipo,
+    equipos: lista.map((r) => ({ codigo: r.CodigoUnidad, unidad: r.Unidad, tipo: r.TipoUnidad || null })),
+    colores,
+    implementos: rows.filter((r) => esImplemento_(r.Unidad)).map((r) => ({ codigo: r.CodigoUnidad, unidad: r.Unidad })),
+  };
+}
+
+// Abierta (sin permiso especial, solo lectura): la usan el celular (para
+// ofrecer solo tractores/retros al iniciar un recorrido) y el Panel (para
+// los colores de cada equipo en el mapa).
+async function getEquiposAvanceHuerta() {
+  const r = await equiposAvanceHuerta_();
+  return { filtradoPorTipo: r.filtradoPorTipo, equipos: r.equipos, colores: r.colores };
+}
+
+// Colores de cada equipo en el mapa de Avance de huerta -- petición de
+// Carlos (oct-2026): "poder cambiarles los colores al traslado, esos que se
+// asignen conforme el tractor". Se guarda en maquinaria.color_mapa
+// ('#rrggbb'), así todos los que ven el Panel ven el mismo color. null =
+// quitar el color propio (vuelve al automático).
+function colorMapaValido_(c) {
+  return typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c.trim());
+}
+
+async function guardarColorEquipoMapa(code, nombreUsuario, codigoUnidad, color) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const codigo = (codigoUnidad || '').toString().trim();
+  if (!codigo) return { success: false, error: 'Falta indicar el equipo.' };
+  let valor = null;
+  if (color !== null && color !== undefined && color !== '') {
+    if (!colorMapaValido_(color)) return { success: false, error: 'El color no es válido (debe ser como #1f6fd6).' };
+    valor = color.trim().toLowerCase();
+  }
+  const [res] = await pool.query('UPDATE maquinaria SET color_mapa = ? WHERE codigo_unidad = ?', [valor, codigo]);
+  if (!res.affectedRows) return { success: false, error: 'Ese equipo ya no existe en Maquinaria.' };
+  return { success: true, color: valor };
+}
+
 async function getRecursosParaAvanceHuerta(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
-  const [rows] = await pool.query('SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria ORDER BY unidad');
-  const equipos = rows.filter((r) => !esImplemento_(r.Unidad)).map((r) => ({ codigo: r.CodigoUnidad, unidad: r.Unidad }));
-  const implementos = rows.filter((r) => esImplemento_(r.Unidad)).map((r) => ({ codigo: r.CodigoUnidad, unidad: r.Unidad }));
+  const r = await equiposAvanceHuerta_();
+  const equipos = r.equipos.map((e) => ({ codigo: e.codigo, unidad: e.unidad }));
+  const implementos = r.implementos;
   const [usuarios] = await pool.query('SELECT nombre, modulos FROM usuarios ORDER BY nombre');
-  const operadores = usuarios.filter((r) => r.nombre && tieneAccesoModulo_(r.modulos, 'Reportar')).map((r) => r.nombre);
-  return { equipos, implementos, operadores };
+  const operadores = usuarios.filter((u) => u.nombre && tieneAccesoModulo_(u.modulos, 'Reportar')).map((u) => u.nombre);
+  return { equipos, implementos, operadores, equiposFiltradosPorTipo: r.filtradoPorTipo };
 }
 
 // Crea, para CADA cuadro en cuadroIds, una fila de huerta_actividades a
@@ -7911,6 +7972,9 @@ module.exports = {
   tramosDeRecorrido_,
   margenCompletado_,
   normalizarTrabajoAvance_,
+  getEquiposAvanceHuerta,
+  guardarColorEquipoMapa,
+  esEquipoAvanceHuerta_,
   intervaloSurcosValido_,
   guardarDireccionSurcosCuadro,
   rumboTramo_,

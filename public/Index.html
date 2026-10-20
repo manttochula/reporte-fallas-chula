@@ -3191,17 +3191,39 @@ function avancePoblarSelectTrabajo_(){
 // ya filtrado (huerta/ubicación/equipo asignado a esta persona) que el
 // resto de la app -- sin incluir implementos, que no son "con qué se
 // trabaja" sino lo que se le engancha al tractor.
+// Petición de Carlos (oct-2026): para Avance huerta, SOLO tractores y
+// retroexcavadoras -- según el tipo de unidad capturado en Maquinaria (lo
+// decide el servidor: getEquiposAvanceHuerta). null = todavía no se sabe
+// (sin señal, o ningún equipo tiene ese tipo capturado): se muestra la
+// lista de siempre para no dejar al operador sin poder trabajar.
+var AVANCE_EQUIPOS_PERMITIDOS = null;
+
+function avanceCargarEquiposPermitidos_(alTerminar){
+  google.script.run
+    .withSuccessHandler(function(r){
+      AVANCE_EQUIPOS_PERMITIDOS = (r && r.filtradoPorTipo && Array.isArray(r.equipos))
+        ? new Set(r.equipos.map(function(e){ return String(e.codigo); }))
+        : null;
+      if(alTerminar) alTerminar();
+    })
+    .withFailureHandler(function(){ if(alTerminar) alTerminar(); })
+    .getEquiposAvanceHuerta();
+}
+
 function avancePoblarSelectEquipo_(){
   var sel = document.getElementById('avance-f-equipo');
   if(!sel) return;
   var valorAnterior = sel.value;
   var soloEquipos = (UNIDADES || []).filter(function(u){ return !u.l.trim().toUpperCase().startsWith('IA'); });
+  if(AVANCE_EQUIPOS_PERMITIDOS){
+    soloEquipos = soloEquipos.filter(function(u){ return AVANCE_EQUIPOS_PERMITIDOS.has(String(u.v)); });
+  }
   sel.innerHTML = '';
   var placeholder = document.createElement('option');
   placeholder.value = '';
   placeholder.disabled = true;
   placeholder.selected = true;
-  placeholder.textContent = 'Selecciona un equipo';
+  placeholder.textContent = soloEquipos.length ? 'Selecciona un tractor o retroexcavadora' : 'No hay tractores ni retroexcavadoras disponibles';
   sel.appendChild(placeholder);
   soloEquipos.forEach(function(u){
     var opt = document.createElement('option');
@@ -3327,6 +3349,9 @@ function cargarAvanceHuerta(huerta){
     // script de Google Maps, no sigas pintando datos de la huerta vieja.
     if(AVANCE_HUERTA_ACTUAL !== huerta) return;
     avancePoblarSelectEquipo_();
+    avanceCargarEquiposPermitidos_(function(){
+      if(AVANCE_HUERTA_ACTUAL === huerta) avancePoblarSelectEquipo_();
+    });
     avanceCargarHistorico_();
     avanceCargarCuadrosYActividades_();
     avanceReanudarSiHayAbierto_();

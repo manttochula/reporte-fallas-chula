@@ -345,6 +345,8 @@
     border:1px solid var(--line); border-radius:6px; padding:8px; margin:8px 0;
   }
   .ah-recorrido-sesion-item{ display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+  .ah-color-equipo{ width:26px; height:20px; padding:0; border:1px solid var(--line); border-radius:4px; background:none; cursor:pointer; flex:none; }
+  .ah-color-equipo-quitar{ color:var(--text-dim); font-size:11.5px; margin-left:6px; }
   .ah-recorrido-color-chip{ width:12px; height:12px; border-radius:3px; flex:none; display:inline-block; }
   /* Rango de horas + ralentí (Avance de huerta) */
   .ah-rango-campos{ display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
@@ -3427,6 +3429,7 @@
         <div id="ah-mapa-google-avance"></div>
         <div id="ah-historico-vacio" class="avance-aviso" style="display:none;">Sin movimientos registrados hoy en esta huerta.</div>
         <div class="ah-recorrido-sesiones" id="ah-leyenda-equipos" style="display:none;"></div>
+        <div class="maq-modal-status" id="ah-color-equipo-status"></div>
         <div class="ah-resumen-rango" id="ah-resumen-rango-hoy"></div>
         <div style="margin:6px 0 14px;">
           <a href="#" id="ah-link-borrar-historico" style="color:#c0392b; font-size:12.5px;">🗑️ Borrar todo el historial de avance</a>
@@ -3517,8 +3520,9 @@
                 <select id="ah-f-asignar-catalogo"></select>
               </div>
               <div class="maq-field" style="flex:1; min-width:200px;">
-                <label>Equipo (tractor)</label>
+                <label>Equipo (tractor o retroexcavadora)</label>
                 <select id="ah-f-asignar-equipo"><option value="">Sin asignar (cuenta cualquiera)</option></select>
+                <div class="ah-campo-sub" id="ah-f-asignar-equipo-aviso" style="display:none;"></div>
               </div>
               <div class="maq-field" style="flex:1; min-width:200px;">
                 <label>Implemento (apero)</label>
@@ -6777,7 +6781,23 @@ function ahClaveGrupoHistorico_(s){
 // sobre la lista ya filtrada de este render -- así un equipo conserva
 // siempre el mismo color aunque Carlos cambie el filtro de Operador/
 // Actividad o entre un día y otro.
+// Colores elegidos por Carlos para cada equipo (maquinaria.color_mapa) --
+// {codigoUnidad: '#rrggbb'}. Si un equipo no tiene color propio, se usa el
+// automático de siempre.
+var AH_COLORES_EQUIPOS = {};
+
+function ahCargarColoresEquipos_(alTerminar){
+  google.script.run
+    .withSuccessHandler(function(r){
+      AH_COLORES_EQUIPOS = (r && r.colores) || {};
+      if(alTerminar) alTerminar();
+    })
+    .withFailureHandler(function(){ if(alTerminar) alTerminar(); })
+    .getEquiposAvanceHuerta();
+}
+
 function ahColorGrupoHistorico_(clave){
+  if(clave && clave.indexOf('equipo:') === 0 && AH_COLORES_EQUIPOS[clave.slice(7)]) return AH_COLORES_EQUIPOS[clave.slice(7)];
   var claves = [];
   (AH_HISTORICO_CACHE || []).forEach(function(s){
     var k = ahClaveGrupoHistorico_(s);
@@ -6930,12 +6950,52 @@ function ahRenderLeyendaHistorico_(grupos){
   cont.style.display = '';
   cont.innerHTML = lista.map(function(g){
     var enCurso = !g.fechaFinUltima ? ' · en curso' : '';
+    // Equipo con código: se le puede cambiar el color (se guarda para todos).
+    var codigo = (g.clave || '').indexOf('equipo:') === 0 ? g.clave.slice(7) : '';
+    var muestra = codigo
+      ? '<input type="color" class="ah-color-equipo" data-codigo="' + escapeHtml(codigo) + '" value="' + g.color + '" title="Cambiar el color de este equipo en el mapa">'
+      : '<span class="ah-recorrido-color-chip" style="background:' + g.color + ';"></span>';
+    var quitar = (codigo && AH_COLORES_EQUIPOS[codigo])
+      ? ' <a href="#" class="ah-color-equipo-quitar" data-codigo="' + escapeHtml(codigo) + '" title="Volver al color automático">↺ automático</a>' : '';
     return '<div class="ah-recorrido-sesion-item">'
-      + '<span class="ah-recorrido-color-chip" style="background:' + g.color + ';"></span>'
-      + '<span style="flex:1;">' + escapeHtml(ahEtiquetaGrupoHistorico_(g)) + enCurso + '</span>'
+      + muestra
+      + '<span style="flex:1;">' + escapeHtml(ahEtiquetaGrupoHistorico_(g)) + enCurso + quitar + '</span>'
       + '</div>';
   }).join('');
 }
+
+// Cambiar (o quitar) el color de un equipo desde la lista debajo del mapa.
+function ahGuardarColorEquipo_(codigo, color){
+  var statusEl = document.getElementById('ah-color-equipo-status');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){
+        if(statusEl){ statusEl.textContent = (r && r.error) || 'No se pudo guardar el color.'; statusEl.className = 'maq-modal-status show err'; }
+        ahDibujarHistoricoGoogleAvance_(); // regresa el selector a como estaba
+        return;
+      }
+      if(statusEl){ statusEl.textContent = ''; statusEl.className = 'maq-modal-status'; }
+      if(r.color) AH_COLORES_EQUIPOS[codigo] = r.color; else delete AH_COLORES_EQUIPOS[codigo];
+      ahDibujarHistoricoGoogleAvance_();
+      ahCargarRangoHoy_();
+    })
+    .withFailureHandler(function(err){
+      if(statusEl){ statusEl.textContent = (err && err.message) || 'No se pudo guardar el color. Revisa tu conexión.'; statusEl.className = 'maq-modal-status show err'; }
+      ahDibujarHistoricoGoogleAvance_();
+    })
+    .guardarColorEquipoMapa(ACCESS_CODE, PANEL_USUARIO, codigo, color);
+}
+document.getElementById('ah-leyenda-equipos').addEventListener('change', function(ev){
+  var el = ev.target;
+  if(!el.classList || !el.classList.contains('ah-color-equipo')) return;
+  ahGuardarColorEquipo_(el.getAttribute('data-codigo'), el.value);
+});
+document.getElementById('ah-leyenda-equipos').addEventListener('click', function(ev){
+  var link = ev.target.closest ? ev.target.closest('.ah-color-equipo-quitar') : null;
+  if(!link) return;
+  ev.preventDefault();
+  ahGuardarColorEquipo_(link.getAttribute('data-codigo'), null);
+});
 
 document.getElementById('ah-f-historico-operador').addEventListener('change', function(){
   AH_HISTORICO_FILTRO_OPERADOR = this.value;
@@ -7055,6 +7115,8 @@ function ahInicializarMapaRecorridoSiHaceFalta_(){
 
 function ahColorSesionRecorrido_(avanceId){
   var idx = (AH_RECORRIDO_SESIONES || []).findIndex(function(s){ return s.avanceId === avanceId; });
+  var ses = idx >= 0 ? AH_RECORRIDO_SESIONES[idx] : null;
+  if(ses && ses.codigoUnidad && AH_COLORES_EQUIPOS[ses.codigoUnidad]) return AH_COLORES_EQUIPOS[ses.codigoUnidad];
   if(idx < 0) idx = 0;
   return AH_RECORRIDO_COLORES[idx % AH_RECORRIDO_COLORES.length];
 }
@@ -7866,6 +7928,15 @@ function ahPoblarSelectsRecursosAsignar_(){
     if(valorPrevio) sel.value = valorPrevio;
   }
   poblar('ah-f-asignar-equipo', AH_RECURSOS.equipos, 'Sin asignar (cuenta cualquiera)', false);
+  // Solo tractores y retroexcavadoras (según el tipo de unidad capturado en
+  // Maquinaria -- ver equiposAvanceHuerta_ en handlers.js).
+  var avisoEq = document.getElementById('ah-f-asignar-equipo-aviso');
+  if(avisoEq){
+    avisoEq.textContent = AH_RECURSOS.equiposFiltradosPorTipo
+      ? 'Solo tractores y retroexcavadoras. ¿Falta uno? Ponle el tipo de unidad "Tractor" o "Retroexcavadora" en Maquinaria.'
+      : 'Todavía ningún equipo tiene tipo "Tractor" o "Retroexcavadora" en Maquinaria; por eso se muestran todos.';
+    avisoEq.style.display = '';
+  }
   poblar('ah-f-asignar-implemento', AH_RECURSOS.implementos, 'Sin asignar', false);
   poblar('ah-f-asignar-operador', AH_RECURSOS.operadores, 'Sin asignar (cuenta cualquiera)', true);
 }
@@ -8420,6 +8491,12 @@ function cargarAvanceHuertaPanel_(huerta){
         ahRenderTabla_(AH_HISTORICO_CACHE);
         ahDibujarHistoricoGoogleAvance_();
         ahCargarRangoHoy_();
+        // Colores propios de cada equipo: en cuanto lleguen, se redibuja.
+        ahCargarColoresEquipos_(function(){
+          if(AH_HUERTA_ACTUAL !== huerta) return;
+          ahDibujarHistoricoGoogleAvance_();
+          ahCargarRangoHoy_();
+        });
       })
       .withFailureHandler(function(){ ahRenderTabla_([]); ahDibujarHistoricoGoogleAvance_(); })
       .getAvanceHuerta(huerta);

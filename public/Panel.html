@@ -7089,12 +7089,14 @@ function ahRenderActividadesTabla_(){
   tbody.innerHTML = lista.map(function(a, idx){
     var completado = a.estado === 'completado';
     // Solo se puede medir en % si el CUADRO ya tiene surcos capturados
-    // (ver ahEditarSurcosCuadro_) -- si no, se queda el criterio de
-    // siempre (Pendiente/Completado nada más, sin %, y la barra se ve
-    // vacía o llena según el estado binario).
+    // (ver ahEditarSurcosCuadro_) -- si no, la actividad se queda
+    // Pendiente con la barra vacía hasta que se capturen (ya no se
+    // completa sola con solo pasar por el cuadro).
     var tieneSurcos = a.surcos !== null && a.surcos !== undefined;
     var pct = tieneSurcos ? Math.max(0, Math.min(100, Number(a.porcentaje) || 0)) : (completado ? 100 : 0);
-    var pctTexto = tieneSurcos ? (pct + '%') : (completado ? 'Completado' : '—');
+    // Sin surcos ya NO se completa sola (ver marcarCuadrosCompletadosPorPunto_
+    // en handlers.js) -- se avisa qué falta en vez de un "—" que no dice nada.
+    var pctTexto = tieneSurcos ? (pct + '%') : (completado ? 'Completado' : 'Falta capturar surcos');
     var subTrabajo = a.trabajo || '';
     if(tieneSurcos && a.intervaloSurcos && a.intervaloSurcos > 1) subTrabajo += ' · cada ' + a.intervaloSurcos + ' surcos';
     // Equipo/operador asignados en "2. Detalle de trabajo" (si se eligieron

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<script>window.APP_SERVIDOR = "https://reporte-fallas-chula.onrender.com"; window.APP_VERSION = "4cde93644c72";</script>
+<script>window.APP_SERVIDOR = "https://reporte-fallas-chula.onrender.com"; window.APP_VERSION = "006d63cc2928";</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>Reporte de Fallas</title>
@@ -864,6 +864,7 @@
 
       <div id="avance-con-mapa" style="display:none;">
         <div id="avance-mapa-google"></div>
+        <div class="avance-aviso" id="avance-mapa-modo" style="display:none; padding-top:6px;"></div>
 
         <div id="avance-panel-rastreo" style="display:none;">
           <div class="field">
@@ -884,10 +885,11 @@
             <input type="number" id="avance-f-porcentaje" min="0" max="100" placeholder="0-100">
           </div>
           <div class="avance-chip" id="avance-chip-estado">Sin registrar avance ahora</div>
+          <div class="avance-aviso" id="avance-sync-estado" style="display:none; padding-top:6px;"></div>
           <button type="button" class="submit-btn" id="avance-btn-iniciar">Iniciar avance</button>
           <button type="button" class="avance-btn-secundario" id="avance-btn-terminar" style="display:none;">Terminar avance</button>
           <div class="status" id="avance-rastreo-status"></div>
-          <div class="avance-paso">Mientras registras tu avance, deja la pantalla encendida y esta página abierta -- si el celular se bloquea o cambias de app, el rastreo se pausa.</div>
+          <div class="avance-paso">Funciona sin señal: el recorrido se guarda en el celular y se envía solo cuando haya señal. En la app de Android puedes bloquear el celular; en el navegador deja la pantalla encendida y esta página abierta.</div>
         </div>
       </div>
     </div>
@@ -922,6 +924,57 @@ function opcionesPostServidor_(cuerpo){
 // ============================================================
 
 // ============================================================
+// Copia de las consultas en el celular (modo SIN SEÑAL, oct-2026): cada
+// respuesta buena de una consulta (funciones get...: usuarios, huertas,
+// unidades, cuadros, actividades, recorridos...) se guarda en el celular
+// (IndexedDB 'rf-cache-lecturas'). Sin señal -- o si el servidor no
+// contesta en RF_CACHE_ESPERA_MS -- se usa esa copia, así la app se puede
+// usar completa en el campo. Con señal siempre se pide la versión nueva.
+// ============================================================
+var RF_CACHE_ESPERA_MS = 8000;
+var RF_CACHE_NO_GUARDAR = { getVersionApp: true };
+function rfEsLecturaCacheable_(fn){
+  return /^get[A-Z]/.test(fn) && !RF_CACHE_NO_GUARDAR[fn];
+}
+function rfCacheDb_(){
+  if(rfCacheDb_.promesa) return rfCacheDb_.promesa;
+  rfCacheDb_.promesa = new Promise(function(ok, mal){
+    if(!window.indexedDB){ mal(new Error('sin IndexedDB')); return; }
+    var req = indexedDB.open('rf-cache-lecturas', 1);
+    req.onupgradeneeded = function(){ if(!req.result.objectStoreNames.contains('r')) req.result.createObjectStore('r'); };
+    req.onsuccess = function(){ ok(req.result); };
+    req.onerror = function(){ rfCacheDb_.promesa = null; mal(req.error); };
+  });
+  return rfCacheDb_.promesa;
+}
+function rfCacheClave_(fn, args){ return fn + '|' + JSON.stringify(args || []); }
+function rfCacheGuardar_(clave, valor){
+  return rfCacheDb_().then(function(db){
+    return new Promise(function(ok){
+      try {
+        var tx = db.transaction('r', 'readwrite');
+        tx.objectStore('r').put({ valor: valor, guardado: Date.now() }, clave);
+        tx.oncomplete = function(){ ok(true); };
+        tx.onerror = tx.onabort = function(){ ok(false); };
+      } catch(e){ ok(false); }
+    });
+  }).catch(function(){ return false; });
+}
+// Resuelve con {valor, guardado} o null si no hay copia.
+function rfCacheLeer_(clave){
+  return rfCacheDb_().then(function(db){
+    return new Promise(function(ok){
+      try {
+        var req = db.transaction('r', 'readonly').objectStore('r').get(clave);
+        req.onsuccess = function(){ ok(req.result || null); };
+        req.onerror = function(){ ok(null); };
+      } catch(e){ ok(null); }
+    });
+  }).catch(function(){ return null; });
+}
+// ============================================================
+
+// ============================================================
 // Shim de compatibilidad: reemplaza google.script.run por llamadas
 // fetch() al servidor local (Node.js), SIN tocar el resto del código
 // de este archivo. El resto del archivo sigue usando exactamente el
@@ -945,6 +998,54 @@ function opcionesPostServidor_(cuerpo){
           // Cualquier otro nombre de propiedad se trata como el nombre de la
           // función a invocar en el servidor (igual que google.script.run).
           return function (...args) {
+            const llamar = () => fetch(urlServidor_(`${API_BASE}/${prop}`), opcionesPostServidor_(JSON.stringify({ args })))
+              .then(async (res) => {
+                const data = await res.json().catch(() => null);
+                if (!res.ok) {
+                  const err = new Error((data && data.error) || ('Error HTTP ' + res.status));
+                  err.status = res.status;
+                  throw err;
+                }
+                return data;
+              });
+            const entregar = (data) => {
+              if (successCb) {
+                try { successCb(data); } catch (e) { console.error('[' + prop + '] error en la pantalla al procesar la respuesta:', e); }
+              }
+            };
+            const fallar = (err) => {
+              if (failCb) failCb(err);
+              else console.error(err);
+            };
+            if (rfEsLecturaCacheable_(prop)) {
+              // Consulta: con señal, la versión nueva (y se guarda copia);
+              // sin señal o si tarda demasiado, la copia del celular.
+              const clave = rfCacheClave_(prop, args);
+              let resuelto = false;
+              const usarCopia = () => rfCacheLeer_(clave).then((copia) => {
+                if (resuelto || !copia) return !!(copia && resuelto);
+                resuelto = true;
+                entregar(copia.valor);
+                return true;
+              });
+              const sinSenalError = () => { const e = new Error('Sin señal y sin datos guardados en el celular.'); e.sinSenal = true; return e; };
+              if (navigator.onLine === false) {
+                usarCopia().then((ok) => { if (!ok && !resuelto) { resuelto = true; fallar(sinSenalError()); } });
+                return;
+              }
+              const timer = setTimeout(() => { usarCopia(); }, RF_CACHE_ESPERA_MS);
+              llamar().then((data) => {
+                clearTimeout(timer);
+                rfCacheGuardar_(clave, data);
+                if (!resuelto) { resuelto = true; entregar(data); }
+              }, (err) => {
+                clearTimeout(timer);
+                if (resuelto) return;
+                if (err && err.status && err.status < 500 && err.status !== 408 && err.status !== 429) { resuelto = true; fallar(err); return; }
+                usarCopia().then((ok) => { if (!ok && !resuelto) { resuelto = true; fallar(err); } });
+              });
+              return;
+            }
             fetch(urlServidor_(`${API_BASE}/${prop}`), opcionesPostServidor_(JSON.stringify({ args })))
               .then(async (res) => {
                 const data = await res.json().catch(() => null);
@@ -1462,7 +1563,7 @@ function renderLoginNombreOptions(filterText){
   const q = (filterText || '').trim().toUpperCase();
   const matches = q === '' ? NOMBRES_USUARIOS_LOGIN.slice(0, 40) : NOMBRES_USUARIOS_LOGIN.filter(n => n.toUpperCase().includes(q)).slice(0, 40);
   if(matches.length === 0){
-    loginNombreDropdown.innerHTML = '<div class="unit-empty">Sin resultados</div>';
+    loginNombreDropdown.innerHTML = '<div class="unit-empty">' + ((NOMBRES_USUARIOS_LOGIN.length === 0 && navigator.onLine === false) ? 'Sin señal: la primera vez en este celular necesitas internet para entrar' : 'Sin resultados') + '</div>';
     return;
   }
   loginNombreDropdown.innerHTML = matches.map(n =>
@@ -1507,8 +1608,59 @@ function mostrarLogin(){
     .withSuccessHandler(function(nombres){
       NOMBRES_USUARIOS_LOGIN = (nombres || []).filter(Boolean);
     })
-    .withFailureHandler(function(){})
+    .withFailureHandler(function(){
+      // Sin señal y sin la lista guardada: al menos quienes ya entraron
+      // en este celular.
+      NOMBRES_USUARIOS_LOGIN = Object.keys(loginOfflineLeer_());
+    })
     .getNombresUsuarios('Reportar');
+}
+
+// ------------------------------------------------------------
+// Entrar SIN SEÑAL (oct-2026): cuando alguien entra con señal, se guarda
+// en este celular una "huella" de su contraseña (PBKDF2 con sal, nunca la
+// contraseña) y sus datos (huertas, pestañas). Sin señal, solo quien ya
+// entró antes en ESTE celular puede volver a entrar, con la misma
+// contraseña. Con señal siempre se revisa en el servidor.
+// ------------------------------------------------------------
+var LOGIN_OFFLINE_KEY = 'login_offline_v1';
+var LOGIN_OFFLINE_ITERACIONES = 100000;
+function loginOfflineLeer_(){
+  try { return JSON.parse(localStorage.getItem(LOGIN_OFFLINE_KEY) || '{}') || {}; } catch(e){ return {}; }
+}
+function loginHex_(buf){
+  return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('0' + b.toString(16)).slice(-2); }).join('');
+}
+function loginDesdeHex_(hex){
+  var a = new Uint8Array(hex.length / 2);
+  for(var i = 0; i < a.length; i++) a[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return a;
+}
+function loginHuella_(pass, salHex, iteraciones){
+  if(!(window.crypto && window.crypto.subtle)) return Promise.reject(new Error('sin cifrado disponible'));
+  var enc = new TextEncoder();
+  return crypto.subtle.importKey('raw', enc.encode(pass), { name: 'PBKDF2' }, false, ['deriveBits']).then(function(clave){
+    return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: loginDesdeHex_(salHex), iterations: iteraciones, hash: 'SHA-256' }, clave, 256);
+  }).then(loginHex_);
+}
+function loginOfflineGuardar_(nombre, pass, datos){
+  var sal = new Uint8Array(16);
+  crypto.getRandomValues(sal);
+  var salHex = loginHex_(sal);
+  return loginHuella_(pass, salHex, LOGIN_OFFLINE_ITERACIONES).then(function(huella){
+    var todos = loginOfflineLeer_();
+    todos[nombre] = { sal: salHex, huella: huella, iteraciones: LOGIN_OFFLINE_ITERACIONES, datos: datos || null, guardado: Date.now() };
+    try { localStorage.setItem(LOGIN_OFFLINE_KEY, JSON.stringify(todos)); } catch(e){}
+    return true;
+  }).catch(function(){ return false; });
+}
+// Resuelve con los datos guardados del usuario si la contraseña coincide, o null.
+function loginOfflineVerificar_(nombre, pass){
+  var reg = loginOfflineLeer_()[nombre];
+  if(!reg || !reg.sal || !reg.huella) return Promise.resolve(null);
+  return loginHuella_(pass, reg.sal, reg.iteraciones || LOGIN_OFFLINE_ITERACIONES).then(function(huella){
+    return huella === reg.huella ? (reg.datos || { success: true }) : null;
+  }).catch(function(){ return null; });
 }
 
 function ocultarLogin(nombre, datosReportar){
@@ -1535,6 +1687,7 @@ function intentarLogin(){
       btn.disabled = false;
       btn.textContent = 'Entrar';
       if(res && res.success){
+        loginOfflineGuardar_(nombre, pass, res);
         ocultarLogin(nombre, res);
       } else {
         loginStatus.textContent = (res && res.error) || 'No se pudo iniciar sesión.';
@@ -1542,10 +1695,24 @@ function intentarLogin(){
       }
     })
     .withFailureHandler(function(err){
-      btn.disabled = false;
-      btn.textContent = 'Entrar';
-      loginStatus.textContent = 'Error de conexión. Intenta de nuevo.';
-      loginStatus.classList.add('show');
+      // Sin señal (o el servidor no contesta): si esta persona ya entró
+      // antes en este celular, se revisa la contraseña aquí mismo.
+      var esDeConexion = !(err && err.status && err.status < 500);
+      var revisar = esDeConexion ? loginOfflineVerificar_(nombre, pass) : Promise.resolve(null);
+      revisar.then(function(datos){
+        btn.disabled = false;
+        btn.textContent = 'Entrar';
+        if(datos){
+          ocultarLogin(nombre, datos);
+          return;
+        }
+        var conocido = !!loginOfflineLeer_()[nombre];
+        loginStatus.textContent = !esDeConexion
+          ? ((err && err.message) || 'No se pudo iniciar sesión.')
+          : (conocido ? 'Sin señal: la contraseña no coincide con la que usaste la última vez en este celular.'
+                      : 'Sin señal: la primera vez que entras en este celular necesitas internet.');
+        loginStatus.classList.add('show');
+      });
     })
     .validarUsuario(nombre, pass, 'Reportar');
 }
@@ -1559,7 +1726,12 @@ function asegurarUsuario(){
   document.getElementById('f-nombre').value = nombre;
   google.script.run
     .withSuccessHandler(aplicarHuerta)
-    .withFailureHandler(function(){})
+    .withFailureHandler(function(){
+      // Sin señal y sin copia de esta consulta: los datos que se guardaron
+      // al entrar en este celular (huertas, pestañas...).
+      var reg = loginOfflineLeer_()[nombre];
+      if(reg && reg.datos) aplicarHuerta(reg.datos);
+    })
     .getHuertaPorUsuario(nombre);
 }
 window.addEventListener('load', asegurarUsuario);
@@ -1642,6 +1814,10 @@ tabMisReportes.addEventListener('click', function(){
 tabAvance.addEventListener('click', function(){
   activarPestana(tabAvance, viewAvance);
   poblarSelectHuertaAvance();
+  // Si quedó elegida una huerta (la única, o la del recorrido abierto) y
+  // todavía no se ha cargado, se carga de una vez.
+  var selHuertaAv = document.getElementById('avance-f-huerta');
+  if(selHuertaAv && selHuertaAv.value && selHuertaAv.value !== AVANCE_HUERTA_ACTUAL) cargarAvanceHuerta(selHuertaAv.value);
 });
 
 function estadoMR(r){
@@ -2707,6 +2883,12 @@ function avanceCargarGoogleMapsSiHaceFalta_(callback){
   var script = document.createElement('script');
   script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_MAPS_API_KEY + '&callback=avanceGoogleMapsListo_';
   script.async = true;
+  script.onerror = function(){
+    // Sin señal (o no se pudo descargar): se puede volver a intentar después.
+    window.avanceGoogleMapsCargando_ = false;
+    window.avanceGoogleMapsCallbacksPendientes_ = [];
+    if(script.parentNode) script.parentNode.removeChild(script);
+  };
   document.head.appendChild(script);
 }
 
@@ -2818,22 +3000,150 @@ function avancePedirPermisosNativos_(){
   });
 }
 
-// Arranca el rastreo en segundo plano de la app nativa (ver
-// BackgroundLocationPlugin.java / BackgroundLocationService.java) para un
-// avance que ya se dio de alta en el servidor (avanceId). apiBase se
-// manda tal cual lo ve el WebView (window.location.origin) para que el
-// servicio nativo mande los puntos GPS al mismo sitio donde está corriendo
-// esta página, sin tener que repetir la dirección a mano aquí.
-function avanceIniciarRastreoNativo_(avanceId){
+// ============================================================
+// Avance de huerta SIN SEÑAL (oct-2026, petición de Carlos: "que funcione
+// completamente sin señal, y cuando agarre datos se actualice y comparta
+// la información capturada").
+//
+// Cada recorrido vive primero EN EL CELULAR:
+//  - se crea aquí mismo con su propio identificador (idLocal), sin
+//    esperar al servidor -- "Iniciar avance" ya no necesita señal;
+//  - cada punto GPS se guarda con su hora y un número consecutivo (s) en
+//    IndexedDB (base 'rf-avance'). En la app de Android el GPS lo toma el
+//    servicio nativo (también con la pantalla bloqueada), que guarda los
+//    puntos en el celular y los manda solo cuando hay señal; esta página
+//    los copia también para dibujarlos y mandar lo que falte;
+//  - cuando hay señal, avanceSincronizarPendientes_ manda lo pendiente al
+//    servidor (sincronizarAvance en handlers.js) en tandas. El servidor no
+//    duplica nada si un envío se repite. Un recorrido ya terminado y
+//    enviado completo se borra del celular.
+// ============================================================
+var AVANCE_DB_NOMBRE = 'rf-avance';
+var AVANCE_SYNC_TANDA = 300;          // puntos por envío
+var AVANCE_SYNC_CADA_MS = 60000;      // reintento periódico mientras haya pendientes
+var AVANCE_SESION_ABIERTA_KEY = 'avance_sesion_abierta';
+var AVANCE_SESION_ACTUAL = null;      // {idLocal, huerta, nombre, trabajo, porcentaje, codigoUnidad, fechaInicio, fechaFin, nativa}
+var AVANCE_SIGUIENTE_SEQ = 1;
+var AVANCE_SYNC_CORRIENDO = false;
+var AVANCE_SYNC_TIMER = null;
+
+function avanceDbAbrir_(){
+  if(avanceDbAbrir_.promesa) return avanceDbAbrir_.promesa;
+  avanceDbAbrir_.promesa = new Promise(function(ok, mal){
+    if(!window.indexedDB){ mal(new Error('Este celular no permite guardar datos.')); return; }
+    var req = indexedDB.open(AVANCE_DB_NOMBRE, 1);
+    req.onupgradeneeded = function(){
+      var db = req.result;
+      if(!db.objectStoreNames.contains('sesiones')) db.createObjectStore('sesiones', { keyPath: 'idLocal' });
+      if(!db.objectStoreNames.contains('puntos')) db.createObjectStore('puntos', { keyPath: ['idLocal', 's'] });
+      if(!db.objectStoreNames.contains('envios')) db.createObjectStore('envios', { keyPath: 'idLocal' });
+    };
+    req.onsuccess = function(){ ok(req.result); };
+    req.onerror = function(){ avanceDbAbrir_.promesa = null; mal(req.error); };
+  });
+  return avanceDbAbrir_.promesa;
+}
+// Corre fn(stores...) dentro de una transacción; fn puede dejar el
+// resultado en caja.valor. Resuelve cuando la transacción termina.
+function avanceDbTx_(nombres, modo, fn){
+  return avanceDbAbrir_().then(function(db){
+    return new Promise(function(ok, mal){
+      var tx = db.transaction(nombres, modo);
+      var caja = { valor: undefined };
+      try { fn.apply(null, nombres.map(function(n){ return tx.objectStore(n); }).concat([caja])); } catch(e){ mal(e); return; }
+      tx.oncomplete = function(){ ok(caja.valor); };
+      tx.onerror = function(){ mal(tx.error); };
+      tx.onabort = function(){ mal(tx.error); };
+    });
+  });
+}
+function avanceRangoPuntos_(idLocal, desde){
+  return IDBKeyRange.bound([idLocal, desde || 0], [idLocal, Number.MAX_SAFE_INTEGER], true, false);
+}
+function avanceGuardarSesionLocal_(sesion){
+  var copia = {};
+  ['idLocal', 'huerta', 'nombre', 'trabajo', 'porcentaje', 'codigoUnidad', 'fechaInicio', 'fechaFin', 'nativa'].forEach(function(k){ copia[k] = sesion[k] === undefined ? null : sesion[k]; });
+  return avanceDbTx_(['sesiones'], 'readwrite', function(st){ st.put(copia); });
+}
+function avanceLeerSesionLocal_(idLocal){
+  return avanceDbTx_(['sesiones'], 'readonly', function(st, caja){ st.get(idLocal).onsuccess = function(e){ caja.valor = e.target.result || null; }; });
+}
+function avanceListarSesionesLocales_(){
+  return avanceDbTx_(['sesiones'], 'readonly', function(st, caja){ st.getAll().onsuccess = function(e){ caja.valor = e.target.result || []; }; });
+}
+function avanceGuardarPuntosLocales_(idLocal, puntos){
+  if(!puntos || puntos.length === 0) return Promise.resolve();
+  return avanceDbTx_(['puntos'], 'readwrite', function(st){
+    puntos.forEach(function(p){ st.put({ idLocal: idLocal, s: p.s, lat: p.lat, lng: p.lng, t: p.t }); });
+  });
+}
+// Puntos con s > desde, en orden (hasta "limite").
+function avanceLeerPuntosLocales_(idLocal, desde, limite){
+  return avanceDbTx_(['puntos'], 'readonly', function(st, caja){
+    st.getAll(avanceRangoPuntos_(idLocal, desde), limite || undefined).onsuccess = function(e){ caja.valor = e.target.result || []; };
+  });
+}
+function avanceUltimoSeqLocal_(idLocal){
+  return avanceDbTx_(['puntos'], 'readonly', function(st, caja){
+    caja.valor = 0;
+    st.openCursor(avanceRangoPuntos_(idLocal, 0), 'prev').onsuccess = function(e){ var c = e.target.result; if(c) caja.valor = c.value.s; };
+  });
+}
+function avanceLeerEnvio_(idLocal){
+  return avanceDbTx_(['envios'], 'readonly', function(st, caja){ st.get(idLocal).onsuccess = function(e){ caja.valor = e.target.result || { idLocal: idLocal, avanceId: null, enviadoHasta: 0, finEnviado: false }; }; });
+}
+function avanceGuardarEnvio_(envio){
+  return avanceDbTx_(['envios'], 'readwrite', function(st){ st.put(envio); });
+}
+function avanceBorrarSesionLocal_(idLocal){
+  return avanceDbTx_(['sesiones', 'puntos', 'envios'], 'readwrite', function(ses, pts, env){
+    ses.delete(idLocal);
+    env.delete(idLocal);
+    pts.delete(avanceRangoPuntos_(idLocal, 0));
+  });
+}
+function avanceNuevoIdLocal_(){
+  return 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+// Con límite de tiempo: con señal muy débil una llamada puede quedarse
+// colgada; si pasa el límite se da por fallida y se reintenta después (el
+// servidor no duplica si de todos modos llegó).
+var AVANCE_SYNC_LIMITE_MS = 45000;
+function avanceLlamarServidor_(fn, args, limiteMs){
+  return new Promise(function(ok, mal){
+    var listo = false;
+    var timer = setTimeout(function(){ if(!listo){ listo = true; mal(new Error('Sin respuesta del servidor')); } }, limiteMs || AVANCE_SYNC_LIMITE_MS);
+    google.script.run
+      .withSuccessHandler(function(r){ if(listo) return; listo = true; clearTimeout(timer); ok(r); })
+      .withFailureHandler(function(e){ if(listo) return; listo = true; clearTimeout(timer); mal(e); })[fn].apply(null, args || []);
+  });
+}
+
+// --- Rastreo nativo (app de Android) ---
+// El servicio nativo (BackgroundLocationService.java) numera y guarda cada
+// punto en el celular, lo manda solo al servidor cuando hay señal, y aquí
+// avisa cada punto nuevo (evento 'puntoNuevo', con s y t) mientras la
+// pantalla está encendida. Lo que tomó con la pantalla bloqueada se copia
+// aquí con leerPuntos (avanceImportarPuntosNativos_).
+function avanceNativoTieneModoSinSenal_(){
+  var BL = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundLocation;
+  return !!(BL && typeof BL.leerPuntos === 'function');
+}
+function avanceIniciarRastreoNativo_(sesion){
   // Promise.resolve().then(...): si la app instalada es una versión sin el
-  // plugin BackgroundLocation, el error sale como promesa rechazada (y se
-  // usa el GPS normal de la página) en vez de tronar la pantalla.
+  // plugin (o sin el modo sin señal), el error sale como promesa
+  // rechazada y se usa el GPS normal de la página.
   return Promise.resolve().then(function(){
     if(!window.Capacitor.Plugins.BackgroundLocation) throw new Error('esta versión de la app no tiene el rastreo en segundo plano; actualízala');
+    if(!avanceNativoTieneModoSinSenal_()) throw new Error('esta versión de la app no guarda el recorrido sin señal; actualízala');
     return avancePedirPermisosNativos_();
   }).then(function(){
     var BL = window.Capacitor.Plugins.BackgroundLocation;
-    return BL.start({ avanceId: avanceId, apiBase: window.APP_SERVIDOR || window.location.origin });
+    return BL.start({
+      idLocal: sesion.idLocal,
+      apiBase: window.APP_SERVIDOR || window.location.origin,
+      sesion: JSON.stringify(avanceMetaSesion_(sesion, null)),
+    });
   });
 }
 
@@ -2841,28 +3151,204 @@ function avanceDetenerRastreoNativo_(){
   return window.Capacitor.Plugins.BackgroundLocation.stop();
 }
 
-// Mientras la pantalla NO está bloqueada, el servicio nativo también
-// reenvía aquí cada punto nuevo (ver BackgroundLocationPlugin.onNuevoPunto)
-// para que el operador siga viendo su trazo avanzar en el mapa en vivo,
-// igual que en el modo navegador -- la diferencia es que aquí NO se vuelve
-// a mandar el punto al servidor (el servicio nativo ya lo mandó directo
-// por HTTP): esta función solo actualiza lo que se VE en pantalla.
-function avanceNuevoPuntoNativo_(lat, lng){
+function avanceImportarPuntosNativos_(){
+  if(!avanceEsAppNativa_() || !avanceNativoTieneModoSinSenal_()) return Promise.resolve(0);
+  var BL = window.Capacitor.Plugins.BackgroundLocation;
+  return avanceListarSesionesLocales_().then(function(sesiones){
+    var nativas = sesiones.filter(function(s){ return s.nativa; });
+    return nativas.reduce(function(cadena, ses){
+      return cadena.then(function(total){
+        return avanceUltimoSeqLocal_(ses.idLocal).then(function(ultimo){
+          return BL.leerPuntos({ idLocal: ses.idLocal, desde: ultimo });
+        }).then(function(r){
+          var puntos = (r && r.puntos) || [];
+          return avanceGuardarPuntosLocales_(ses.idLocal, puntos).then(function(){
+            if(AVANCE_SESION_ACTUAL && AVANCE_SESION_ACTUAL.idLocal === ses.idLocal && puntos.length){
+              puntos.forEach(function(p){ if(p.s >= AVANCE_SIGUIENTE_SEQ) AVANCE_SIGUIENTE_SEQ = p.s + 1; });
+              return avanceRecargarTrazoActual_().then(function(){ return total + puntos.length; });
+            }
+            return total + puntos.length;
+          });
+        }).catch(function(){ return total; });
+      });
+    }, Promise.resolve(0));
+  });
+}
+
+// Un punto GPS nuevo del recorrido en curso. s/t vienen del servicio
+// nativo; en el navegador se numeran aquí.
+function avanceRegistrarPunto_(lat, lng, s, t){
+  var sesion = AVANCE_SESION_ACTUAL;
+  if(!sesion) return Promise.resolve(); // ya se terminó -- se descarta cualquier punto tardío
   var nuevo = { lat: lat, lng: lng };
-  if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return;
+  if(s == null){
+    if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return Promise.resolve();
+    s = AVANCE_SIGUIENTE_SEQ;
+    t = Date.now();
+  }
+  if(s >= AVANCE_SIGUIENTE_SEQ) AVANCE_SIGUIENTE_SEQ = s + 1;
   AVANCE_PUNTOS_SESION.push(nuevo);
   AVANCE_ULTIMO_PUNTO = nuevo;
   avanceActualizarPolylineActual_();
   var chip = document.getElementById('avance-chip-estado');
   if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
+  // Si antes se había perdido el GPS, ya regresó: se quita ese aviso.
+  var statusGps = document.getElementById('avance-rastreo-status');
+  if(statusGps && /Se perdió la señal de GPS/.test(statusGps.textContent)){
+    statusGps.textContent = avanceMensajeRastreoActivo_();
+    statusGps.className = 'status show ok';
+  }
+  return avanceGuardarPuntosLocales_(sesion.idLocal, [{ s: s, lat: lat, lng: lng, t: t || Date.now() }])
+    .then(function(){ avanceProgramarSync_(); avanceActualizarEstadoSyncPronto_(); })
+    .catch(function(){ /* sin espacio/permiso para guardar: el punto se ve pero no se podrá mandar */ });
+}
+
+function avanceRecargarTrazoActual_(){
+  var sesion = AVANCE_SESION_ACTUAL;
+  if(!sesion) return Promise.resolve();
+  return avanceLeerPuntosLocales_(sesion.idLocal, 0).then(function(puntos){
+    AVANCE_PUNTOS_SESION = puntos.map(function(p){ return { lat: p.lat, lng: p.lng }; });
+    AVANCE_ULTIMO_PUNTO = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
+    if(puntos.length && puntos[puntos.length - 1].s >= AVANCE_SIGUIENTE_SEQ) AVANCE_SIGUIENTE_SEQ = puntos[puntos.length - 1].s + 1;
+    avanceActualizarPolylineActual_();
+    var chip = document.getElementById('avance-chip-estado');
+    if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
+  });
 }
 
 if(avanceEsAppNativa_() && window.Capacitor.Plugins.BackgroundLocation){
   window.Capacitor.Plugins.BackgroundLocation.addListener('puntoNuevo', function(data){
-    if(!AVANCE_SESION_ID) return; // ya se terminó el avance -- se descarta cualquier punto tardío
-    avanceNuevoPuntoNativo_(data.lat, data.lng);
+    if(!AVANCE_SESION_ACTUAL || !data) return;
+    if(data.s == null) return; // servicio de una versión vieja: ese ya manda sus puntos por su cuenta
+    if(data.idLocal && data.idLocal !== AVANCE_SESION_ACTUAL.idLocal) return;
+    avanceRegistrarPunto_(data.lat, data.lng, data.s, data.t);
   });
 }
+
+// --- Envío al servidor cuando hay señal ---
+function avanceMetaSesion_(sesion, fechaFin){
+  return {
+    idLocal: sesion.idLocal,
+    huerta: sesion.huerta,
+    nombre: sesion.nombre,
+    trabajo: sesion.trabajo,
+    porcentaje: sesion.porcentaje,
+    codigoUnidad: sesion.codigoUnidad,
+    fechaInicio: sesion.fechaInicio,
+    fechaFin: fechaFin || null,
+  };
+}
+function avanceProgramarSync_(esperaMs){
+  if(AVANCE_SYNC_TIMER) return;
+  AVANCE_SYNC_TIMER = setTimeout(function(){
+    AVANCE_SYNC_TIMER = null;
+    avanceSincronizarPendientes_();
+  }, esperaMs == null ? 3000 : esperaMs);
+}
+// Manda TODO lo pendiente de un recorrido (en tandas). Resuelve con
+// {completadas: bool} o rechaza si no hubo señal / el servidor falló.
+function avanceSincronizarSesion_(sesion){
+  var huboCompletadas = false;
+  return Promise.all([avanceLeerEnvio_(sesion.idLocal), avanceUltimoSeqLocal_(sesion.idLocal)]).then(function(r){
+    var envio = r[0];
+    var ultimoLocal = r[1];
+    function terminar(){
+      var listo = sesion.fechaFin && envio.finEnviado && (envio.enviadoHasta || 0) >= ultimoLocal;
+      var fin = listo ? avanceBorrarSesionLocal_(sesion.idLocal).then(function(){
+        if(sesion.nativa && avanceNativoTieneModoSinSenal_()){
+          return window.Capacitor.Plugins.BackgroundLocation.borrarSesion({ idLocal: sesion.idLocal }).catch(function(){});
+        }
+      }) : Promise.resolve();
+      return fin.then(function(){ return { completadas: huboCompletadas }; });
+    }
+    function tanda(){
+      var pendientePuntos = (envio.enviadoHasta || 0) < ultimoLocal;
+      var pendienteFin = !!(sesion.fechaFin && !envio.finEnviado);
+      if(!pendientePuntos && !pendienteFin && envio.avanceId) return terminar();
+      return avanceLeerPuntosLocales_(sesion.idLocal, envio.enviadoHasta || 0, AVANCE_SYNC_TANDA).then(function(puntos){
+        var esUltimaTanda = puntos.length === 0 || puntos[puntos.length - 1].s >= ultimoLocal;
+        var meta = avanceMetaSesion_(sesion, esUltimaTanda ? sesion.fechaFin : null);
+        var envioPuntos = puntos.map(function(p){ return { s: p.s, lat: p.lat, lng: p.lng, t: p.t }; });
+        return avanceLlamarServidor_('sincronizarAvance', [meta, envioPuntos]).then(function(res){
+          if(!res || !res.success) throw new Error((res && res.error) || 'El servidor no guardó el recorrido.');
+          envio.avanceId = res.avanceId;
+          envio.enviadoHasta = Math.max(envio.enviadoHasta || 0, res.ultimoSeq || 0);
+          if(res.terminado) envio.finEnviado = true;
+          if(res.actividadesCompletadas && res.actividadesCompletadas.length) huboCompletadas = true;
+          var avanzo = envioPuntos.length > 0 && (res.ultimoSeq || 0) >= envioPuntos[envioPuntos.length - 1].s;
+          return avanceGuardarEnvio_(envio).then(function(){
+            if((envio.enviadoHasta || 0) < ultimoLocal && avanzo) return tanda();
+            return terminar();
+          });
+        });
+      });
+    }
+    return tanda();
+  });
+}
+function avanceSincronizarPendientes_(){
+  if(AVANCE_SYNC_CORRIENDO) return Promise.resolve(false);
+  AVANCE_SYNC_CORRIENDO = true;
+  var huboCompletadas = false;
+  var todoBien = true;
+  return avanceImportarPuntosNativos_().catch(function(){}).then(avanceListarSesionesLocales_).then(function(sesiones){
+    return sesiones.reduce(function(cadena, sesion){
+      return cadena.then(function(){
+        if(!todoBien) return; // sin señal: no tiene caso seguir intentando los demás ahora
+        return avanceSincronizarSesion_(sesion).then(function(r){ if(r && r.completadas) huboCompletadas = true; }, function(){ todoBien = false; });
+      });
+    }, Promise.resolve());
+  }).catch(function(){ todoBien = false; }).then(function(){
+    AVANCE_SYNC_CORRIENDO = false;
+    if(huboCompletadas && AVANCE_HUERTA_ACTUAL) avanceCargarCuadrosYActividades_();
+    return avanceActualizarEstadoSync_().then(function(pendientes){
+      if(pendientes > 0) avanceProgramarSync_(AVANCE_SYNC_CADA_MS);
+      return todoBien;
+    });
+  });
+}
+// Cuántos puntos/recorridos faltan por mandar, para que el operador lo vea.
+function avanceContarPendientes_(){
+  return avanceListarSesionesLocales_().then(function(sesiones){
+    return Promise.all(sesiones.map(function(s){
+      return Promise.all([avanceLeerEnvio_(s.idLocal), avanceUltimoSeqLocal_(s.idLocal)]).then(function(r){
+        var faltan = Math.max(0, r[1] - (r[0].enviadoHasta || 0));
+        var faltaFin = !!(s.fechaFin && !r[0].finEnviado);
+        return { puntos: faltan, recorrido: (faltan > 0 || faltaFin || !r[0].avanceId) ? 1 : 0 };
+      });
+    }));
+  }).then(function(lista){
+    return lista.reduce(function(t, x){ return { puntos: t.puntos + x.puntos, recorridos: t.recorridos + x.recorrido }; }, { puntos: 0, recorridos: 0 });
+  });
+}
+// Para no recalcular con cada punto: a lo más cada 3 segundos.
+var AVANCE_ESTADO_SYNC_TIMER = null;
+function avanceActualizarEstadoSyncPronto_(){
+  if(AVANCE_ESTADO_SYNC_TIMER) return;
+  AVANCE_ESTADO_SYNC_TIMER = setTimeout(function(){ AVANCE_ESTADO_SYNC_TIMER = null; avanceActualizarEstadoSync_(); }, 3000);
+}
+function avanceActualizarEstadoSync_(){
+  return avanceContarPendientes_().then(function(p){
+    var el = document.getElementById('avance-sync-estado');
+    if(el){
+      if(p.recorridos === 0){
+        el.style.display = 'none';
+        el.textContent = '';
+      } else {
+        el.style.display = '';
+        el.textContent = (navigator.onLine === false ? 'Sin señal. ' : '') + 'Guardado en el celular, falta enviar: ' + p.puntos + ' punto' + (p.puntos === 1 ? '' : 's') + ' de ' + p.recorridos + ' recorrido' + (p.recorridos === 1 ? '' : 's') + '. Se envía solo cuando haya señal.';
+      }
+    }
+    return p.recorridos;
+  }).catch(function(){ return 0; });
+}
+window.addEventListener('online', function(){ avanceProgramarSync_(500); });
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible'){
+    avanceProgramarSync_(500);
+  }
+});
+window.addEventListener('load', function(){ avanceProgramarSync_(2000); });
 var AVANCE_CUADROS = []; // de getCuadrosHuerta: [{id, nombre, poligono: [{lat,lng}, ...]}]
 var AVANCE_ACTIVIDADES = []; // de getActividadesHuerta: [{id, cuadroId, cuadroNombre, trabajo, estado, ...}]
 
@@ -2881,7 +3367,11 @@ function poblarSelectHuertaAvance(){
   // coincidiría con el placeholder y bloquearía el autoseleccionar de
   // abajo) -- solo cuenta una selección anterior de verdad, o si solo hay
   // 1 huerta disponible, esa.
-  var aAutoseleccionar = actual || (listaBase.length === 1 ? listaBase[0] : '');
+  // Si en este celular quedó un recorrido abierto, se abre su huerta para
+  // retomarlo (aunque no haya señal).
+  var huertaAbierta = '';
+  try { huertaAbierta = localStorage.getItem('avance_sesion_abierta_huerta') || ''; } catch(e){}
+  var aAutoseleccionar = actual || huertaAbierta || (listaBase.length === 1 ? listaBase[0] : '');
   if(aAutoseleccionar){
     for(var i=0; i<sel.options.length; i++){
       if(sel.options[i].value === aAutoseleccionar){ sel.selectedIndex = i; break; }
@@ -2938,6 +3428,7 @@ function avanceCuadrosPendientesParaTrabajo_(trabajo){
 // de otro).
 function avanceInicializarMapaSiHaceFalta_(){
   if(AVANCE_GOOGLE_MAP) return;
+  document.getElementById('avance-mapa-google').innerHTML = ''; // quita el mapa sin satélite
   var centro = { lat: 19.4326, lng: -99.1332 };
   AVANCE_GOOGLE_MAP = new google.maps.Map(document.getElementById('avance-mapa-google'), {
     center: centro,
@@ -2954,6 +3445,7 @@ function avanceInicializarMapaSiHaceFalta_(){
 // con el mismo color según su avance que Carlos ve en su Panel. Se vuelve
 // a llamar cada vez que cambian los cuadros/actividades de la huerta.
 function avanceDibujarCuadrosGoogle_(){
+  if(!AVANCE_GOOGLE_MAP){ avanceDibujarMapaSimple_(); return; }
   AVANCE_POLIGONOS_CUADROS.forEach(function(p){ p.setMap(null); });
   AVANCE_POLIGONOS_CUADROS = [];
   var primerPunto = null;
@@ -3072,6 +3564,7 @@ function avanceSuavizarTrazo_(puntos, toleranciaMetros){
 }
 
 function avanceDibujarHistoricoGoogle_(){
+  if(!AVANCE_GOOGLE_MAP){ avanceDibujarMapaSimple_(); return; }
   AVANCE_POLYLINES_HISTORICO.forEach(function(pl){ pl.setMap(null); });
   AVANCE_POLYLINES_HISTORICO = [];
   (AVANCE_HISTORICO || []).forEach(function(sesion){
@@ -3096,7 +3589,7 @@ function avanceDibujarHistoricoGoogle_(){
 // está desbloqueado y viendo el mapa como si viene del rastreo nativo en
 // segundo plano).
 function avanceActualizarPolylineActual_(){
-  if(!AVANCE_GOOGLE_MAP) return; // mapa aún no listo (p.ej. llegó un punto nativo antes de que cargara Google Maps) -- se perderá ese punto en pantalla, pero ya quedó guardado en AVANCE_PUNTOS_SESION y en el servidor
+  if(!AVANCE_GOOGLE_MAP){ avanceDibujarMapaSimple_(); return; } // sin Google Maps (sin señal / todavía cargando): mapa sin satélite
   if(!AVANCE_POLYLINE_ACTUAL){
     AVANCE_POLYLINE_ACTUAL = new google.maps.Polyline({
       path: [],
@@ -3210,6 +3703,9 @@ function avancePoblarSelectTrabajo_(){
   var hayPendientes = ordenTrabajo.length > 0;
   sel.style.display = hayPendientes ? '' : 'none';
   vacio.style.display = hayPendientes ? 'none' : '';
+  vacio.textContent = AVANCE_DATOS_SIN_SENAL
+    ? 'Sin señal y este celular todavía no tiene guardados los datos de esta huerta. Ábrela una vez con señal para que se guarden.'
+    : 'Todavía no hay actividades pendientes asignadas a esta huerta. Pídele a tu encargado que las agregue desde el Panel (Avance Huerta → Dibujar cuadros en Google Maps).';
   if(!sel.disabled) btnIniciar.disabled = !hayPendientes; // no tocar el disabled si ya hay un avance en curso
   // La lista de actividades pudo haber cambiado (p.ej. alguna se acaba de
   // completar) -- hay que refrescar también qué cuadros quedan resaltados
@@ -3272,72 +3768,294 @@ function avancePoblarSelectEquipo_(){
   }
 }
 
-// Al entrar a "Avance Huerta" revisa si ESTE operador ya tiene un registro
-// abierto para esta huerta (ver getAvanceAbierto en handlers.js) -- por
-// ejemplo porque bloqueó la pantalla él mismo, se le acabó la batería, o
-// cerró el navegador por accidente a medio registrar. Si lo hay, lo retoma
-// en el mismo avanceId (sigue sumando puntos ahí, no empieza uno nuevo
-// encimado) en vez de dejarlo huérfano para siempre o arriesgar que el
-// operador no se dé cuenta y pierda ese avance.
+// Al entrar a "Avance Huerta" revisa si en ESTE celular quedó un recorrido
+// abierto (se bloqueó la pantalla, se acabó la batería, se cerró la app a
+// medio registrar...). Ya no se le pregunta al servidor -- el recorrido
+// vive en el celular (ver avanceSincronizarPendientes_), así que se retoma
+// aunque no haya señal. Si el que quedó abierto es de OTRA huerta, se da
+// por terminado (igual que cambiar de huerta a media faena).
+function avanceIdSesionAbierta_(){
+  try { return localStorage.getItem(AVANCE_SESION_ABIERTA_KEY) || ''; } catch(e){ return ''; }
+}
 function avanceReanudarSiHayAbierto_(){
   var huerta = AVANCE_HUERTA_ACTUAL;
-  var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
-  if(!huerta || !nombre) return;
-  google.script.run
-    .withSuccessHandler(function(abierto){
-      // Por si ya se inició (o se retomó) uno nuevo mientras llegaba esta
-      // respuesta, o si mientras tanto se cambió de huerta.
-      if(!abierto || !abierto.existe || AVANCE_SESION_ID || AVANCE_HUERTA_ACTUAL !== huerta) return;
-      AVANCE_SESION_ID = abierto.avanceId;
-      AVANCE_PUNTOS_SESION = abierto.puntos || [];
-      AVANCE_ULTIMO_PUNTO = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
-      avanceActualizarPolylineActual_();
-      document.getElementById('avance-btn-iniciar').style.display = 'none';
-      document.getElementById('avance-btn-terminar').style.display = '';
-      document.getElementById('avance-f-equipo').disabled = true;
-      document.getElementById('avance-f-trabajo').disabled = true;
-      document.getElementById('avance-f-porcentaje').disabled = true;
-      if(abierto.trabajo){
-        // avanceCargarCuadrosYActividades_ puebla este <select> por su
-        // cuenta, en paralelo -- puede que todavía no haya terminado
-        // cuando llega esta respuesta. Para no depender de ese orden, si
-        // la opción todavía no existe se agrega aquí mismo (se descarta
-        // sola en cuanto ese otro llamado repueble el select de verdad).
-        var selTrabajo = document.getElementById('avance-f-trabajo');
-        var yaExisteOpcion = Array.prototype.some.call(selTrabajo.options, function(o){ return o.value === abierto.trabajo; });
-        if(!yaExisteOpcion){
-          var optResumen = document.createElement('option');
-          optResumen.value = abierto.trabajo;
-          optResumen.textContent = abierto.trabajo;
-          selTrabajo.appendChild(optResumen);
-        }
-        selTrabajo.value = abierto.trabajo;
-        avanceDibujarCuadrosGoogle_(); // para que el resaltado del mapa ya refleje la actividad retomada, sin esperar al próximo punto de GPS
-      }
-      if(abierto.porcentaje !== null && abierto.porcentaje !== undefined) document.getElementById('avance-f-porcentaje').value = abierto.porcentaje;
-      var chip = document.getElementById('avance-chip-estado');
-      chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
-      chip.classList.add('activo');
+  var idLocal = avanceIdSesionAbierta_();
+  if(!huerta || !idLocal || AVANCE_SESION_ACTUAL) return Promise.resolve(false);
+  return avanceLeerSesionLocal_(idLocal).then(function(sesion){
+    if(!sesion || sesion.fechaFin){
+      try { localStorage.removeItem(AVANCE_SESION_ABIERTA_KEY); } catch(e){}
+      return false;
+    }
+    if(AVANCE_SESION_ACTUAL || AVANCE_HUERTA_ACTUAL !== huerta) return false;
+    if(sesion.huerta !== huerta){
+      return avanceCerrarSesion_(sesion).then(function(){ return false; });
+    }
+    AVANCE_SESION_ACTUAL = sesion;
+    AVANCE_SESION_ID = sesion.idLocal;
+    AVANCE_SIGUIENTE_SEQ = 1;
+    return avanceImportarPuntosNativos_().catch(function(){}).then(avanceRecargarTrazoActual_).then(function(){
+      avanceMostrarSesionActiva_(sesion);
       var statusEl = document.getElementById('avance-rastreo-status');
-      statusEl.textContent = 'Retomamos tu avance que seguía en curso' + (abierto.fechaInicio ? (' (iniciado ' + new Date(abierto.fechaInicio).toLocaleString('es-MX') + ')') : '') + '.';
+      statusEl.textContent = 'Retomamos tu avance que seguía en curso (iniciado ' + new Date(sesion.fechaInicio).toLocaleString('es-MX') + ').';
       statusEl.className = 'status show ok';
-      if(avanceEsAppNativa_()){
-        avanceIniciarRastreoNativo_(abierto.avanceId).catch(function(){
-          AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-        });
-      } else {
-        AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-        avanceSolicitarWakeLock_();
-      }
-    })
-    .withFailureHandler(function(){ /* sin red: no se puede saber todavía -- no es grave, se reintenta la próxima vez que se entre a esta huerta */ })
-    .getAvanceAbierto(huerta, nombre);
+      avanceArrancarGps_(sesion);
+      avanceProgramarSync_(1000);
+      return true;
+    });
+  }).catch(function(){ return false; });
 }
 
+// Pone la pantalla en modo "registrando" (botón Terminar, selects bloqueados).
+function avanceMostrarSesionActiva_(sesion){
+  document.getElementById('avance-btn-iniciar').style.display = 'none';
+  document.getElementById('avance-btn-terminar').style.display = '';
+  document.getElementById('avance-f-equipo').disabled = true;
+  document.getElementById('avance-f-trabajo').disabled = true;
+  document.getElementById('avance-f-porcentaje').disabled = true;
+  if(sesion.trabajo){
+    // La lista de actividades puede no haber llegado todavía (o venir de
+    // la copia del celular); si la opción no existe se agrega aquí.
+    var selTrabajo = document.getElementById('avance-f-trabajo');
+    var yaExisteOpcion = Array.prototype.some.call(selTrabajo.options, function(o){ return o.value === sesion.trabajo; });
+    if(!yaExisteOpcion){
+      var opt = document.createElement('option');
+      opt.value = sesion.trabajo;
+      opt.textContent = sesion.trabajo;
+      selTrabajo.appendChild(opt);
+    }
+    selTrabajo.value = sesion.trabajo;
+  }
+  if(sesion.codigoUnidad){
+    var selEquipo = document.getElementById('avance-f-equipo');
+    if(!Array.prototype.some.call(selEquipo.options, function(o){ return o.value === sesion.codigoUnidad; })){
+      var optEq = document.createElement('option');
+      optEq.value = sesion.codigoUnidad;
+      optEq.textContent = sesion.codigoUnidad;
+      selEquipo.appendChild(optEq);
+    }
+    selEquipo.value = sesion.codigoUnidad;
+  }
+  if(sesion.porcentaje !== null && sesion.porcentaje !== undefined) document.getElementById('avance-f-porcentaje').value = sesion.porcentaje;
+  var chip = document.getElementById('avance-chip-estado');
+  chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
+  chip.classList.add('activo');
+  avanceDibujarCuadrosGoogle_();
+}
+
+// GPS: en la app de Android, el servicio nativo (sigue con la pantalla
+// bloqueada y guarda sin señal); si no se puede, el GPS de la página.
+function avanceArrancarGps_(sesion){
+  var statusEl = document.getElementById('avance-rastreo-status');
+  function gpsDeLaPagina(){
+    sesion.nativa = false;
+    avanceGuardarSesionLocal_(sesion).catch(function(){});
+    if(AVANCE_WATCH_ID === null){
+      AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+    }
+    avanceSolicitarWakeLock_();
+  }
+  if(avanceEsAppNativa_()){
+    avanceIniciarRastreoNativo_(sesion).then(function(){
+      sesion.nativa = true;
+      return avanceGuardarSesionLocal_(sesion);
+    }).catch(function(err){
+      statusEl.textContent = 'No se pudo activar el rastreo en segundo plano (' + ((err && err.message) || 'revisa los permisos de ubicación') + '). Mientras tengas esta pantalla abierta se sigue registrando igual.';
+      statusEl.className = 'status show err';
+      gpsDeLaPagina();
+    });
+  } else {
+    gpsDeLaPagina();
+  }
+}
+
+// Marca un recorrido como terminado (con la hora de ahora) y lo deja listo
+// para enviarse. No necesita señal.
+function avanceCerrarSesion_(sesion){
+  sesion.fechaFin = Date.now();
+  try { if(avanceIdSesionAbierta_() === sesion.idLocal){ localStorage.removeItem(AVANCE_SESION_ABIERTA_KEY); localStorage.removeItem(AVANCE_SESION_ABIERTA_KEY + '_huerta'); } } catch(e){}
+  return avanceGuardarSesionLocal_(sesion).then(function(){
+    return avanceImportarPuntosNativos_().catch(function(){});
+  }).then(function(){
+    avanceProgramarSync_(500);
+    return avanceActualizarEstadoSync_();
+  });
+}
+
+// ============================================================
+// Mapa SIN SEÑAL (oct-2026): el satélite de Google Maps necesita internet
+// (y que la llave acepte la app). Si no carga -- sin señal, llave
+// rechazada o tarda demasiado -- se dibuja aquí mismo un mapa sencillo:
+// los cuadros (con los mismos colores), los recorridos y "aquí estoy",
+// sobre un fondo liso. En cuanto Google Maps sí carga, se cambia solo.
+// Ningún dato de la pantalla espera al mapa.
+// ============================================================
+var AVANCE_MAPS_ESPERA_MS = 10000;
+var AVANCE_MAPS_FALLO = false;
+var AVANCE_SVG_NS = 'http://www.w3.org/2000/svg';
+
+function avanceUsandoMapaSimple_(){
+  return !AVANCE_GOOGLE_MAP;
+}
+
+// Intenta cargar Google Maps; mientras tanto (y si falla) queda el mapa
+// sencillo. alListo se llama solo si Google Maps cargó de verdad.
+function avancePrepararMapa_(alListo){
+  avanceDibujarMapaSimple_();
+  if(navigator.onLine === false){ avanceMarcarModoMapa_(); return; }
+  var resuelto = false;
+  var timer = setTimeout(function(){ if(!resuelto) avanceMarcarModoMapa_(); }, AVANCE_MAPS_ESPERA_MS);
+  avanceCargarGoogleMapsSiHaceFalta_(function(){
+    resuelto = true;
+    clearTimeout(timer);
+    if(AVANCE_MAPS_FALLO) return;
+    try {
+      avanceInicializarMapaSiHaceFalta_();
+    } catch(e){
+      AVANCE_GOOGLE_MAP = null;
+      avanceDibujarMapaSimple_();
+      return;
+    }
+    avanceMarcarModoMapa_();
+    if(alListo) alListo();
+  });
+}
+// Google llama esto cuando la llave no acepta esta app (p.ej. falta
+// https://localhost/* en las restricciones de la llave).
+window.gm_authFailure = function(){
+  AVANCE_MAPS_FALLO = true;
+  AVANCE_GOOGLE_MAP = null;
+  AVANCE_POLIGONOS_CUADROS = [];
+  AVANCE_POLYLINES_HISTORICO = [];
+  AVANCE_POLYLINE_ACTUAL = null;
+  AVANCE_MARCADOR_ACTUAL = null;
+  var cont = document.getElementById('avance-mapa-google');
+  if(cont) cont.innerHTML = '';
+  avanceDibujarMapaSimple_();
+  avanceMarcarModoMapa_();
+};
+function avanceMarcarModoMapa_(){
+  var aviso = document.getElementById('avance-mapa-modo');
+  if(!aviso) return;
+  if(!avanceUsandoMapaSimple_()){ aviso.style.display = 'none'; return; }
+  aviso.style.display = '';
+  aviso.textContent = AVANCE_MAPS_FALLO
+    ? 'Mapa sin satélite: Google Maps no aceptó la app (revisar la llave de Google Maps).'
+    : (navigator.onLine === false ? 'Sin señal: mapa sin satélite. Tu recorrido se sigue guardando.' : 'Cargando satélite... mientras tanto, mapa sin satélite.');
+}
+window.addEventListener('online', function(){
+  if(AVANCE_HUERTA_ACTUAL && avanceUsandoMapaSimple_() && !AVANCE_MAPS_FALLO){
+    avancePrepararMapa_(function(){ avanceDibujarCuadrosGoogle_(); avanceRedibujarTrazosConCuadros_(); });
+  }
+});
+window.addEventListener('offline', function(){ avanceMarcarModoMapa_(); });
+
+// Redibuja lo que toque en el mapa que esté activo.
+function avanceDibujarMapaSiHaceFalta_(){
+  if(avanceUsandoMapaSimple_()) avanceDibujarMapaSimple_();
+}
+
+function avanceDibujarMapaSimple_(){
+  var cont = document.getElementById('avance-mapa-google');
+  if(!cont || !avanceUsandoMapaSimple_()) return;
+  var cuadros = (AVANCE_CUADROS || []).filter(function(c){ return (c.poligono || []).length >= 3; });
+  var actual = avanceFiltrarPuntosFueraDeHuerta_(AVANCE_PUNTOS_SESION || []);
+  var historico = (AVANCE_HISTORICO || []).map(function(s){ return avanceSuavizarTrazo_(avanceFiltrarPuntosFueraDeHuerta_(s.puntos || [])); }).filter(function(p){ return p.length >= 2; });
+  // Encuadre: los cuadros; si no hay, lo recorrido.
+  var base = [];
+  cuadros.forEach(function(c){ base = base.concat(c.poligono); });
+  if(base.length === 0){ base = actual.slice(); historico.forEach(function(p){ base = base.concat(p); }); }
+  if(actual.length) base = base.concat([actual[actual.length - 1]]);
+  var ancho = Math.max(cont.clientWidth || 360, 200);
+  var alto = Math.max(cont.clientHeight || 340, 200);
+  var svg = document.createElementNS(AVANCE_SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + ancho + ' ' + alto);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.setAttribute('id', 'avance-mapa-simple');
+  svg.style.display = 'block';
+  svg.style.background = '#2a3a2e';
+  if(base.length === 0){
+    var t0 = document.createElementNS(AVANCE_SVG_NS, 'text');
+    t0.setAttribute('x', ancho / 2); t0.setAttribute('y', alto / 2);
+    t0.setAttribute('text-anchor', 'middle'); t0.setAttribute('fill', '#c9ccd1'); t0.setAttribute('font-size', '14');
+    t0.textContent = AVANCE_HUERTA_ACTUAL ? 'Esta huerta todavía no tiene cuadros guardados en el celular.' : '';
+    svg.appendChild(t0);
+    cont.innerHTML = '';
+    cont.appendChild(svg);
+    return;
+  }
+  var lat0 = base.reduce(function(a, p){ return a + p.lat; }, 0) / base.length;
+  var kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 111320;
+  var xs = base.map(function(p){ return p.lng * kx; }), ys = base.map(function(p){ return p.lat * ky; });
+  var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs), minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+  var margen = 14;
+  var escala = Math.min((ancho - 2 * margen) / Math.max(maxX - minX, 20), (alto - 2 * margen) / Math.max(maxY - minY, 20));
+  var offX = (ancho - (maxX - minX) * escala) / 2, offY = (alto - (maxY - minY) * escala) / 2;
+  function px(p){ return [offX + (p.lng * kx - minX) * escala, alto - (offY + (p.lat * ky - minY) * escala)]; }
+  function puntosAttr(lista){ return lista.map(function(p){ var q = px(p); return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' '); }
+  var selTrabajoEl = document.getElementById('avance-f-trabajo');
+  var trabajoElegido = selTrabajoEl ? selTrabajoEl.value : '';
+  var pendientesDelTrabajo = trabajoElegido ? avanceCuadrosPendientesParaTrabajo_(trabajoElegido) : null;
+  cuadros.forEach(function(c){
+    var color, opacidad;
+    if(pendientesDelTrabajo){
+      color = pendientesDelTrabajo[c.id] ? AVANCE_COLOR_RESALTADO : AVANCE_COLOR_ATENUADO;
+      opacidad = pendientesDelTrabajo[c.id] ? 0.4 : 0.12;
+    } else {
+      color = AVANCE_COLORES_CUADRO[avanceEstadoCuadro_(c.id)].stroke;
+      opacidad = 0.22;
+    }
+    var pol = document.createElementNS(AVANCE_SVG_NS, 'polygon');
+    pol.setAttribute('points', puntosAttr(c.poligono));
+    pol.setAttribute('fill', color); pol.setAttribute('fill-opacity', opacidad);
+    pol.setAttribute('stroke', color); pol.setAttribute('stroke-width', '2');
+    pol.setAttribute('class', 'avance-simple-cuadro');
+    svg.appendChild(pol);
+    var cx = 0, cy = 0;
+    c.poligono.forEach(function(p){ var q = px(p); cx += q[0]; cy += q[1]; });
+    var etiqueta = document.createElementNS(AVANCE_SVG_NS, 'text');
+    etiqueta.setAttribute('x', (cx / c.poligono.length).toFixed(1));
+    etiqueta.setAttribute('y', (cy / c.poligono.length).toFixed(1));
+    etiqueta.setAttribute('text-anchor', 'middle'); etiqueta.setAttribute('dominant-baseline', 'middle');
+    etiqueta.setAttribute('fill', '#ffffff'); etiqueta.setAttribute('font-size', '11'); etiqueta.setAttribute('font-weight', '600');
+    etiqueta.setAttribute('paint-order', 'stroke'); etiqueta.setAttribute('stroke', '#000000'); etiqueta.setAttribute('stroke-width', '2');
+    etiqueta.textContent = String(c.nombre || '').replace(/^\s*cuadro\s*/i, '');
+    svg.appendChild(etiqueta);
+  });
+  historico.forEach(function(p){
+    var pl = document.createElementNS(AVANCE_SVG_NS, 'polyline');
+    pl.setAttribute('points', puntosAttr(p));
+    pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', '#4c8dae'); pl.setAttribute('stroke-opacity', '0.75'); pl.setAttribute('stroke-width', '2.5');
+    pl.setAttribute('class', 'avance-simple-historico');
+    svg.appendChild(pl);
+  });
+  if(actual.length){
+    var suav = avanceSuavizarTrazo_(actual);
+    if(suav.length >= 2){
+      var pa = document.createElementNS(AVANCE_SVG_NS, 'polyline');
+      pa.setAttribute('points', puntosAttr(suav));
+      pa.setAttribute('fill', 'none'); pa.setAttribute('stroke', '#E8871E'); pa.setAttribute('stroke-width', '3.5');
+      pa.setAttribute('class', 'avance-simple-actual');
+      svg.appendChild(pa);
+    }
+    var q = px(actual[actual.length - 1]);
+    var yo = document.createElementNS(AVANCE_SVG_NS, 'circle');
+    yo.setAttribute('cx', q[0].toFixed(1)); yo.setAttribute('cy', q[1].toFixed(1)); yo.setAttribute('r', '7');
+    yo.setAttribute('fill', '#E8871E'); yo.setAttribute('stroke', '#ffffff'); yo.setAttribute('stroke-width', '2.5');
+    yo.setAttribute('class', 'avance-simple-yo');
+    svg.appendChild(yo);
+  }
+  cont.innerHTML = '';
+  cont.appendChild(svg);
+}
+
+var AVANCE_DATOS_SIN_SENAL = false; // sin señal y sin copia guardada de esta huerta
 function avanceCargarCuadrosYActividades_(){
   var huerta = AVANCE_HUERTA_ACTUAL;
   google.script.run
     .withSuccessHandler(function(cuadros){
+      if(AVANCE_HUERTA_ACTUAL !== huerta) return;
+      AVANCE_DATOS_SIN_SENAL = false;
       AVANCE_CUADROS = cuadros || [];
       google.script.run
         .withSuccessHandler(function(actividades){
@@ -3349,7 +4067,7 @@ function avanceCargarCuadrosYActividades_(){
         .withFailureHandler(function(){ AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avanceRedibujarTrazosConCuadros_(); avancePoblarSelectTrabajo_(); })
         .getActividadesHuerta(huerta);
     })
-    .withFailureHandler(function(){ AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avanceRedibujarTrazosConCuadros_(); avancePoblarSelectTrabajo_(); })
+    .withFailureHandler(function(){ if(AVANCE_HUERTA_ACTUAL !== huerta) return; AVANCE_DATOS_SIN_SENAL = true; AVANCE_CUADROS = []; AVANCE_ACTIVIDADES = []; avanceDibujarCuadrosGoogle_(); avanceRedibujarTrazosConCuadros_(); avancePoblarSelectTrabajo_(); })
     .getCuadrosHuerta(huerta);
 }
 
@@ -3376,18 +4094,20 @@ function cargarAvanceHuerta(huerta){
   document.getElementById('avance-f-trabajo').innerHTML = '<option value="" disabled selected>Cargando actividades...</option>';
   document.getElementById('avance-f-trabajo-vacio').style.display = 'none';
   document.getElementById('avance-btn-iniciar').disabled = true;
-  avanceCargarGoogleMapsSiHaceFalta_(function(){
-    avanceInicializarMapaSiHaceFalta_();
-    // Si el usuario ya cambió de huerta (o la quitó) mientras cargaba el
-    // script de Google Maps, no sigas pintando datos de la huerta vieja.
+  // Los datos (de internet o, sin señal, de la copia guardada en el
+  // celular) ya NO esperan a que cargue Google Maps.
+  avancePoblarSelectEquipo_();
+  avanceCargarEquiposPermitidos_(function(){
+    if(AVANCE_HUERTA_ACTUAL === huerta) avancePoblarSelectEquipo_();
+  });
+  avanceCargarHistorico_();
+  avanceCargarCuadrosYActividades_();
+  avanceReanudarSiHayAbierto_();
+  avanceActualizarEstadoSync_();
+  avancePrepararMapa_(function(){
     if(AVANCE_HUERTA_ACTUAL !== huerta) return;
-    avancePoblarSelectEquipo_();
-    avanceCargarEquiposPermitidos_(function(){
-      if(AVANCE_HUERTA_ACTUAL === huerta) avancePoblarSelectEquipo_();
-    });
-    avanceCargarHistorico_();
-    avanceCargarCuadrosYActividades_();
-    avanceReanudarSiHayAbierto_();
+    avanceDibujarCuadrosGoogle_();
+    avanceRedibujarTrazosConCuadros_();
   });
 }
 
@@ -3462,56 +4182,45 @@ function avanceMensajeRastreoActivo_(){
 
 function avanceDetenerRastreoSiActivo_(){
   avanceLiberarWakeLock_();
-  if(avanceEsAppNativa_()){
-    avanceDetenerRastreoNativo_().catch(function(){ /* si ya no estaba corriendo, no hay nada que hacer */ });
+  var sesion = AVANCE_SESION_ACTUAL;
+  var paro = Promise.resolve();
+  if(avanceEsAppNativa_() && window.Capacitor.Plugins.BackgroundLocation){
+    paro = avanceDetenerRastreoNativo_().catch(function(){ /* si ya no estaba corriendo, no hay nada que hacer */ });
   }
   if(AVANCE_WATCH_ID !== null){
     navigator.geolocation.clearWatch(AVANCE_WATCH_ID);
     AVANCE_WATCH_ID = null;
   }
-  if(AVANCE_SESION_ID){
-    var id = AVANCE_SESION_ID;
-    AVANCE_SESION_ID = null;
-    google.script.run.withSuccessHandler(function(){}).withFailureHandler(function(){}).terminarAvance(id);
-    document.getElementById('avance-btn-iniciar').style.display = '';
-    document.getElementById('avance-btn-terminar').style.display = 'none';
-    document.getElementById('avance-f-equipo').disabled = false;
-    document.getElementById('avance-f-trabajo').disabled = false;
-    document.getElementById('avance-f-porcentaje').disabled = false;
-    document.getElementById('avance-f-porcentaje').value = '';
-    AVANCE_PUNTOS_SESION = [];
-    AVANCE_ULTIMO_PUNTO = null;
-    if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
-    if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }
-    avanceCargarCuadrosYActividades_(); // refresca la lista -- el avance que acaba de terminar pudo haber completado solo alguna actividad por el GPS, y ya no debe seguir apareciendo para elegir
-    avanceCargarHistorico_(); // la sesión que acaba de cerrarse ya pasa a formar parte del histórico
-    var chip = document.getElementById('avance-chip-estado');
-    chip.textContent = 'Sin registrar avance ahora';
-    chip.classList.remove('activo');
-  }
+  if(!sesion) return paro;
+  AVANCE_SESION_ACTUAL = null;
+  AVANCE_SESION_ID = null;
+  document.getElementById('avance-btn-iniciar').style.display = '';
+  document.getElementById('avance-btn-terminar').style.display = 'none';
+  document.getElementById('avance-f-equipo').disabled = false;
+  document.getElementById('avance-f-trabajo').disabled = false;
+  document.getElementById('avance-f-porcentaje').disabled = false;
+  document.getElementById('avance-f-porcentaje').value = '';
+  AVANCE_PUNTOS_SESION = [];
+  AVANCE_ULTIMO_PUNTO = null;
+  AVANCE_SIGUIENTE_SEQ = 1;
+  if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
+  if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }
+  var chip = document.getElementById('avance-chip-estado');
+  chip.textContent = 'Sin registrar avance ahora';
+  chip.classList.remove('activo');
+  // Se espera a que el servicio nativo se detenga (para copiar TODOS sus
+  // puntos) y se cierra el recorrido en el celular; se manda en cuanto
+  // haya señal. Después se refrescan actividades e histórico (con señal
+  // traen lo nuevo; sin señal, la última copia).
+  return paro.then(function(){ return avanceCerrarSesion_(sesion); }).catch(function(){}).then(function(){
+    avanceCargarCuadrosYActividades_();
+    avanceCargarHistorico_();
+    avanceDibujarMapaSiHaceFalta_();
+  });
 }
 
 function avanceNuevaPosicion_(pos){
-  var nuevo = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-  if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return;
-  AVANCE_PUNTOS_SESION.push(nuevo);
-  AVANCE_ULTIMO_PUNTO = nuevo;
-  avanceActualizarPolylineActual_();
-  var chip = document.getElementById('avance-chip-estado');
-  if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
-  if(AVANCE_SESION_ID){
-    google.script.run
-      .withSuccessHandler(function(resultado){
-        // Si con este punto el servidor acaba de completar alguna
-        // actividad solo (detectado por el GPS, ver
-        // marcarCuadrosCompletadosPorPunto_), refresca cuadros/actividades
-        // para que ese cuadro deje de verse resaltado de inmediato -- sin
-        // que el operador tenga que parar ni hacer nada.
-        if(resultado && resultado.actividadesCompletadas && resultado.actividadesCompletadas.length > 0) avanceCargarCuadrosYActividades_();
-      })
-      .withFailureHandler(function(){})
-      .agregarPuntoAvance(AVANCE_SESION_ID, nuevo.lat, nuevo.lng);
-  }
+  avanceRegistrarPunto_(pos.coords.latitude, pos.coords.longitude);
 }
 
 function avanceErrorPosicion_(err){
@@ -3520,43 +4229,35 @@ function avanceErrorPosicion_(err){
   statusEl.className = 'status show err';
 }
 
-// Iniciar avance en el campo: la señal va y viene, y en Render el
-// servidor puede tardar unos segundos si se estaba reiniciando. Antes, un
-// solo intento fallido le mostraba al operador "No se pudo iniciar.
-// Revisa tu conexión" aunque el problema fuera otro. Ahora se reintenta
-// solo (esperas en AVANCE_INICIAR_ESPERAS_MS) cuando no hubo respuesta o
-// el servidor no estaba disponible (5xx), y al final se dice la causa real.
-var AVANCE_INICIAR_ESPERAS_MS = [2000, 5000];
-function avanceErrorEsReintentable_(err){
-  var st = err && err.status;
-  return !st || st >= 500 || st === 408 || st === 429;
-}
-function avanceMensajeErrorInicio_(err){
-  var st = err && err.status;
-  if(!st){
-    if(typeof navigator !== 'undefined' && navigator.onLine === false) return 'No se pudo iniciar: el celular no tiene internet ahora. Busca un lugar con señal e intenta de nuevo.';
-    return 'No se pudo iniciar: no hubo respuesta del servidor (señal débil). Intenta de nuevo en un momento.';
-  }
-  if(st >= 500 || st === 408 || st === 429) return 'No se pudo iniciar: el servidor no está disponible en este momento (error ' + st + '). Espera un minuto e intenta de nuevo.';
-  return 'No se pudo iniciar: ' + ((err && err.message) || ('error ' + st)) + '. Avisa a sistemas si se repite.';
-}
-function avanceIniciarConReintentos_(args, esperas, alTerminarBien, alFallar, alReintentar){
-  var total = esperas.length;
-  function intentar(){
-    google.script.run
-      .withSuccessHandler(alTerminarBien)
-      .withFailureHandler(function(err){
-        if(esperas.length > 0 && avanceErrorEsReintentable_(err)){
-          var espera = esperas.shift();
-          if(alReintentar) alReintentar(total - esperas.length, total);
-          setTimeout(intentar, espera);
-          return;
-        }
-        alFallar(err);
-      })
-      .iniciarAvance.apply(null, args);
-  }
-  intentar();
+// "Iniciar avance" ya NO espera al servidor: el recorrido se crea en el
+// celular y arranca el GPS de inmediato, haya o no señal. Se manda solo
+// cuando haya señal (avanceSincronizarPendientes_).
+function avanceIniciarSesion_(datos){
+  var sesion = {
+    idLocal: avanceNuevoIdLocal_(),
+    huerta: datos.huerta,
+    nombre: datos.nombre,
+    trabajo: datos.trabajo,
+    porcentaje: datos.porcentaje,
+    codigoUnidad: datos.codigoUnidad,
+    fechaInicio: Date.now(),
+    fechaFin: null,
+    nativa: false,
+  };
+  return avanceGuardarSesionLocal_(sesion).then(function(){
+    try { localStorage.setItem(AVANCE_SESION_ABIERTA_KEY, sesion.idLocal); localStorage.setItem(AVANCE_SESION_ABIERTA_KEY + '_huerta', sesion.huerta); } catch(e){}
+    AVANCE_SESION_ACTUAL = sesion;
+    AVANCE_SESION_ID = sesion.idLocal;
+    AVANCE_SIGUIENTE_SEQ = 1;
+    AVANCE_ULTIMO_PUNTO = null;
+    AVANCE_PUNTOS_SESION = [];
+    if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
+    if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }
+    avanceMostrarSesionActiva_(sesion);
+    avanceArrancarGps_(sesion);
+    avanceProgramarSync_(1000); // con señal, el Panel lo ve de una vez
+    return sesion;
+  });
 }
 
 document.getElementById('avance-btn-iniciar').addEventListener('click', function(){
@@ -3575,68 +4276,40 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
     statusEl.textContent = 'Elige de la lista qué actividad vas a hacer.'; statusEl.className = 'status show err';
     return;
   }
-  if(!navigator.geolocation){
+  if(porcentaje !== null && (isNaN(porcentaje) || porcentaje < 0 || porcentaje > 100)){
+    statusEl.textContent = 'El porcentaje debe ser un número entre 0 y 100.'; statusEl.className = 'status show err';
+    return;
+  }
+  if(!navigator.geolocation && !avanceEsAppNativa_()){
     statusEl.textContent = 'Este celular/navegador no tiene GPS disponible.'; statusEl.className = 'status show err';
     return;
   }
   var btn = this;
   btn.disabled = true;
-  avanceIniciarConReintentos_([huerta, nombre, trabajo, porcentaje, codigoEquipo], AVANCE_INICIAR_ESPERAS_MS.slice(),
-    function(result){
-      btn.disabled = false;
-      if(!result || !result.success){
-        statusEl.textContent = (result && result.error) || 'No se pudo iniciar.';
-        statusEl.className = 'status show err';
-        return;
-      }
-      AVANCE_SESION_ID = result.avanceId;
-      AVANCE_ULTIMO_PUNTO = null;
-      AVANCE_PUNTOS_SESION = [];
-      if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
-      if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }
-      document.getElementById('avance-btn-iniciar').style.display = 'none';
-      document.getElementById('avance-btn-terminar').style.display = '';
-      document.getElementById('avance-f-equipo').disabled = true;
-      document.getElementById('avance-f-trabajo').disabled = true;
-      document.getElementById('avance-f-porcentaje').disabled = true;
-      var chip = document.getElementById('avance-chip-estado');
-      chip.textContent = 'Registrando avance... (0 puntos)';
-      chip.classList.add('activo');
-      statusEl.textContent = avanceMensajeRastreoActivo_();
-      statusEl.className = 'status show ok';
-      if(avanceEsAppNativa_()){
-        // Dentro de la app nativa de Android, el rastreo lo lleva el
-        // plugin BackgroundLocation (sigue funcionando con la pantalla
-        // bloqueada). Si por lo que sea no se pudo activar (el operador
-        // negó el permiso de ubicación, por ejemplo), no se deja al
-        // operador sin ningún rastreo: se cae de vuelta al watchPosition
-        // normal del navegador, igual que en el sitio web.
-        avanceIniciarRastreoNativo_(result.avanceId).catch(function(err){
-          statusEl.textContent = 'No se pudo activar el rastreo en segundo plano (' + ((err && err.message) || 'revisa los permisos de ubicación') + '). Mientras tengas esta pantalla abierta se sigue registrando igual.';
-          statusEl.className = 'status show err';
-          AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-        });
-      } else {
-        AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-        avanceSolicitarWakeLock_();
-      }
-    },
-    function(err){
-      btn.disabled = false;
-      statusEl.textContent = avanceMensajeErrorInicio_(err);
-      statusEl.className = 'status show err';
-    },
-    function(intento, total){
-      statusEl.textContent = 'No hubo respuesta del servidor, reintentando (' + intento + ' de ' + total + ')...';
-      statusEl.className = 'status show';
-    });
+  avanceIniciarSesion_({ huerta: huerta, nombre: nombre, trabajo: trabajo, porcentaje: porcentaje, codigoUnidad: codigoEquipo }).then(function(){
+    btn.disabled = false;
+    statusEl.textContent = avanceMensajeRastreoActivo_() + (navigator.onLine === false ? ' Sin señal: el recorrido se guarda en el celular y se envía solo cuando haya señal.' : '');
+    statusEl.className = 'status show ok';
+  }, function(err){
+    btn.disabled = false;
+    statusEl.textContent = 'No se pudo iniciar: este celular no deja guardar datos (' + ((err && err.message) || 'error') + '). Revisa que tenga espacio libre.';
+    statusEl.className = 'status show err';
+  });
 });
 
 document.getElementById('avance-btn-terminar').addEventListener('click', function(){
-  avanceDetenerRastreoSiActivo_(); // ya deja el select de actividad en su placeholder, limpia el porcentaje y recarga el histórico
   var statusEl = document.getElementById('avance-rastreo-status');
-  statusEl.textContent = 'Avance terminado y guardado.';
+  statusEl.textContent = 'Avance terminado y guardado en el celular. Enviando...';
   statusEl.className = 'status show ok';
+  avanceDetenerRastreoSiActivo_().then(function(){
+    return avanceSincronizarPendientes_();
+  }).then(avanceContarPendientes_).then(function(p){
+    statusEl.textContent = (p && p.recorridos > 0)
+      ? 'Avance terminado y guardado en el celular. Se envía solo en cuanto haya señal.'
+      : 'Avance terminado y enviado.';
+  }, function(){
+    statusEl.textContent = 'Avance terminado y guardado en el celular. Se envía solo en cuanto haya señal.';
+  });
 });
 
 // App empaquetada: si el sitio ya tiene una versión más nueva de esta

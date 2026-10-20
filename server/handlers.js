@@ -5226,6 +5226,93 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   return { success: true, actividadesCompletadas };
 }
 
+// ------------------------------------------------------------------
+// Modo SIN SEÑAL (oct-2026, petición de Carlos: "que funcione completamente
+// sin señal y cuando agarre datos se actualice"). El celular arma cada
+// recorrido por su cuenta (idLocal) y guarda cada punto GPS con su hora y
+// un número consecutivo (s). Cuando hay señal manda lo pendiente aquí, en
+// tandas; lo puede mandar la página o el servicio nativo de Android (los
+// dos a la vez sin problema): un candado por recorrido (GET_LOCK) y
+// ultimo_seq evitan duplicados. Los puntos se guardan con la hora en que
+// se tomaron (no la hora en que llegaron) y se les acredita el avance de
+// cuadros igual que en vivo (marcarCuadrosCompletadosPorPunto_).
+//   sesion = { idLocal, huerta, nombre, trabajo, porcentaje, codigoUnidad, fechaInicio (ms), fechaFin (ms|null) }
+//   puntos = [{ s, lat, lng, t (ms) }]
+// Abierta (sin clave), igual que iniciarAvance/agregarPuntoAvance.
+const AVANCE_SYNC_MAX_PUNTOS = 2000;
+function segundosDeMs_(ms) {
+  const n = Number(ms);
+  // Hora del celular razonable: de 2020 a mañana. Si no, se usa la del servidor.
+  if (!Number.isFinite(n) || n < 1577836800000 || n > Date.now() + 86400000) return null;
+  return n / 1000;
+}
+async function sincronizarAvance(sesion, puntos) {
+  const s = sesion || {};
+  const idLocal = (s.idLocal || '').toString().trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(idLocal)) return { success: false, error: 'Falta el identificador del recorrido.' };
+  const huerta = (s.huerta || '').toString().trim();
+  const nombre = (s.nombre || '').toString().trim();
+  if (!huerta || !nombre) return { success: false, error: 'Falta la huerta o quién hizo el recorrido.' };
+  const lista = Array.isArray(puntos) ? puntos : [];
+  if (lista.length > AVANCE_SYNC_MAX_PUNTOS) return { success: false, error: 'Demasiados puntos en un solo envío.' };
+  const porcentajeNum = (s.porcentaje === '' || s.porcentaje === undefined || s.porcentaje === null) ? null : Number(s.porcentaje);
+  const porcentaje = (porcentajeNum !== null && Number.isFinite(porcentajeNum) && porcentajeNum >= 0 && porcentajeNum <= 100) ? porcentajeNum : null;
+  const con = await pool.getConnection();
+  const candado = 'avance_sync_' + idLocal;
+  let conCandado = false;
+  try {
+    const [[lk]] = await con.query('SELECT GET_LOCK(?, 20) AS ok', [candado]);
+    if (!lk || Number(lk.ok) !== 1) return { success: false, error: 'El recorrido se está guardando desde otro envío; se reintenta solo.' };
+    conCandado = true;
+    const leer = () => pool.query('SELECT id, huerta, nombre, codigo_unidad, fecha_fin, ultimo_seq FROM avance_huerta WHERE id_local = ?', [idLocal]);
+    let [filas] = await leer();
+    if (filas.length === 0) {
+      await pool.query(
+        'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio, codigo_unidad, id_local, ultimo_seq) VALUES (?, ?, ?, ?, COALESCE(FROM_UNIXTIME(?), NOW()), ?, ?, 0)',
+        [huerta, nombre, normalizarTrabajoAvance_(s.trabajo), porcentaje, segundosDeMs_(s.fechaInicio), (s.codigoUnidad || '').toString().trim() || null, idLocal]
+      );
+      [filas] = await leer();
+    }
+    const av = filas[0];
+    let ultimo = Number(av.ultimo_seq) || 0;
+    const completadas = [];
+    const ordenados = lista.slice().sort((a, b) => Number(a && a.s) - Number(b && b.s));
+    for (const p of ordenados) {
+      const seq = Number(p && p.s);
+      if (!Number.isInteger(seq) || seq <= ultimo) continue; // ya se había guardado
+      const lat = Number(p.lat);
+      const lng = Number(p.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        await pool.query(
+          'INSERT INTO avance_huerta_puntos (avance_id, lat, lng, capturado_en) VALUES (?, ?, ?, COALESCE(FROM_UNIXTIME(?), NOW()))',
+          [av.id, lat, lng, segundosDeMs_(p.t)]
+        );
+        try {
+          const nuevas = await marcarCuadrosCompletadosPorPunto_(av.huerta, av.id, lat, lng, av.nombre, av.codigo_unidad);
+          completadas.push(...nuevas);
+        } catch (err) {
+          console.error('[sincronizarAvance] No se pudo acreditar avance (avance_id=' + av.id + '):', err.message);
+        }
+      }
+      ultimo = seq;
+      await pool.query('UPDATE avance_huerta SET ultimo_seq = ? WHERE id = ?', [ultimo, av.id]);
+    }
+    if (porcentaje !== null) await pool.query('UPDATE avance_huerta SET porcentaje = ? WHERE id = ?', [porcentaje, av.id]);
+    let terminado = av.fecha_fin !== null;
+    if (s.fechaFin && !terminado) {
+      await pool.query('UPDATE avance_huerta SET fecha_fin = COALESCE(FROM_UNIXTIME(?), NOW()) WHERE id = ? AND fecha_fin IS NULL', [segundosDeMs_(s.fechaFin), av.id]);
+      terminado = true;
+    }
+    return { success: true, avanceId: av.id, ultimoSeq: ultimo, terminado, actividadesCompletadas: completadas };
+  } catch (err) {
+    console.error('[sincronizarAvance] idLocal=' + idLocal + ':', err.message);
+    return { success: false, error: err.toString() };
+  } finally {
+    if (conCandado) { try { await con.query('SELECT RELEASE_LOCK(?)', [candado]); } catch (e) { /* se libera solo al cerrar */ } }
+    con.release();
+  }
+}
+
 async function terminarAvance(avanceId) {
   const id = Number(avanceId);
   if (!id) return { success: false, error: 'Falta indicar qué registro terminar.' };
@@ -7849,6 +7936,8 @@ function getVersionApp() {
 
 module.exports = {
   getVersionApp,
+  sincronizarAvance,
+  segundosDeMs_,
   submitReporte,
   crearOrdenPanel,
   getReportes,

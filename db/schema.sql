@@ -2305,6 +2305,22 @@ PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
 
+-- id_local / ultimo_seq (oct-2026, modo SIN SEÑAL): el celular crea cada
+-- recorrido con su propio identificador (id_local) y numera sus puntos
+-- GPS (1, 2, 3...). Los manda cuando hay señal con sincronizarAvance
+-- (handlers.js); ultimo_seq es el último punto ya guardado, así que si un
+-- envío se repite (se cortó la señal a medias) no se duplica nada.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'avance_huerta' AND column_name = 'id_local'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE avance_huerta ADD COLUMN id_local VARCHAR(64) DEFAULT NULL, ADD COLUMN ultimo_seq INT NOT NULL DEFAULT 0, ADD UNIQUE INDEX uq_avance_id_local (id_local)',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- ------------------------------------------------------------
 -- Cuadros (lotes numerados) y actividades planeadas por cuadro
 -- ------------------------------------------------------------

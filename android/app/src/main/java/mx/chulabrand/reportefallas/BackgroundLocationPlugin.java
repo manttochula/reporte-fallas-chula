@@ -3,12 +3,14 @@ package mx.chulabrand.reportefallas;
 import android.Manifest;
 import android.content.Intent;
 import android.os.Build;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import java.util.List;
 
 /**
  * Puente entre Index.html y BackgroundLocationService -- expone a JavaScript
@@ -36,16 +38,25 @@ import com.getcapacitor.annotation.Permission;
 )
 public class BackgroundLocationPlugin extends Plugin implements BackgroundLocationService.Listener {
 
+    /** Arranca el GPS en segundo plano para el recorrido idLocal (creado en
+     *  el celular; no necesita señal). "sesion" son los datos del recorrido
+     *  en JSON (huerta, nombre, actividad, equipo...) que el servicio manda
+     *  al servidor junto con los puntos. */
     @PluginMethod
     public void start(PluginCall call) {
-        Integer avanceId = call.getInt("avanceId");
+        String idLocal = call.getString("idLocal");
         String apiBase = call.getString("apiBase");
-        if (avanceId == null || avanceId <= 0) {
-            call.reject("Falta avanceId.");
+        String sesion = call.getString("sesion");
+        if (!AlmacenAvance.idValido(idLocal)) {
+            call.reject("Falta idLocal.");
             return;
         }
         if (apiBase == null || apiBase.isEmpty()) {
             call.reject("Falta apiBase.");
+            return;
+        }
+        if (sesion == null || sesion.isEmpty()) {
+            call.reject("Faltan los datos del recorrido.");
             return;
         }
         if (getPermissionState("location") != com.getcapacitor.PermissionState.GRANTED) {
@@ -56,8 +67,9 @@ public class BackgroundLocationPlugin extends Plugin implements BackgroundLocati
         BackgroundLocationService.establecerListener(this);
 
         Intent intent = new Intent(getContext(), BackgroundLocationService.class);
-        intent.putExtra(BackgroundLocationService.EXTRA_AVANCE_ID, (long) avanceId.intValue());
+        intent.putExtra(BackgroundLocationService.EXTRA_ID_LOCAL, idLocal);
         intent.putExtra(BackgroundLocationService.EXTRA_API_BASE, apiBase);
+        intent.putExtra(BackgroundLocationService.EXTRA_SESION, sesion);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 getContext().startForegroundService(intent);
@@ -78,19 +90,48 @@ public class BackgroundLocationPlugin extends Plugin implements BackgroundLocati
         call.resolve();
     }
 
-    // --- BackgroundLocationService.Listener -------------------------------
-    // Reenvía cada punto nuevo a JavaScript (si la página está activa en
-    // este momento -- si la pantalla está bloqueada, esto simplemente no
-    // llega a ningún lado, y no afecta en nada el envío al servidor, que
-    // ya se hizo por HTTP directo desde el propio servicio). Así,
-    // mientras el operador SÍ está viendo la pantalla, Index.html puede
-    // seguir dibujando el trazo en vivo igual que antes, en lugar de
-    // perder esa parte por pasar el GPS a este plugin nativo.
+    /** Los puntos guardados en el celular con s > desde (para que la
+     *  página copie lo que se tomó con la pantalla bloqueada). */
+    @PluginMethod
+    public void leerPuntos(PluginCall call) {
+        String idLocal = call.getString("idLocal");
+        if (!AlmacenAvance.idValido(idLocal)) {
+            call.reject("Falta idLocal.");
+            return;
+        }
+        long desde = call.getData().optLong("desde", 0L);
+        List<AlmacenAvance.Punto> puntos = AlmacenAvance.leerDesde(getContext(), idLocal, desde, 0);
+        JSArray lista = new JSArray();
+        for (AlmacenAvance.Punto p : puntos) {
+            JSObject o = new JSObject();
+            o.put("s", p.s);
+            o.put("lat", p.lat);
+            o.put("lng", p.lng);
+            o.put("t", p.t);
+            lista.put(o);
+        }
+        JSObject ret = new JSObject();
+        ret.put("puntos", lista);
+        ret.put("enviadoHasta", AlmacenAvance.enviadoHasta(getContext(), idLocal));
+        call.resolve(ret);
+    }
+
+    /** Borra del celular un recorrido ya enviado completo. */
+    @PluginMethod
+    public void borrarSesion(PluginCall call) {
+        String idLocal = call.getString("idLocal");
+        if (AlmacenAvance.idValido(idLocal)) AlmacenAvance.borrar(getContext(), idLocal);
+        call.resolve();
+    }
+
     @Override
-    public void onNuevoPunto(double lat, double lng) {
+    public void onNuevoPunto(String idLocal, long s, double lat, double lng, long t) {
         JSObject data = new JSObject();
+        data.put("idLocal", idLocal);
+        data.put("s", s);
         data.put("lat", lat);
         data.put("lng", lng);
+        data.put("t", t);
         notifyListeners("puntoNuevo", data);
     }
 

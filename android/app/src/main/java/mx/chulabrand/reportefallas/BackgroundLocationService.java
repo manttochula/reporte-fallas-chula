@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -16,33 +17,33 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
-import java.util.concurrent.ExecutorService;
+import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Servicio en primer plano que mantiene capturando el GPS del "Avance
- * Huerta" aunque el operador bloquee la pantalla del celular -- a
- * diferencia de todo lo que corre dentro del WebView (la página normal),
- * Android SÍ deja seguir vivo a un servicio en primer plano con su
- * notificación fija, que es justo la pieza que faltaba para que esto
- * funcionara con la pantalla bloqueada (petición original de Carlos).
+ * Huerta" aunque el operador bloquee la pantalla del celular (Android SÍ
+ * deja seguir vivo a un servicio en primer plano con su notificación fija).
  *
- * Es el ÚNICO lugar que escucha el GPS mientras la app nativa tiene un
- * avance activo (ver BackgroundLocationPlugin.java) -- manda cada punto
- * directo por HTTP al mismo endpoint que ya usaba el sitio web
- * (POST /api/agregarPuntoAvance, con el mismo formato {"args":[...]} del
- * shim de google.script.run en Index.html), y además avisa al plugin
- * (BackgroundLocationService.Listener) para que, si la pantalla NO está
- * bloqueada, la página siga dibujando el trazo en vivo igual que antes.
- * Si falla el envío (sin señal, por ejemplo) simplemente se descarta ese
- * punto -- el mismo comportamiento que ya tenía la versión web para estos
- * puntos de GPS (no hay cola de reintento para esto, a diferencia de los
- * reportes/diesel/movimientos).
+ * Modo SIN SEÑAL (oct-2026, petición de Carlos): cada punto se GUARDA
+ * primero en el celular (AlmacenAvance) con su hora y un número
+ * consecutivo; después se intenta mandar lo pendiente al servidor
+ * (POST /api/sincronizarAvance, en tandas). Si no hay señal, no se pierde
+ * nada: se reintenta con cada punto nuevo y cada minuto, y lo que quede al
+ * terminar lo manda la página (Index.html, avanceSincronizarPendientes_)
+ * en cuanto haya señal. El servidor no duplica puntos si un envío se
+ * repite. También avisa cada punto al plugin para que, si la pantalla NO
+ * está bloqueada, la página siga dibujando el trazo en vivo.
  */
 public class BackgroundLocationService extends Service implements LocationListener {
 
@@ -50,22 +51,23 @@ public class BackgroundLocationService extends Service implements LocationListen
     private static final String CANAL_ID = "avance_huerta_rastreo";
     private static final int NOTIF_ID = 4821;
 
-    public static final String EXTRA_AVANCE_ID = "avanceId";
+    public static final String EXTRA_ID_LOCAL = "idLocal";
     public static final String EXTRA_API_BASE = "apiBase";
+    public static final String EXTRA_SESION = "sesion";
 
-    /** Distancia mínima entre puntos para pedir uno nuevo -- mismo criterio
-     *  que AVANCE_DISTANCIA_MINIMA_METROS en Index.html, para no generar
-     *  de más mientras el operador está parado en un mismo lugar. */
+    /** Para retomar solo el recorrido si Android reinicia el servicio. */
+    private static final String PREFS = "avance_activo";
+
+    /** Distancia mínima entre puntos -- mismo criterio que
+     *  AVANCE_DISTANCIA_MINIMA_METROS en Index.html. */
     private static final float DISTANCIA_MINIMA_METROS = 3f;
     private static final long INTERVALO_MINIMO_MS = 4000L;
+    private static final int PUNTOS_POR_ENVIO = 300;
+    private static final long ESPERA_ENTRE_INTENTOS_MS = 15000L;
 
-    /** Puente hacia BackgroundLocationPlugin, para que la página siga
-     *  viendo los puntos en vivo cuando la pantalla NO está bloqueada
-     *  (cuando SÍ está bloqueada, esto simplemente no tiene a quién
-     *  avisarle -- no afecta en nada el envío al servidor, que ya pasó
-     *  por HTTP directo desde este mismo servicio). */
+    /** Puente hacia BackgroundLocationPlugin (la página, si está abierta). */
     public interface Listener {
-        void onNuevoPunto(double lat, double lng);
+        void onNuevoPunto(String idLocal, long s, double lat, double lng, long t);
     }
 
     private static Listener listenerActivo;
@@ -74,57 +76,71 @@ public class BackgroundLocationService extends Service implements LocationListen
         listenerActivo = listener;
     }
 
-    private long avanceId;
+    private String idLocal;
     private String apiBase;
+    private String sesionJson;
     private LocationManager locationManager;
     private PowerManager.WakeLock wakeLock;
-    private ExecutorService envioEjecutor;
+    private ScheduledExecutorService envioEjecutor;
+    private volatile boolean enviando = false;
+    private volatile long ultimoIntentoMs = 0L;
+    private volatile boolean creadoEnServidor = false;
+    private boolean reintentoProgramado = false;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        envioEjecutor = Executors.newSingleThreadExecutor();
+        envioEjecutor = Executors.newSingleThreadScheduledExecutor();
         crearCanalNotificacion_();
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null || !intent.hasExtra(EXTRA_AVANCE_ID)) {
+        SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String idAnterior = idLocal;
+        if (intent != null && intent.hasExtra(EXTRA_ID_LOCAL)) {
+            idLocal = intent.getStringExtra(EXTRA_ID_LOCAL);
+            apiBase = intent.getStringExtra(EXTRA_API_BASE);
+            sesionJson = intent.getStringExtra(EXTRA_SESION);
+            prefs.edit().putString(EXTRA_ID_LOCAL, idLocal).putString(EXTRA_API_BASE, apiBase).putString(EXTRA_SESION, sesionJson).apply();
+        } else {
+            // Android reinició el servicio (START_STICKY) sin el intent
+            // original: se retoma el recorrido guardado, sin perder nada.
+            idLocal = prefs.getString(EXTRA_ID_LOCAL, null);
+            apiBase = prefs.getString(EXTRA_API_BASE, null);
+            sesionJson = prefs.getString(EXTRA_SESION, null);
+        }
+        if (!AlmacenAvance.idValido(idLocal)) {
             stopSelf();
             return START_NOT_STICKY;
         }
-        this.avanceId = intent.getLongExtra(EXTRA_AVANCE_ID, 0);
-        this.apiBase = intent.getStringExtra(EXTRA_API_BASE);
+        if (idAnterior != null && !idAnterior.equals(idLocal)) creadoEnServidor = false;
 
         startForeground(NOTIF_ID, construirNotificacion_());
         iniciarCapturaGps_();
-
-        // START_STICKY: si Android llegara a matar este proceso por
-        // memoria extrema (muy raro para un servicio en primer plano con
-        // notificación visible), que intente reiniciarlo solo -- aunque
-        // sin el intent original perderíamos el avanceId, así que en la
-        // práctica lo que realmente recupera esa sesión es
-        // avanceReanudarSiHayAbierto_ del lado del sitio en cuanto el
-        // operador vuelva a abrir la app.
+        // Reintento periódico: si el tractor se queda parado (sin puntos
+        // nuevos) igual se manda lo pendiente cuando regrese la señal.
+        if (!reintentoProgramado) {
+            reintentoProgramado = true;
+            envioEjecutor.scheduleWithFixedDelay(this::enviarPendientes_, 5, 60, TimeUnit.SECONDS);
+        }
         return START_STICKY;
     }
 
     private void iniciarCapturaGps_() {
+        if (locationManager != null) return; // ya estaba capturando
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (locationManager == null) return;
         try {
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVALO_MINIMO_MS, DISTANCIA_MINIMA_METROS, this);
             }
-            // De respaldo, por si el GPS puro tarda en obtener señal o el
-            // celular no lo tiene habilitado -- misma idea que el
-            // enableHighAccuracy:true del lado web, pero con un proveedor
-            // de reserva en vez de dejar al operador sin ningún punto.
+            // De respaldo, por si el GPS puro tarda en obtener señal.
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, INTERVALO_MINIMO_MS, DISTANCIA_MINIMA_METROS, this);
             }
         } catch (SecurityException se) {
-            Log.w(TAG, "Sin permiso de ubicación al iniciar el servicio -- no debería pasar, el plugin ya lo valida antes de arrancar este servicio.", se);
+            Log.w(TAG, "Sin permiso de ubicación al iniciar el servicio.", se);
             stopSelf();
             return;
         }
@@ -132,7 +148,7 @@ public class BackgroundLocationService extends Service implements LocationListen
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (pm != null) {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ReporteDeFallas:AvanceRastreoFondo");
-            wakeLock.acquire(12 * 60 * 60 * 1000L /* 12h máximo, por seguridad -- nunca debería durar tanto una sola faena */);
+            wakeLock.acquire(12 * 60 * 60 * 1000L /* 12h máximo, por seguridad */);
         }
     }
 
@@ -140,14 +156,19 @@ public class BackgroundLocationService extends Service implements LocationListen
     public void onLocationChanged(Location location) {
         final double lat = location.getLatitude();
         final double lng = location.getLongitude();
-        if (listenerActivo != null) {
-            listenerActivo.onNuevoPunto(lat, lng);
+        final long t = System.currentTimeMillis();
+        final long s = AlmacenAvance.agregarPunto(this, idLocal, lat, lng, t);
+        if (s <= 0) return;
+        Listener l = listenerActivo;
+        if (l != null) {
+            l.onNuevoPunto(idLocal, s, lat, lng, t);
         }
-        envioEjecutor.execute(() -> enviarPuntoAlServidor_(lat, lng));
+        if (!enviando && System.currentTimeMillis() - ultimoIntentoMs >= ESPERA_ENTRE_INTENTOS_MS) {
+            try { envioEjecutor.execute(this::enviarPendientes_); } catch (Exception ignored) { /* servicio terminando */ }
+        }
     }
 
-    // Métodos viejos de la interfaz LocationListener que ya no se usan
-    // desde Android reciente, pero hay que implementarlos igual.
+    // Métodos viejos de la interfaz LocationListener (hay que implementarlos).
     @Override
     public void onStatusChanged(String provider, int status, Bundle extras) {}
     @Override
@@ -155,29 +176,74 @@ public class BackgroundLocationService extends Service implements LocationListen
     @Override
     public void onProviderDisabled(String provider) {}
 
-    private void enviarPuntoAlServidor_(double lat, double lng) {
-        if (apiBase == null || apiBase.isEmpty() || avanceId <= 0) return;
+    /** Manda al servidor lo pendiente, en tandas. Sin señal: no pasa nada, se reintenta después. */
+    private void enviarPendientes_() {
+        if (enviando || apiBase == null || apiBase.isEmpty() || sesionJson == null) return;
+        enviando = true;
+        ultimoIntentoMs = System.currentTimeMillis();
         try {
-            URL url = new URL(apiBase + "/api/agregarPuntoAvance");
-            HttpURLConnection con = (HttpURLConnection) url.openConnection();
+            JSONObject sesion = new JSONObject(sesionJson);
+            for (int vuelta = 0; vuelta < 50; vuelta++) {
+                long desde = AlmacenAvance.enviadoHasta(this, idLocal);
+                List<AlmacenAvance.Punto> puntos = AlmacenAvance.leerDesde(this, idLocal, desde, PUNTOS_POR_ENVIO);
+                if (puntos.isEmpty() && creadoEnServidor) break;
+                JSONArray lista = new JSONArray();
+                for (AlmacenAvance.Punto p : puntos) {
+                    JSONObject o = new JSONObject();
+                    o.put("s", p.s);
+                    o.put("lat", p.lat);
+                    o.put("lng", p.lng);
+                    o.put("t", p.t);
+                    lista.put(o);
+                }
+                JSONArray args = new JSONArray();
+                args.put(sesion);
+                args.put(lista);
+                JSONObject cuerpo = new JSONObject();
+                cuerpo.put("args", args);
+                JSONObject respuesta = postJson_(apiBase + "/api/sincronizarAvance", cuerpo.toString());
+                if (respuesta == null || !respuesta.optBoolean("success", false)) break;
+                creadoEnServidor = true;
+                long hasta = respuesta.optLong("ultimoSeq", 0L);
+                AlmacenAvance.marcarEnviado(this, idLocal, hasta);
+                if (puntos.isEmpty() || hasta < puntos.get(puntos.size() - 1).s) break;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "No se pudo mandar el avance (sin señal probablemente): " + e.getMessage());
+        } finally {
+            enviando = false;
+        }
+    }
+
+    private JSONObject postJson_(String direccion, String cuerpo) {
+        HttpURLConnection con = null;
+        try {
+            URL url = new URL(direccion);
+            con = (HttpURLConnection) url.openConnection();
             con.setRequestMethod("POST");
             con.setRequestProperty("Content-Type", "application/json");
             con.setConnectTimeout(15000);
-            con.setReadTimeout(15000);
+            con.setReadTimeout(60000);
             con.setDoOutput(true);
-            String cuerpo = String.format(Locale.US, "{\"args\":[%d,%s,%s]}", avanceId, String.valueOf(lat), String.valueOf(lng));
             try (OutputStream os = con.getOutputStream()) {
                 os.write(cuerpo.getBytes(StandardCharsets.UTF_8));
             }
             int code = con.getResponseCode();
             if (code < 200 || code >= 300) {
-                Log.w(TAG, "agregarPuntoAvance respondió " + code + " -- se descarta este punto (mismo criterio que el sitio web sin conexión).");
+                Log.w(TAG, "sincronizarAvance respondió " + code);
+                return null;
             }
-            con.disconnect();
+            StringBuilder sb = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8))) {
+                String linea;
+                while ((linea = br.readLine()) != null) sb.append(linea);
+            }
+            return new JSONObject(sb.toString());
         } catch (Exception e) {
-            // Sin señal, timeout, etc. -- se descarta este punto nada más,
-            // igual que ya hacía el sitio web antes de esta app nativa.
-            Log.w(TAG, "No se pudo enviar un punto de avance (sin red probablemente): " + e.getMessage());
+            Log.w(TAG, "Sin señal al mandar el avance: " + e.getMessage());
+            return null;
+        } finally {
+            if (con != null) con.disconnect();
         }
     }
 
@@ -216,13 +282,17 @@ public class BackgroundLocationService extends Service implements LocationListen
     public void onDestroy() {
         if (locationManager != null) {
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) {}
+            locationManager = null;
         }
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
         if (envioEjecutor != null) {
-            envioEjecutor.shutdown();
+            envioEjecutor.shutdownNow();
         }
+        // Se terminó el recorrido: ya no se retoma solo. Lo que falte por
+        // mandar sigue guardado (AlmacenAvance) y lo manda la página.
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply();
         listenerActivo = null;
         super.onDestroy();
     }

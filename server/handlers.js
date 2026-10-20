@@ -5135,6 +5135,20 @@ async function guardarCalibracionMapaHuerta(nombreUsuario, huerta, cal1, cal2) {
 // submitReporte: basta con haber iniciado sesión en el celular, sin pedir
 // ningún permiso de Panel. Cualquier operador con acceso a esa huerta para
 // Reportar puede marcar su propio avance ahí.
+// La versión vieja de la pantalla de Avance del celular hacía elegir
+// "CUADRO 30 — CANALERA" (cuadro + actividad) en vez de solo la actividad
+// ("CANALERA"). Un celular que abre la app SIN señal en la huerta carga la
+// copia guardada (ver public/sw.js) y puede seguir mandando ese formato
+// viejo -- y los recorridos ya guardados así salían como opciones aparte
+// en el filtro "Actividad" del mapa del Panel (petición de Carlos,
+// oct-2026). Esto deja siempre solo la actividad, al guardar y al leer.
+function normalizarTrabajoAvance_(trabajo) {
+  const t = (trabajo === null || trabajo === undefined) ? '' : trabajo.toString().trim();
+  if (!t) return null;
+  const m = t.match(/^CUADRO\s+.+?\s+[—–]\s+(.+)$/i); // solo guion largo, el que usaba la app vieja
+  return (m ? m[1].trim() : t) || null;
+}
+
 async function iniciarAvance(huerta, nombre, trabajo, porcentaje, codigoUnidad) {
   const nombreHuerta = (huerta || '').toString().trim();
   const nombrePersona = (nombre || '').toString().trim();
@@ -5153,7 +5167,7 @@ async function iniciarAvance(huerta, nombre, trabajo, porcentaje, codigoUnidad) 
   try {
     const [result] = await pool.query(
       'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio, codigo_unidad) VALUES (?, ?, ?, ?, NOW(), ?)',
-      [nombreHuerta, nombrePersona, (trabajo || '').toString().trim() || null, porcentajeNum, (codigoUnidad || '').toString().trim() || null]
+      [nombreHuerta, nombrePersona, normalizarTrabajoAvance_(trabajo), porcentajeNum, (codigoUnidad || '').toString().trim() || null]
     );
     return { success: true, avanceId: result.insertId };
   } catch (err) {
@@ -5228,7 +5242,7 @@ async function getAvanceAbierto(huerta, nombre) {
   return {
     existe: true,
     avanceId: sesion.id,
-    trabajo: sesion.trabajo,
+    trabajo: normalizarTrabajoAvance_(sesion.trabajo),
     porcentaje: sesion.porcentaje !== null ? Number(sesion.porcentaje) : null,
     fechaInicio: sesion.fecha_inicio,
     puntos: puntos.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })),
@@ -5271,7 +5285,7 @@ async function getAvanceHuerta(huerta) {
   return sesiones.map((s) => ({
     avanceId: s.id,
     nombre: s.nombre,
-    trabajo: s.trabajo,
+    trabajo: normalizarTrabajoAvance_(s.trabajo),
     porcentaje: s.porcentaje !== null ? Number(s.porcentaje) : null,
     fechaInicio: s.fecha_inicio,
     fechaFin: s.fecha_fin,
@@ -5322,7 +5336,7 @@ async function getRecorridosPorFecha(code, nombreUsuario, huerta, fecha) {
   return sesiones.map((s) => ({
     avanceId: s.id,
     nombre: s.nombre,
-    trabajo: s.trabajo,
+    trabajo: normalizarTrabajoAvance_(s.trabajo),
     codigoUnidad: s.codigo_unidad,
     equipoUnidad: s.codigo_unidad ? (equiposPorCodigo[s.codigo_unidad] || s.codigo_unidad) : null,
     fechaInicio: s.fecha_inicio,
@@ -7578,6 +7592,7 @@ module.exports = {
   pasadasNecesarias_,
   tramosDeRecorrido_,
   margenCompletado_,
+  normalizarTrabajoAvance_,
   getProveedores,
   guardarProveedor,
   eliminarProveedor,

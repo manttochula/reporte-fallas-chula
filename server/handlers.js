@@ -5891,10 +5891,23 @@ function avanceDeTramo_(a, b, poligono, direccionSurcos) {
 // Pasadas que hacen falta para completar una actividad: ceil(surcos /
 // cada cuántos surcos cuenta una pasada). null = el cuadro no tiene
 // surcos capturados (no se puede medir; no se completa sola).
+// "Cada cuántos surcos" de una actividad: 1 = cada surco, 2 = cada 2
+// surcos (implemento que cubre 2 de una pasada)... y desde oct-2026 también
+// 0.5 = hay que pasar 2 VECES por cada surco (petición de Carlos). Se
+// acepta en pasos de 0.5 (0.5, 1, 1.5, 2...), de 0.5 a 50; cualquier otra
+// cosa se redondea al 0.5 más cercano, y lo inválido/vacío vale 1. La
+// columna es DECIMAL en la base, y mysql2 la regresa como texto -- por eso
+// siempre se pasa por aquí antes de usarla.
+function intervaloSurcosValido_(valor) {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.min(50, Math.max(0.5, Math.round(n * 2) / 2));
+}
+
 function pasadasNecesarias_(surcos, intervaloSurcos) {
   const n = Number(surcos);
   if (!n || n <= 0) return null;
-  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  const intervalo = intervaloSurcosValido_(intervaloSurcos);
   return Math.ceil(n / intervalo);
 }
 // Cuándo se da por COMPLETADA una actividad: cuando le falta menos del 2%
@@ -5977,7 +5990,7 @@ function calcularLargoPoligonoMetros_(poligono) {
 function calcularDistanciaTotalEsperadaMetros_(poligono, surcos, intervaloSurcos) {
   const n = Number(surcos);
   if (!n || n <= 0) return null;
-  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  const intervalo = intervaloSurcosValido_(intervaloSurcos);
   const pasadas = Math.ceil(n / intervalo);
   const largo = calcularLargoPoligonoMetros_(poligono);
   return pasadas * largo;
@@ -6137,7 +6150,7 @@ async function getActividadesCatalogo(code, nombreUsuario, huerta) {
   return rows.map((r) => ({
     id: r.id,
     trabajo: r.trabajo,
-    intervaloSurcos: r.intervalo_surcos,
+    intervaloSurcos: intervaloSurcosValido_(r.intervalo_surcos),
     creadoPor: r.creado_por,
     creadoEn: r.creado_en,
   }));
@@ -6152,7 +6165,7 @@ async function guardarActividadCatalogo(code, nombreUsuario, id, huerta, trabajo
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
   const trabajoTexto = (trabajo || '').toString().trim();
-  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  const intervalo = intervaloSurcosValido_(intervaloSurcos);
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
   if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
   try {
@@ -6230,7 +6243,7 @@ async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, act
   );
   if (catalogo.length === 0) return { success: false, error: 'Esa actividad ya no existe en el catálogo.' };
   const trabajo = catalogo[0].trabajo;
-  const intervalo = catalogo[0].intervalo_surcos;
+  const intervalo = intervaloSurcosValido_(catalogo[0].intervalo_surcos);
 
   const [yaAsignados] = await pool.query(
     'SELECT cuadro_id FROM huerta_actividades WHERE actividad_catalogo_id = ? AND cuadro_id IN (?)',
@@ -6282,7 +6295,7 @@ async function guardarActividadHuerta(code, nombreUsuario, huerta, cuadroId, tra
   const nombreHuerta = (huerta || '').toString().trim();
   const idCuadro = Number(cuadroId);
   const trabajoTexto = (trabajo || '').toString().trim();
-  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  const intervalo = intervaloSurcosValido_(intervaloSurcos);
   if (!nombreHuerta) return { success: false, error: 'Falta indicar la huerta.' };
   if (!idCuadro) return { success: false, error: 'Falta indicar a qué cuadro corresponde.' };
   if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
@@ -6353,7 +6366,7 @@ async function getActividadesHuerta(huerta) {
       // marcarCuadrosCompletadosPorPunto_) hasta que se capturen.
       sinSurcos: necesarias === null,
       surcos: r.cuadroSurcos,
-      intervaloSurcos: r.intervalo_surcos,
+      intervaloSurcos: intervaloSurcosValido_(r.intervalo_surcos),
       avanceMetros,
       distanciaTotalEsperada: esperado,
       pasadas: Math.round(pasadas * 100) / 100,
@@ -7898,6 +7911,7 @@ module.exports = {
   tramosDeRecorrido_,
   margenCompletado_,
   normalizarTrabajoAvance_,
+  intervaloSurcosValido_,
   guardarDireccionSurcosCuadro,
   rumboTramo_,
   diferenciaRumbos_,

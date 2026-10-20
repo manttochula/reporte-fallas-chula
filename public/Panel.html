@@ -3471,7 +3471,7 @@
             </div>
             <div class="maq-field" style="flex:0 0 150px; min-width:150px; margin-bottom:0;">
               <label>Cada cuántos surcos</label>
-              <input type="number" id="ah-f-catalogo-intervalo" min="1" step="1" value="1" title="1 = pasa por cada surco. 2 = un implemento que cubre 2 surcos por pasada, y así.">
+              <input type="number" id="ah-f-catalogo-intervalo" min="0.5" step="0.5" value="1" title="1 = pasa por cada surco. 2 = un implemento que cubre 2 surcos por pasada. 0.5 = hay que pasar 2 veces por cada surco.">
             </div>
             <button class="maq-save-btn" id="ah-btn-guardar-catalogo" style="max-width:190px; flex:none;">Agregar al catálogo</button>
             <button type="button" class="export-btn" id="ah-btn-cancelar-catalogo" style="display:none; max-width:140px; flex:none;">Cancelar edición</button>
@@ -7536,6 +7536,24 @@ function ahEditarSurcosCuadro_(cuadroId, surcosActual){
 // asignarla a los cuadros que quiera de un jalón, en vez de volver a
 // escribirla cada vez) ---
 
+// "Cada cuántos surcos" acepta medios (oct-2026, petición de Carlos): 0.5
+// = pasar 2 veces por cada surco. Mismo criterio que intervaloSurcosValido_
+// en handlers.js: pasos de 0.5, de 0.5 a 50; vacío/inválido = 1.
+function ahIntervaloSurcosValido_(valor){
+  var n = Number(valor);
+  if(!isFinite(n) || n <= 0) return 1;
+  return Math.min(50, Math.max(0.5, Math.round(n * 2) / 2));
+}
+
+// Texto para mostrar el intervalo: "cada surco", "cada 2 surcos",
+// "2 pasadas por surco" (0.5), "cada 1.5 surcos".
+function ahTextoIntervaloSurcos_(valor){
+  var n = ahIntervaloSurcosValido_(valor);
+  if(n === 1) return 'cada surco';
+  if(n === 0.5) return '2 pasadas por surco';
+  return 'cada ' + n + ' surcos';
+}
+
 function ahRenderCatalogoTabla_(){
   var tbody = document.getElementById('ah-catalogo-table-body');
   var vacio = document.getElementById('ah-catalogo-vacio');
@@ -7551,7 +7569,7 @@ function ahRenderCatalogoTabla_(){
   tbody.innerHTML = AH_CATALOGO.map(function(a){
     return '<tr>'
       + '<td>' + escapeHtml(a.trabajo || '') + '</td>'
-      + '<td>' + (a.intervaloSurcos > 1 ? ('cada ' + a.intervaloSurcos + ' surcos') : 'cada surco') + '</td>'
+      + '<td>' + escapeHtml(ahTextoIntervaloSurcos_(a.intervaloSurcos)) + '</td>'
       + '<td><a href="#" data-id="' + a.id + '" class="ah-catalogo-editar" title="Editar">✏️</a></td>'
       + '<td><a href="#" data-id="' + a.id + '" class="ah-catalogo-eliminar" title="Quitar del catálogo (no afecta lo ya asignado)">✕</a></td>'
       + '</tr>';
@@ -7563,7 +7581,7 @@ function ahPoblarSelectAsignarCatalogo_(){
   var valorPrevio = sel.value;
   sel.innerHTML = (AH_CATALOGO || []).map(function(a){
     return '<option value="' + a.id + '">' + escapeHtml(a.trabajo)
-      + (a.intervaloSurcos > 1 ? (' (cada ' + a.intervaloSurcos + ' surcos)') : '') + '</option>';
+      + (ahIntervaloSurcosValido_(a.intervaloSurcos) !== 1 ? (' (' + ahTextoIntervaloSurcos_(a.intervaloSurcos) + ')') : '') + '</option>';
   }).join('');
   if(valorPrevio && (AH_CATALOGO || []).some(function(a){ return String(a.id) === valorPrevio; })){
     sel.value = valorPrevio;
@@ -7655,7 +7673,7 @@ function ahRenderActividadesTabla_(){
     // en handlers.js) -- se avisa qué falta en vez de un "—" que no dice nada.
     var pctTexto = tieneSurcos ? (Number(pct.toFixed(2)) + '%') : (completado ? 'Completado' : 'Falta capturar surcos');
     var subTrabajo = a.trabajo || '';
-    if(tieneSurcos && a.intervaloSurcos && a.intervaloSurcos > 1) subTrabajo += ' · cada ' + a.intervaloSurcos + ' surcos';
+    if(tieneSurcos && a.intervaloSurcos && ahIntervaloSurcosValido_(a.intervaloSurcos) !== 1) subTrabajo += ' · ' + ahTextoIntervaloSurcos_(a.intervaloSurcos);
     // Cuántas atravesadas lleva (ver avanceDeTramo_ en handlers.js) -- p.ej.
     // "4 de 33 pasadas", para que se vea de dónde sale el %. En un cuadro sin
     // surcos se muestra lo que ya se lleva, aunque no se pueda dar un %.
@@ -8117,7 +8135,7 @@ document.getElementById('ah-btn-guardar-catalogo').addEventListener('click', fun
   var idActual = document.getElementById('ah-f-catalogo-id').value;
   var trabajo = document.getElementById('ah-f-catalogo-trabajo').value.trim();
   var intervaloInput = document.getElementById('ah-f-catalogo-intervalo');
-  var intervalo = Math.max(1, Math.round(Number(intervaloInput.value)) || 1);
+  var intervalo = ahIntervaloSurcosValido_(intervaloInput.value);
   if(!trabajo){
     statusEl.textContent = 'Describe la actividad (por ejemplo: Poda).';
     statusEl.className = 'maq-modal-status show err';
@@ -8163,7 +8181,7 @@ document.getElementById('ah-catalogo-table-body').addEventListener('click', func
     if(!actividad) return;
     document.getElementById('ah-f-catalogo-id').value = actividad.id;
     document.getElementById('ah-f-catalogo-trabajo').value = actividad.trabajo;
-    document.getElementById('ah-f-catalogo-intervalo').value = actividad.intervaloSurcos || 1;
+    document.getElementById('ah-f-catalogo-intervalo').value = ahIntervaloSurcosValido_(actividad.intervaloSurcos);
     document.getElementById('ah-btn-guardar-catalogo').textContent = 'Guardar cambios';
     document.getElementById('ah-btn-cancelar-catalogo').style.display = '';
     document.getElementById('ah-f-catalogo-trabajo').focus();

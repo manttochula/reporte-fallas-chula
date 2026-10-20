@@ -2408,7 +2408,7 @@ CREATE TABLE IF NOT EXISTS huerta_actividades (
   cuadro_id       INT NOT NULL,
   trabajo         VARCHAR(255) NOT NULL,
   estado          VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-  intervalo_surcos INT NOT NULL DEFAULT 1,
+  intervalo_surcos DECIMAL(5,2) NOT NULL DEFAULT 1,
   avance_metros   DECIMAL(10,2) NOT NULL DEFAULT 0,
   avance_pasadas  DECIMAL(10,4) NOT NULL DEFAULT 0,
   creado_por      VARCHAR(255) DEFAULT NULL,
@@ -2424,7 +2424,7 @@ SET @col_exists = (
   WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'intervalo_surcos'
 );
 SET @sql_alter = IF(@col_exists = 0,
-  'ALTER TABLE huerta_actividades ADD COLUMN intervalo_surcos INT NOT NULL DEFAULT 1',
+  'ALTER TABLE huerta_actividades ADD COLUMN intervalo_surcos DECIMAL(5,2) NOT NULL DEFAULT 1',
   'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
@@ -2518,11 +2518,36 @@ CREATE TABLE IF NOT EXISTS actividades_catalogo (
   id               INT AUTO_INCREMENT PRIMARY KEY,
   huerta           VARCHAR(255) NOT NULL,
   trabajo          VARCHAR(255) NOT NULL,
-  intervalo_surcos INT NOT NULL DEFAULT 1,
+  intervalo_surcos DECIMAL(5,2) NOT NULL DEFAULT 1,
   creado_por       VARCHAR(255) DEFAULT NULL,
   creado_en        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_actividades_catalogo_huerta (huerta)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- "Cada cuántos surcos" acepta medios desde oct-2026 (0.5 = pasar 2 veces
+-- por cada surco, petición de Carlos): intervalo_surcos pasa de INT a
+-- DECIMAL(5,2) en las 2 tablas que lo usan. Solo cambia el tipo si todavía
+-- es entero; los valores que ya existían (1, 2, ...) se quedan igual.
+SET @es_entero = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'actividades_catalogo' AND column_name = 'intervalo_surcos' AND DATA_TYPE = 'int'
+);
+SET @sql_alter = IF(@es_entero = 1,
+  'ALTER TABLE actividades_catalogo MODIFY COLUMN intervalo_surcos DECIMAL(5,2) NOT NULL DEFAULT 1',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+SET @es_entero = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'intervalo_surcos' AND DATA_TYPE = 'int'
+);
+SET @sql_alter = IF(@es_entero = 1,
+  'ALTER TABLE huerta_actividades MODIFY COLUMN intervalo_surcos DECIMAL(5,2) NOT NULL DEFAULT 1',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
 
 -- De qué actividad del catálogo viene esta fila de huerta_actividades (la
 -- asignación concreta a un cuadro). `trabajo`/`intervalo_surcos` en

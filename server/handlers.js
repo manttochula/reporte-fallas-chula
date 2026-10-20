@@ -5185,6 +5185,10 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   try {
     actividadesCompletadas = await marcarCuadrosCompletadosPorPunto_(rows[0].huerta, id, lat, lng, rows[0].nombre, rows[0].codigo_unidad);
   } catch (err) {
+    // Se deja constancia en el log del servidor (Render > Logs): si esto
+    // falla, el avance de los cuadros deja de subir aunque el punto sí se
+    // guarde -- p.ej. si faltó correr actualizar_estructura_nube.bat.
+    console.error('[avance cuadros] No se pudo acreditar avance del punto (avance_id=' + id + '):', err.message);
     actividadesCompletadas = [];
   }
   return { success: true, actividadesCompletadas };
@@ -5438,30 +5442,16 @@ function cubreCuadro_(punto, poligono) {
 // que corre junto a un cuadro (o entre 2 cuadros) contaba como si se
 // hubiera trabajado dentro -- y a veces para los 2 cuadros a la vez -- y
 // cuadros que solo se habían cruzado por una orilla aparecían
-// "Completado". Ahora un tramo del recorrido solo suma avance si sus 2
-// puntos están DENTRO del contorno dibujado (o a lo mucho a 3 m de su
-// borde, por el error normal del GPS del celular).
-const CUADRO_TOLERANCIA_AVANCE_METROS = 3;
+// "Completado". Ahora solo cuenta lo que queda DENTRO del contorno
+// dibujado (ver avanceDeTramo_), con un margen de 1.5 m solo para un
+// recorrido que va pegado por fuera de la orilla. Se probó con 3 m, pero
+// con el error normal del GPS (±2.5 m) ir por un camino a 4 m de la orilla
+// todavía sumaba ~1/3 de pasada; con 1.5 m ya no suma nada.
+const CUADRO_TOLERANCIA_AVANCE_METROS = 1.5;
 
 function dentroParaAvance_(punto, poligono) {
   if (puntoDentroDePoligono_(punto, poligono)) return true;
   return distanciaPuntoAPoligonoMetros_(punto, poligono) <= CUADRO_TOLERANCIA_AVANCE_METROS;
-}
-
-// Metros recorridos DENTRO de un cuadro a lo largo de una lista ORDENADA
-// de puntos de UNA sola sesión de avance: suma cada tramo entre 2 puntos
-// consecutivos solo si los 2 están dentro (dentroParaAvance_). Es la misma
-// regla que aplica marcarCuadrosCompletadosPorPunto_ punto por punto en
-// vivo, pero de una sola pasada -- la usa recalcularAvanceActividadesHuerta_
-// para reconstruir el avance desde el histórico de GPS.
-function metrosDentroDeCuadro_(puntos, poligono) {
-  let total = 0;
-  for (let i = 1; i < (puntos || []).length; i++) {
-    if (dentroParaAvance_(puntos[i - 1], poligono) && dentroParaAvance_(puntos[i], poligono)) {
-      total += distanciaMetros_(puntos[i - 1], puntos[i]);
-    }
-  }
-  return total;
 }
 
 // Distancia GPS real (en metros) entre 2 puntos cualesquiera -- a
@@ -5472,6 +5462,189 @@ function metrosDentroDeCuadro_(puntos, poligono) {
 function distanciaMetros_(a, b) {
   const p = aMetrosLocal_(a, b);
   return Math.sqrt(p.x * p.x + p.y * p.y);
+}
+
+// ------------------------------------------------------------
+// Avance por PASADAS (oct-2026) -- petición de Carlos: en el CUADRO 22
+// (33 surcos) llevaba 4 atravesadas y el Panel decía 100%; lo correcto es
+// 4 / 33 = 12.12%. Antes el largo de "un surco" se ESTIMABA con el lado
+// más largo del polígono, pero en muchos cuadros los surcos corren a lo
+// ANCHO (por el lado corto), y además metros sueltos no dicen cuántas
+// atravesadas son. Ahora cada tramo del recorrido se convierte
+// directamente en "fracción de pasada":
+//
+//    pasada del tramo = metros del tramo DENTRO del cuadro
+//                       / largo del cuadro, de orilla a orilla, en la
+//                         MISMA dirección en que va el tractor
+//
+// Así una atravesada completa vale 1 sin importar hacia dónde corran los
+// surcos ni si el cuadro es un trapecio (se mide la cuerda justo por donde
+// pasa), media atravesada vale 0.5, y un tramo de lado (vueltas en la
+// cabecera, el GPS "bailando" con el tractor parado) casi no suma, porque
+// a lo ancho el cuadro es mucho más largo. El tramo se RECORTA contra el
+// contorno: entrar o salir del cuadro cuenta solo la parte de adentro (no
+// se pierde el pedazo entre el último punto de afuera y el primero de
+// adentro), y lo que va por el camino de afuera no cuenta. Si los 2
+// puntos están dentro del margen de error del GPS
+// (CUADRO_TOLERANCIA_AVANCE_METROS), el tramo cuenta completo.
+function puntoDentroLocal_(p, verts) {
+  let dentro = false;
+  for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+    const vi = verts[i];
+    const vj = verts[j];
+    const cruza = (vi.y > p.y) !== (vj.y > p.y)
+      && p.x < ((vj.x - vi.x) * (p.y - vi.y)) / (vj.y - vi.y) + vi.x;
+    if (cruza) dentro = !dentro;
+  }
+  return dentro;
+}
+
+// Regresa { metros, pasadas } de UN tramo (de a a b) respecto a un cuadro.
+function avanceDeTramo_(a, b, poligono) {
+  const cero = { metros: 0, pasadas: 0 };
+  if (!a || !b || !poligono || poligono.length < 3) return cero;
+  const origen = poligono[0];
+  const verts = poligono.map((v) => aMetrosLocal_(origen, v));
+  const A = aMetrosLocal_(origen, a);
+  const B = aMetrosLocal_(origen, b);
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const largo = Math.sqrt(dx * dx + dy * dy);
+  if (largo < 0.01) return cero;
+
+  // Pedazos de una recta paralela a A->B (corrida `desplazamiento` metros
+  // de lado) que quedan DENTRO del cuadro, como intervalos [t0, t1] (t = 0
+  // en A, 1 en B). Cada pedazo es una cuerda de orilla a orilla.
+  const nx = -dy / largo;
+  const ny = dx / largo;
+  function pedazosDeRecta(desplazamiento) {
+    const ax = A.x + nx * desplazamiento;
+    const ay = A.y + ny * desplazamiento;
+    const ts = [];
+    for (let i = 0; i < verts.length; i++) {
+      const P = verts[i];
+      const Q = verts[(i + 1) % verts.length];
+      const ex = Q.x - P.x;
+      const ey = Q.y - P.y;
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue; // lado paralelo al tramo
+      const t = ((P.x - ax) * ey - (P.y - ay) * ex) / den;
+      const u = ((P.x - ax) * dy - (P.y - ay) * dx) / den;
+      if (u >= -1e-9 && u <= 1 + 1e-9) ts.push(t);
+    }
+    ts.sort((x, y) => x - y);
+    const res = [];
+    for (let i = 0; i + 1 < ts.length; i++) {
+      if (ts[i + 1] - ts[i] < 1e-9) continue;
+      const tm = (ts[i] + ts[i + 1]) / 2;
+      if (puntoDentroLocal_({ x: ax + tm * dx, y: ay + tm * dy }, verts)) res.push([ts[i], ts[i + 1]]);
+    }
+    return res;
+  }
+  const pedazos = pedazosDeRecta(0);
+  let fraccionDentro = 0;
+  for (const pz of pedazos) fraccionDentro += Math.max(0, Math.min(1, pz[1]) - Math.max(0, pz[0]));
+  // Largo del cuadro de orilla a orilla en la dirección del tramo. NO se
+  // toma solo la recta exacta del tramo: en el último surco, pegado a la
+  // orilla, el GPS hace que el tramo cruce la orilla en un ángulo muy
+  // cerrado y esa recta "ve" el cuadro cortísimo (cada tramo contaba como
+  // casi una pasada entera). Se mide también en rectas paralelas hasta
+  // CUERDA_DESPLAZAMIENTO_METROS hacia cada lado y se toma la más larga
+  // que pase a la altura del tramo -- en un trapecio, 10 m de lado cambian
+  // la cuerda apenas unos centímetros.
+  let cuerda = null;
+  for (let d = -CUERDA_DESPLAZAMIENTO_METROS; d <= CUERDA_DESPLAZAMIENTO_METROS + 1e-9; d += 2.5) {
+    for (const pz of pedazosDeRecta(d)) {
+      if (pz[1] > 0 && pz[0] < 1) { // atraviesa el cuadro a la altura del tramo
+        const c = (pz[1] - pz[0]) * largo;
+        if (cuerda === null || c > cuerda) cuerda = c;
+      }
+    }
+  }
+  let metros = fraccionDentro * largo;
+  // ¿Va directo hacia el cuadro (entra a él muy poco después o salió de
+  // él muy poco antes)? Entonces es la entrada/salida desde el camino y lo
+  // de afuera NO cuenta; la parte de adentro ya la cuenta el tramo de al lado.
+  const entrandoOSaliendo = pedazos.some((pz) => pz[1] >= -0.5 && pz[0] <= 1.5);
+  if (metros <= 0 && !entrandoOSaliendo) {
+    // El tramo NO entra al contorno dibujado. Solo cuenta si va pegado a
+    // la orilla, dentro del margen de error del GPS (p.ej. el último surco
+    // con el GPS marcando 2 m afuera): se mide qué parte del tramo queda a
+    // <= CUADRO_TOLERANCIA_AVANCE_METROS del borde, en pedacitos de ~1 m.
+    // Primero un descarte rápido por "caja" para no hacer esto con cuadros
+    // lejanos.
+    const m = CUADRO_TOLERANCIA_AVANCE_METROS;
+    let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    verts.forEach((v) => { minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x); minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y); });
+    if (Math.max(A.x, B.x) < minX - m || Math.min(A.x, B.x) > maxX + m
+      || Math.max(A.y, B.y) < minY - m || Math.min(A.y, B.y) > maxY + m) return cero;
+    const n = Math.min(200, Math.max(1, Math.ceil(largo)));
+    let cerca = 0;
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n;
+      const pt = { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t };
+      if (distanciaPuntoAPoligonoMetros_(pt, poligono) <= m) cerca++;
+    }
+    metros = (cerca / n) * largo;
+  }
+  if (metros <= 0) return cero;
+  if (cuerda === null) {
+    // Ninguna recta cercana atraviesa el cuadro a la altura del tramo: se
+    // usa el largo total del cuadro en esa dirección.
+    const ux = dx / largo;
+    const uy = dy / largo;
+    let min = Infinity;
+    let max = -Infinity;
+    verts.forEach((v) => { const pr = v.x * ux + v.y * uy; if (pr < min) min = pr; if (pr > max) max = pr; });
+    cuerda = max - min;
+  }
+  if (!(cuerda > 0)) return cero;
+  return { metros, pasadas: Math.min(1, metros / cuerda) };
+}
+
+// Pasadas que hacen falta para completar una actividad: ceil(surcos /
+// cada cuántos surcos cuenta una pasada). null = el cuadro no tiene
+// surcos capturados (no se puede medir; no se completa sola).
+function pasadasNecesarias_(surcos, intervaloSurcos) {
+  const n = Number(surcos);
+  if (!n || n <= 0) return null;
+  const intervalo = Math.max(1, Math.round(Number(intervaloSurcos)) || 1);
+  return Math.ceil(n / intervalo);
+}
+// Cuándo se da por COMPLETADA una actividad: cuando le falta menos del 2%
+// de las pasadas necesarias, con un máximo de media pasada (p.ej. 33
+// surcos -> a partir de 32.5). Sin este margen, una actividad trabajada
+// completa podía quedarse para siempre en 98-99%: en el surco pegado a la
+// orilla parte del recorrido cae fuera del contorno por el error del GPS
+// y ese surco cuenta ~0.9 en vez de 1.
+function margenCompletado_(necesarias) {
+  return Math.min(0.5, Math.max(0.01, necesarias * 0.02));
+}
+// Ver avanceDeTramo_ (cómo se mide el largo del cuadro junto a la orilla).
+const CUERDA_DESPLAZAMIENTO_METROS = 10;
+// El avance se mide en tramos de al menos 15 m (desde el "ancla" del
+// recorrido), no entre cada par de puntos seguidos: el celular manda un
+// punto cada 3 m y, con el error normal del GPS (±3-5 m), sumar esos
+// tramitos en zigzag inflaba el avance (4 atravesadas llegaban a contar
+// como 5-8). Con tramos de 15 m el error se promedia y 4 atravesadas dan
+// 4 pasadas (probado con ±5 m de error, ver tests/unitarias/test_avance_pasadas.js).
+const AVANCE_TRAMO_MINIMO_METROS = 15;
+
+// Parte una lista ORDENADA de puntos de un recorrido en los tramos que
+// realmente se miden (ancla -> primer punto a >= AVANCE_TRAMO_MINIMO_METROS,
+// y así sucesivamente) -- la misma regla que se aplica en vivo punto por
+// punto en marcarCuadrosCompletadosPorPunto_. Regresa [[a, b], ...].
+function tramosDeRecorrido_(puntos) {
+  const tramos = [];
+  let ancla = null;
+  for (const p of puntos || []) {
+    if (!ancla) { ancla = p; continue; }
+    if (distanciaMetros_(ancla, p) >= AVANCE_TRAMO_MINIMO_METROS) {
+      tramos.push([ancla, p]);
+      ancla = p;
+    }
+  }
+  return tramos;
 }
 
 // ------------------------------------------------------------
@@ -5591,18 +5764,17 @@ async function actualizarSurcosCuadro(code, nombreUsuario, cuadroId, surcos) {
   const [cuadros] = await pool.query('SELECT poligono FROM huerta_cuadros WHERE id = ?', [id]);
   if (cuadros.length === 0) return { success: false, error: 'Ese cuadro ya no existe.' };
   await pool.query('UPDATE huerta_cuadros SET surcos = ? WHERE id = ?', [surcosNum, id]);
-  const poligono = parsearPoligono_(cuadros[0].poligono);
   const [actividades] = await pool.query(
-    `SELECT id, intervalo_surcos, avance_metros FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
+    `SELECT id, intervalo_surcos, avance_pasadas FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
     [id]
   );
   for (const act of actividades) {
-    const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, surcosNum, act.intervalo_surcos);
-    const avanceMetros = Number(act.avance_metros) || 0;
-    if (esperado !== null && avanceMetros >= esperado - SURCOS_TOLERANCIA_METROS) {
+    const necesarias = pasadasNecesarias_(surcosNum, act.intervalo_surcos);
+    const pasadas = Number(act.avance_pasadas) || 0;
+    if (necesarias !== null && pasadas >= necesarias - margenCompletado_(necesarias)) {
       await pool.query(
-        `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_metros = ? WHERE id = ?`,
-        [Math.min(avanceMetros, esperado), act.id]
+        `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW() WHERE id = ?`,
+        [act.id]
       );
     }
   }
@@ -5834,7 +6006,7 @@ async function getActividadesHuerta(huerta) {
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
     `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, c.poligono AS cuadroPoligono, c.surcos AS cuadroSurcos,
-            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.creado_en, a.completado_en, a.actividad_catalogo_id,
+            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.avance_pasadas, a.creado_en, a.completado_en, a.actividad_catalogo_id,
             a.equipo_codigo, me.unidad AS equipoUnidad,
             a.implemento_codigo, mi.unidad AS implementoUnidad,
             a.operador_nombre
@@ -5850,9 +6022,13 @@ async function getActividadesHuerta(huerta) {
     const poligono = parsearPoligono_(r.cuadroPoligono);
     const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, r.cuadroSurcos, r.intervalo_surcos);
     const avanceMetros = Number(r.avance_metros) || 0;
+    const necesarias = pasadasNecesarias_(r.cuadroSurcos, r.intervalo_surcos);
+    const pasadas = Number(r.avance_pasadas) || 0;
+    // % = pasadas hechas / pasadas necesarias (p.ej. 4 de 33 = 12.12%),
+    // con 2 decimales.
     const porcentaje = r.estado === 'completado'
       ? 100
-      : (esperado ? Math.max(0, Math.min(100, (avanceMetros / esperado) * 100)) : 0);
+      : (necesarias ? Math.max(0, Math.min(100, (pasadas / necesarias) * 100)) : 0);
     return {
       id: r.id,
       cuadroId: r.cuadro_id,
@@ -5862,12 +6038,14 @@ async function getActividadesHuerta(huerta) {
       // true = el cuadro no tiene surcos capturados: su avance no se puede
       // medir en % y la actividad no se completa sola (ver
       // marcarCuadrosCompletadosPorPunto_) hasta que se capturen.
-      sinSurcos: esperado === null,
+      sinSurcos: necesarias === null,
       surcos: r.cuadroSurcos,
       intervaloSurcos: r.intervalo_surcos,
       avanceMetros,
       distanciaTotalEsperada: esperado,
-      porcentaje: Math.round(porcentaje),
+      pasadas: Math.round(pasadas * 100) / 100,
+      pasadasNecesarias: necesarias,
+      porcentaje: Math.round(porcentaje * 100) / 100,
       creadoEn: r.creado_en,
       completadoEn: r.completado_en,
       actividadCatalogoId: r.actividad_catalogo_id,
@@ -5922,40 +6100,50 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
        AND EXISTS (SELECT 1 FROM huerta_actividades a WHERE a.cuadro_id = c.id AND a.estado = 'pendiente')`,
     [huerta]
   );
-  if (cuadros.length === 0) return [];
-  const [ultimos] = await pool.query(
-    'SELECT lat, lng FROM avance_huerta_puntos WHERE avance_id = ? ORDER BY id DESC LIMIT 2',
-    [avanceId]
-  );
-  const anterior = ultimos.length > 1 ? { lat: Number(ultimos[1].lat), lng: Number(ultimos[1].lng) } : null;
-
+  // El tramo se mide desde el "ancla" del recorrido (avance_huerta.ancla_*),
+  // no desde el punto inmediato anterior: ver AVANCE_TRAMO_MINIMO_METROS.
+  const [anclas] = await pool.query('SELECT ancla_lat, ancla_lng FROM avance_huerta WHERE id = ?', [avanceId]);
+  const anterior = (anclas.length && anclas[0].ancla_lat !== null)
+    ? { lat: Number(anclas[0].ancla_lat), lng: Number(anclas[0].ancla_lng) }
+    : null;
   const completadas = [];
+  if (!anterior) {
+    // Primer punto de la sesión: queda como ancla, todavía no hay tramo.
+    await pool.query('UPDATE avance_huerta SET ancla_lat = ?, ancla_lng = ? WHERE id = ?', [lat, lng, avanceId]);
+    return completadas;
+  }
+  if (distanciaMetros_(anterior, actual) < AVANCE_TRAMO_MINIMO_METROS) return completadas;
+  await pool.query('UPDATE avance_huerta SET ancla_lat = ?, ancla_lng = ? WHERE id = ?', [lat, lng, avanceId]);
+  if (cuadros.length === 0) return completadas;
   for (const c of cuadros) {
     const poligono = parsearPoligono_(c.poligono);
-    if (!dentroParaAvance_(actual, poligono)) continue;
-    const metrosTramo = (anterior && dentroParaAvance_(anterior, poligono)) ? distanciaMetros_(anterior, actual) : 0;
+    // Ver avanceDeTramo_: solo la parte del tramo DENTRO del cuadro, en
+    // fracción de pasada (atravesada completa = 1).
+    const tramo = avanceDeTramo_(anterior, actual, poligono);
+    if (tramo.pasadas <= 0) continue;
     const [actividades] = await pool.query(
-      `SELECT id, trabajo, intervalo_surcos, avance_metros, equipo_codigo, operador_nombre FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
+      `SELECT id, trabajo, intervalo_surcos, avance_metros, avance_pasadas, equipo_codigo, operador_nombre FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
       [c.id]
     );
     for (const act of actividades) {
       if (!coincideConAsignado_(act.equipo_codigo, avanceEquipo) || !coincideConAsignado_(act.operador_nombre, avanceNombre)) continue;
-      const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, c.surcos, act.intervalo_surcos);
-      const nuevoAvance = Number(act.avance_metros) + metrosTramo;
-      // Cuadro SIN surcos capturados (esperado === null): ya NO se completa
-      // solo con pasar por él (petición de Carlos, oct-2026 -- un solo
-      // cruce lo dejaba "Completado"). Se queda pendiente, pero los metros
-      // SÍ se siguen sumando, para que en cuanto Carlos capture sus surcos
-      // (actualizarSurcosCuadro) el % refleje lo que ya se trabajó.
-      const completado = esperado !== null && nuevoAvance >= esperado - SURCOS_TOLERANCIA_METROS;
+      const necesarias = pasadasNecesarias_(c.surcos, act.intervalo_surcos);
+      const nuevasPasadas = (Number(act.avance_pasadas) || 0) + tramo.pasadas;
+      const nuevosMetros = (Number(act.avance_metros) || 0) + tramo.metros;
+      // Cuadro SIN surcos capturados (necesarias === null): ya NO se
+      // completa solo con pasar por él (petición de Carlos, oct-2026). Se
+      // queda pendiente, pero las pasadas SÍ se siguen sumando, para que en
+      // cuanto Carlos capture sus surcos (actualizarSurcosCuadro) el %
+      // refleje lo que ya se trabajó.
+      const completado = necesarias !== null && nuevasPasadas >= necesarias - margenCompletado_(necesarias);
       if (completado) {
         await pool.query(
-          `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_id = ?, avance_metros = ? WHERE id = ?`,
-          [avanceId, Math.min(nuevoAvance, esperado), act.id]
+          `UPDATE huerta_actividades SET estado = 'completado', completado_en = NOW(), avance_id = ?, avance_metros = ?, avance_pasadas = ? WHERE id = ?`,
+          [avanceId, nuevosMetros, Math.min(nuevasPasadas, necesarias), act.id]
         );
         completadas.push({ id: act.id, cuadroNombre: c.cuadroNombre, trabajo: act.trabajo });
-      } else if (metrosTramo > 0) {
-        await pool.query('UPDATE huerta_actividades SET avance_metros = ? WHERE id = ?', [nuevoAvance, act.id]);
+      } else {
+        await pool.query('UPDATE huerta_actividades SET avance_metros = ?, avance_pasadas = ? WHERE id = ?', [nuevosMetros, nuevasPasadas, act.id]);
       }
     }
   }
@@ -5974,8 +6162,8 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
 // coincidan con el equipo/operador asignado (si tiene), y de cada uno solo
 // los puntos capturados DESDE que se creó la actividad (igual que en vivo:
 // nada de "adelantar" con recorridos de antes). Suma metros con
-// metrosDentroDeCuadro_ en orden cronológico; si llega a lo esperado, la
-// marca completada con la hora del punto en que lo alcanzó.
+// avanceDeTramo_ (pasadas) en orden cronológico; si llega a las pasadas
+// necesarias, la marca completada con la hora del punto en que lo alcanzó.
 //
 // aplicar = false -> NO cambia nada, solo regresa la lista de cambios que
 // HARÍA (para revisarlos antes). aplicar = true -> además los guarda.
@@ -5983,7 +6171,7 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
 // la usa el script recalcular_avance_cuadros_nube.js.
 async function recalcularAvanceActividadesHuerta_(aplicar) {
   const [acts] = await pool.query(
-    `SELECT a.id, a.huerta, a.trabajo, a.estado, a.creado_en, a.completado_en, a.intervalo_surcos, a.avance_metros,
+    `SELECT a.id, a.huerta, a.trabajo, a.estado, a.creado_en, a.completado_en, a.intervalo_surcos, a.avance_metros, a.avance_pasadas,
             a.equipo_codigo, a.operador_nombre, c.nombre AS cuadroNombre, c.poligono, c.surcos
      FROM huerta_actividades a JOIN huerta_cuadros c ON c.id = a.cuadro_id
      ORDER BY a.huerta, c.nombre, a.id`
@@ -6015,52 +6203,54 @@ async function recalcularAvanceActividadesHuerta_(aplicar) {
   const cambios = [];
   for (const a of acts) {
     const poligono = parsearPoligono_(a.poligono);
-    const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, a.surcos, a.intervalo_surcos);
+    const necesarias = pasadasNecesarias_(a.surcos, a.intervalo_surcos);
     const desde = new Date(a.creado_en);
     const sesiones = await sesionesDe_(a.huerta);
-    let total = 0;
+    let pasadas = 0;
+    let metros = 0;
     let completadoEn = null;
     let avanceIdCompleto = null;
     for (const ses of sesiones) {
       if (completadoEn) break;
       if (!coincideConAsignado_(a.equipo_codigo, ses.codigo_unidad) || !coincideConAsignado_(a.operador_nombre, ses.nombre)) continue;
-      const pts = ses.puntos;
-      for (let i = 1; i < pts.length; i++) {
-        if (pts[i].t < desde) continue;
-        if (dentroParaAvance_(pts[i - 1], poligono) && dentroParaAvance_(pts[i], poligono)) {
-          total += distanciaMetros_(pts[i - 1], pts[i]);
-          if (esperado !== null && total >= esperado - SURCOS_TOLERANCIA_METROS) {
-            completadoEn = pts[i].t;
-            avanceIdCompleto = ses.id;
-            break;
-          }
+      for (const [pa, pb] of tramosDeRecorrido_(ses.puntos)) {
+        if (pb.t < desde) continue;
+        const tramo = avanceDeTramo_(pa, pb, poligono);
+        if (tramo.pasadas <= 0) continue;
+        pasadas += tramo.pasadas;
+        metros += tramo.metros;
+        if (necesarias !== null && pasadas >= necesarias - margenCompletado_(necesarias)) {
+          completadoEn = pb.t;
+          avanceIdCompleto = ses.id;
+          break;
         }
       }
     }
     const nuevoEstado = completadoEn ? 'completado' : 'pendiente';
-    const nuevoAvance = Math.round((completadoEn ? Math.min(total, esperado) : total) * 100) / 100;
-    const avanceAnterior = Number(a.avance_metros) || 0;
+    const nuevasPasadas = Math.round((completadoEn ? Math.min(pasadas, necesarias) : pasadas) * 10000) / 10000;
+    const nuevosMetros = Math.round(metros * 100) / 100;
+    const pasadasAntes = Number(a.avance_pasadas) || 0;
     // Una actividad que YA estaba completada y lo sigue estando se deja
     // tal cual (no se le mueve la fecha de completado).
     if (a.estado === 'completado' && nuevoEstado === 'completado') continue;
-    if (a.estado === nuevoEstado && Math.abs(avanceAnterior - nuevoAvance) < 0.01) continue;
-    const pct = esperado ? Math.round(Math.max(0, Math.min(100, (nuevoAvance / esperado) * 100))) : null;
+    if (a.estado === nuevoEstado && Math.abs(pasadasAntes - nuevasPasadas) < 0.001) continue;
+    const pct = necesarias ? Math.round(Math.max(0, Math.min(100, (nuevasPasadas / necesarias) * 100)) * 100) / 100 : null;
     cambios.push({
       id: a.id, huerta: a.huerta, cuadro: a.cuadroNombre, trabajo: a.trabajo,
       estadoAntes: a.estado, estadoDespues: nuevoEstado,
-      metrosAntes: Math.round(avanceAnterior * 100) / 100, metrosDespues: nuevoAvance,
-      porcentajeDespues: pct, sinSurcos: esperado === null,
+      pasadasDespues: Math.round(nuevasPasadas * 100) / 100, pasadasNecesarias: necesarias,
+      porcentajeDespues: pct, sinSurcos: necesarias === null,
     });
     if (aplicar) {
       if (nuevoEstado === 'completado') {
         await pool.query(
-          `UPDATE huerta_actividades SET estado = 'completado', completado_en = ?, avance_id = ?, avance_metros = ? WHERE id = ?`,
-          [completadoEn, avanceIdCompleto, nuevoAvance, a.id]
+          `UPDATE huerta_actividades SET estado = 'completado', completado_en = ?, avance_id = ?, avance_metros = ?, avance_pasadas = ? WHERE id = ?`,
+          [completadoEn, avanceIdCompleto, nuevosMetros, nuevasPasadas, a.id]
         );
       } else {
         await pool.query(
-          `UPDATE huerta_actividades SET estado = 'pendiente', completado_en = NULL, avance_id = NULL, avance_metros = ? WHERE id = ?`,
-          [nuevoAvance, a.id]
+          `UPDATE huerta_actividades SET estado = 'pendiente', completado_en = NULL, avance_id = NULL, avance_metros = ?, avance_pasadas = ? WHERE id = ?`,
+          [nuevosMetros, nuevasPasadas, a.id]
         );
       }
     }
@@ -7383,8 +7573,11 @@ module.exports = {
   generarOrdenServicioAutomotriz,
   revisarYGenerarOrdenesPreventivasAutomaticas_,
   recalcularAvanceActividadesHuerta_,
-  metrosDentroDeCuadro_,
   dentroParaAvance_,
+  avanceDeTramo_,
+  pasadasNecesarias_,
+  tramosDeRecorrido_,
+  margenCompletado_,
   getProveedores,
   guardarProveedor,
   eliminarProveedor,

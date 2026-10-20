@@ -7096,9 +7096,16 @@ function ahRenderActividadesTabla_(){
     var pct = tieneSurcos ? Math.max(0, Math.min(100, Number(a.porcentaje) || 0)) : (completado ? 100 : 0);
     // Sin surcos ya NO se completa sola (ver marcarCuadrosCompletadosPorPunto_
     // en handlers.js) -- se avisa qué falta en vez de un "—" que no dice nada.
-    var pctTexto = tieneSurcos ? (pct + '%') : (completado ? 'Completado' : 'Falta capturar surcos');
+    var pctTexto = tieneSurcos ? (Number(pct.toFixed(2)) + '%') : (completado ? 'Completado' : 'Falta capturar surcos');
     var subTrabajo = a.trabajo || '';
     if(tieneSurcos && a.intervaloSurcos && a.intervaloSurcos > 1) subTrabajo += ' · cada ' + a.intervaloSurcos + ' surcos';
+    // Cuántas atravesadas lleva (ver avanceDeTramo_ en handlers.js) -- p.ej.
+    // "4 de 33 pasadas", para que se vea de dónde sale el %. En un cuadro sin
+    // surcos se muestra lo que ya se lleva, aunque no se pueda dar un %.
+    var pasadasHechas = Number(a.pasadas) || 0;
+    var pasadasTxt = String(Number(pasadasHechas.toFixed(1)));
+    if(!completado && tieneSurcos && a.pasadasNecesarias) subTrabajo += ' · ' + pasadasTxt + ' de ' + a.pasadasNecesarias + ' pasadas';
+    else if(!completado && !tieneSurcos && pasadasHechas > 0) subTrabajo += ' · ' + pasadasTxt + ' pasadas';
     // Equipo/operador asignados en "2. Detalle de trabajo" (si se eligieron
     // -- son opcionales): se muestran como referencia debajo del cuadro,
     // igual que la actividad.

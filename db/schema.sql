@@ -2274,6 +2274,23 @@ CREATE TABLE IF NOT EXISTS avance_huerta_puntos (
   INDEX idx_avance_puntos_avance (avance_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ancla_lat/ancla_lng (oct-2026): último punto del recorrido desde el que
+-- se midió avance en los cuadros. El avance solo se mide cuando el
+-- tractor ya se alejó AVANCE_TRAMO_MINIMO_METROS (15 m) de este punto, en
+-- vez de entre cada par de puntos seguidos (el celular manda uno cada
+-- 3 m), para que el "bailoteo" normal del GPS no infle las pasadas. Ver
+-- marcarCuadrosCompletadosPorPunto_ en handlers.js.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'avance_huerta' AND column_name = 'ancla_lat'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE avance_huerta ADD COLUMN ancla_lat DECIMAL(10,7) DEFAULT NULL, ADD COLUMN ancla_lng DECIMAL(10,7) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- ------------------------------------------------------------
 -- Cuadros (lotes numerados) y actividades planeadas por cuadro
 -- ------------------------------------------------------------
@@ -2376,6 +2393,7 @@ CREATE TABLE IF NOT EXISTS huerta_actividades (
   estado          VARCHAR(20) NOT NULL DEFAULT 'pendiente',
   intervalo_surcos INT NOT NULL DEFAULT 1,
   avance_metros   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  avance_pasadas  DECIMAL(10,4) NOT NULL DEFAULT 0,
   creado_por      VARCHAR(255) DEFAULT NULL,
   creado_en       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   completado_en   DATETIME DEFAULT NULL,
@@ -2401,6 +2419,23 @@ SET @col_exists = (
 );
 SET @sql_alter = IF(@col_exists = 0,
   'ALTER TABLE huerta_actividades ADD COLUMN avance_metros DECIMAL(10,2) NOT NULL DEFAULT 0',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+-- avance_pasadas (oct-2026): cuántas "atravesadas" lleva la actividad en
+-- su cuadro (1 = un surco recorrido de orilla a orilla; ver
+-- avanceDeTramo_ en handlers.js). El % es avance_pasadas / pasadas
+-- necesarias (surcos / intervalo_surcos) -- p.ej. 4 de 33 = 12.12%.
+-- Reemplaza a avance_metros para el % (los metros se siguen guardando
+-- solo como referencia).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_actividades' AND column_name = 'avance_pasadas'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_actividades ADD COLUMN avance_pasadas DECIMAL(10,4) NOT NULL DEFAULT 0',
   'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;

@@ -308,6 +308,10 @@
   .ah-cuadro-chip a{ color:var(--text-dim); text-decoration:none; font-weight:700; padding:0 2px; }
   .ah-cuadro-chip a:hover{ color:#c0392b; }
   .ah-cuadro-chip a.ah-cuadro-direccion{ color:var(--steel); }
+  .ah-cuadro-chip .ah-cuadro-ha{ color:var(--text-dim); font-weight:600; }
+  /* Etiqueta "22 · 3.42 ha" encima de cada cuadro en los mapas de Google:
+     texto blanco con contorno oscuro para que se lea sobre el satélite. */
+  .ah-etiqueta-cuadro{ text-shadow:0 0 3px #000, 0 0 3px #000, 0 0 2px #000; letter-spacing:.2px; pointer-events:none; }
   .ah-cuadro-chip a.ah-cuadro-direccion-falta{ color:var(--text-dim); }
   .ah-badge{ display:inline-block; padding:3px 9px; border-radius:12px; font-size:12px; font-weight:700; }
   .ah-badge-pendiente{ background:#FBEBD0; color:#8a5a00; }
@@ -3456,6 +3460,7 @@
           </div>
           <div id="ah-cuadros-vacio" class="avance-aviso" style="display:none; padding:8px 0 0;">Todavía no has dibujado ningún cuadro de esta huerta.</div>
           <div class="avance-aviso" style="padding:8px 0 0;">Toca "· surcos ✏️" en un cuadro para decirle cuántos surcos tiene de verdad -- así el avance de sus actividades se ve en % conforme el operador los va recorriendo, en vez de solo Pendiente/Completado.</div>
+          <div id="ah-cuadros-total" class="avance-aviso" style="padding:8px 0 0; display:none;"></div>
           <div id="ah-cuadros-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0;"></div>
           <div class="maq-modal-status" id="ah-cuadros-status"></div>
 
@@ -6348,6 +6353,9 @@ function poblarSelectHuertaAvanceHuerta_(){
 var AH_GOOGLE_MAP_AVANCE = null;
 var AH_GOOGLE_POLIGONOS_AVANCE = [];
 var AH_GOOGLE_GUIAS_DIRECCION_AVANCE = [];
+var AH_GOOGLE_ETIQUETAS_AVANCE = [];
+var AH_GOOGLE_ETIQUETAS_DIBUJO = [];
+var AH_GOOGLE_ETIQUETAS_SELECCION = [];
 var AH_GOOGLE_POLYLINES_HISTORICO_AVANCE = [];
 var AH_GOOGLE_MARCADORES_ACTUAL_AVANCE = []; // ícono "aquí está el tractor ahora" para cada sesión todavía en curso (fechaFin vacía) -- petición de Carlos, para verlo como en su otra app de flotillas
 
@@ -6440,6 +6448,7 @@ function ahDibujarCuadrosGoogleAvance_(){
     poly.setMap(AH_GOOGLE_MAP_AVANCE);
     return poly;
   });
+  AH_GOOGLE_ETIQUETAS_AVANCE = ahDibujarEtiquetasCuadros_(AH_GOOGLE_MAP_AVANCE, AH_CUADROS, AH_GOOGLE_ETIQUETAS_AVANCE);
   // Líneas guía blancas con la dirección de los surcos de cada cuadro que
   // ya la tiene capturada (3 por cuadro, de orilla a orilla).
   (AH_GOOGLE_GUIAS_DIRECCION_AVANCE || []).forEach(function(l){ l.setMap(null); });
@@ -7280,19 +7289,101 @@ document.getElementById('ah-recorrido-sesiones-lista').addEventListener('change'
 // de surcos (petición de Carlos: medir avance en % en vez de solo
 // Pendiente/Completado) se edita tocando ese mismo texto -- ver
 // ahEditarSurcosCuadro_ más abajo.
+// ---------------------------------------------------------------
+// Hectáreas de cada cuadro -- petición de Carlos (oct-2026): "conforme los
+// cuadros que marque se podría sacar la medida de los cuadros en hectáreas
+// y que se ponga la medida en el cuadro con el número de cuadro". Se mide
+// con el contorno que se dibujó en Google Maps (fórmula del área de un
+// polígono, en metros locales alrededor del centro del cuadro -- a la
+// escala de un cuadro el error es de menos de 0.1%). No se guarda nada:
+// se recalcula sola si se redibuja el cuadro.
+// ---------------------------------------------------------------
+function ahAreaHectareas_(poligono){
+  if(!poligono || poligono.length < 3) return 0;
+  var o = { lat: 0, lng: 0 };
+  poligono.forEach(function(v){ o.lat += v.lat / poligono.length; o.lng += v.lng / poligono.length; });
+  var mLng = 111320 * Math.cos(o.lat * Math.PI / 180);
+  var area2 = 0;
+  for(var i = 0; i < poligono.length; i++){
+    var a = poligono[i], b = poligono[(i + 1) % poligono.length];
+    var ax = (a.lng - o.lng) * mLng, ay = (a.lat - o.lat) * 111320;
+    var bx = (b.lng - o.lng) * mLng, by = (b.lat - o.lat) * 111320;
+    area2 += ax * by - bx * ay;
+  }
+  return Math.abs(area2) / 2 / 10000;
+}
+
+function ahTextoHectareas_(ha){
+  var n = Number(ha) || 0;
+  return (n >= 100 ? n.toFixed(1) : n.toFixed(2)) + ' ha';
+}
+
+// "CUADRO 22" -> "22", "CUADRO 18+" -> "18+", "Lote norte" -> "Lote norte".
+function ahNumeroCuadro_(nombre){
+  var t = String(nombre || '').trim();
+  var sin = t.replace(/^cuadro\s*/i, '').trim();
+  return sin || t;
+}
+
+// Punto donde va la etiqueta: el centro de masa del contorno.
+function ahCentroCuadro_(poligono){
+  var n = poligono.length;
+  var o = { lat: 0, lng: 0 };
+  poligono.forEach(function(v){ o.lat += v.lat / n; o.lng += v.lng / n; });
+  var mLng = 111320 * Math.cos(o.lat * Math.PI / 180);
+  var a2 = 0, cx = 0, cy = 0;
+  for(var i = 0; i < n; i++){
+    var p = poligono[i], q = poligono[(i + 1) % n];
+    var px = (p.lng - o.lng) * mLng, py = (p.lat - o.lat) * 111320;
+    var qx = (q.lng - o.lng) * mLng, qy = (q.lat - o.lat) * 111320;
+    var f = px * qy - qx * py;
+    a2 += f; cx += (px + qx) * f; cy += (py + qy) * f;
+  }
+  if(Math.abs(a2) < 1e-9) return o;
+  cx /= (3 * a2); cy /= (3 * a2);
+  return { lat: o.lat + cy / 111320, lng: o.lng + cx / mLng };
+}
+
+// Una etiqueta "22 · 3.42 ha" por cuadro, encima del mapa. No se puede
+// tocar (no estorba para dar clic en el cuadro, p.ej. al seleccionarlo).
+function ahDibujarEtiquetasCuadros_(mapa, cuadros, anteriores){
+  (anteriores || []).forEach(function(m){ m.setMap(null); });
+  if(!mapa || typeof google === 'undefined' || !google.maps) return [];
+  return (cuadros || []).filter(function(c){ return c.poligono && c.poligono.length >= 3; }).map(function(c){
+    var ha = ahTextoHectareas_(ahAreaHectareas_(c.poligono));
+    return new google.maps.Marker({
+      position: ahCentroCuadro_(c.poligono),
+      map: mapa,
+      clickable: false,
+      zIndex: 3,
+      title: (c.nombre || '') + ' · ' + ha,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0, fillOpacity: 0, strokeOpacity: 0 },
+      label: { text: ahNumeroCuadro_(c.nombre) + ' · ' + ha, color: '#ffffff', fontSize: '12px', fontWeight: '700', className: 'ah-etiqueta-cuadro' },
+    });
+  });
+}
+
 function ahRenderCuadrosChips_(){
   var wrap = document.getElementById('ah-cuadros-chips');
   var vacio = document.getElementById('ah-cuadros-vacio');
+  var totalEl = document.getElementById('ah-cuadros-total');
   if(!AH_CUADROS || AH_CUADROS.length === 0){
     wrap.innerHTML = '';
     vacio.style.display = '';
+    if(totalEl){ totalEl.style.display = 'none'; totalEl.textContent = ''; }
     return;
   }
   vacio.style.display = 'none';
+  if(totalEl){
+    var totalHa = AH_CUADROS.reduce(function(t, c){ return t + ahAreaHectareas_(c.poligono); }, 0);
+    totalEl.textContent = AH_CUADROS.length + ' cuadro' + (AH_CUADROS.length === 1 ? '' : 's') + ' · ' + ahTextoHectareas_(totalHa) + ' en total (medido con el contorno dibujado)';
+    totalEl.style.display = '';
+  }
   wrap.innerHTML = AH_CUADROS.map(function(c){
     var surcosTexto = (c.surcos !== null && c.surcos !== undefined) ? (c.surcos + ' surcos') : 'sin surcos';
     var tieneDir = c.direccionSurcos !== null && c.direccionSurcos !== undefined;
     return '<span class="ah-cuadro-chip">' + escapeHtml(c.nombre)
+      + ' <span class="ah-cuadro-ha">· ' + ahTextoHectareas_(ahAreaHectareas_(c.poligono)) + '</span>'
       + ' <a href="#" data-id="' + c.id + '" data-surcos="' + (c.surcos === null || c.surcos === undefined ? '' : c.surcos) + '" class="ah-cuadro-surcos" title="Definir/cambiar el número de surcos de este cuadro">· ' + surcosTexto + ' ✏️</a>'
       + ' <a href="#" data-id="' + c.id + '" class="ah-cuadro-direccion' + (tieneDir ? '' : ' ah-cuadro-direccion-falta') + '" title="Trazar en el mapa hacia dónde van los surcos de este cuadro">· ' + (tieneDir ? (ahFlechaRumbo_(c.direccionSurcos) + ' dirección') : 'sin dirección') + ' ✏️</a>'
       + ' <a href="#" data-id="' + c.id + '" class="ah-cuadro-eliminar" title="Borrar este cuadro">✕</a></span>';
@@ -7878,7 +7969,7 @@ function ahActualizarUiDibujoCuadroGoogle_(){
   document.getElementById('ah-mapa-google-btn-terminar').disabled = n < 3;
   document.getElementById('ah-mapa-google-conteo-puntos').textContent = n === 0
     ? ''
-    : (n < 3 ? 'Llevas ' + n + ' esquina(s) marcada(s) -- faltan al menos ' + (3 - n) + ' más.' : n + ' esquinas marcadas. Toca "✅ Terminar cuadro" cuando termines, o sigue tocando el mapa para agregar más.');
+    : (n < 3 ? 'Llevas ' + n + ' esquina(s) marcada(s) -- faltan al menos ' + (3 - n) + ' más.' : n + ' esquinas marcadas (≈ ' + ahTextoHectareas_(ahAreaHectareas_(AH_GOOGLE_DIBUJO_PUNTOS)) + '). Toca "✅ Terminar cuadro" cuando termines, o sigue tocando el mapa para agregar más.');
 }
 
 function ahEmpezarDibujoCuadroGoogle_(){
@@ -7919,6 +8010,7 @@ function ahDibujarPoligonosGoogleExistentes_(){
     poly.setMap(AH_GOOGLE_MAP);
     return poly;
   });
+  AH_GOOGLE_ETIQUETAS_DIBUJO = ahDibujarEtiquetasCuadros_(AH_GOOGLE_MAP, AH_CUADROS, AH_GOOGLE_ETIQUETAS_DIBUJO);
 }
 
 // --- "1. Selección de campo" por mapa (petición de Carlos, al estilo del
@@ -7969,6 +8061,7 @@ function ahDibujarPoligonosSeleccionables_(){
     });
     return poly;
   });
+  AH_GOOGLE_ETIQUETAS_SELECCION = ahDibujarEtiquetasCuadros_(AH_GOOGLE_MAP_SELECCION, AH_CUADROS, AH_GOOGLE_ETIQUETAS_SELECCION);
 }
 
 function ahAbrirModalSeleccionMapa_(){

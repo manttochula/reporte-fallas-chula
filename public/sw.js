@@ -14,6 +14,14 @@
 // con IndexedDB + fetch normal.
 const CACHE_NOMBRE = 'reportar-shell-v3';
 
+// Con señal muy débil (p.ej. 339 B/s) el servidor NO falla: la descarga se
+// queda colgada, y antes el celular esperaba hasta que Android mostraba
+// "Página web no disponible -- net::ERR_TIMED_OUT" (oct-2026), aunque ya
+// hubiera una copia guardada. Ahora, si en ESPERA_RED_MS no llegó la
+// página y hay copia guardada, se abre la copia; la descarga sigue en
+// segundo plano y actualiza la copia para la próxima vez.
+const ESPERA_RED_MS = 5000;
+
 // La página en sí, más el manifiesto y los íconos que usa el celular para
 // "instalarla" en la pantalla de inicio — para que abrir ese ícono
 // funcione aunque no haya señal, no solo la página desde el navegador.
@@ -52,16 +60,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    fetch(event.request)
-      .then((respuesta) => {
-        // Con señal: siempre se usa la versión que manda el servidor (para
-        // no quedarse pegado en una versión vieja de la app), y de paso se
-        // refresca la copia guardada para la próxima vez que no haya señal.
-        const copia = respuesta.clone();
-        caches.open(CACHE_NOMBRE).then((cache) => cache.put(url.pathname, copia));
-        return respuesta;
-      })
-      .catch(() => caches.match(url.pathname))
-  );
+  event.respondWith(responderPagina_(event, url));
 });
+
+async function responderPagina_(event, url) {
+  const guardada = await caches.match(url.pathname);
+  const deRed = fetch(event.request).then((respuesta) => {
+    // Solo se guarda una respuesta BUENA: antes, si Render contestaba un
+    // error (502 mientras reinicia), esa página de error reemplazaba la
+    // copia buena y luego sin señal se abría el error.
+    if (respuesta && respuesta.ok) {
+      const copia = respuesta.clone();
+      caches.open(CACHE_NOMBRE).then((cache) => cache.put(url.pathname, copia));
+      return respuesta;
+    }
+    return guardada || respuesta;
+  });
+  if (!guardada) return deRed; // primera vez: no hay de otra más que esperar a la red
+  event.waitUntil(deRed.catch(() => {})); // que la copia se actualice aunque ya se haya mostrado la guardada
+  return Promise.race([
+    deRed.catch(() => guardada),
+    new Promise((resolver) => setTimeout(() => resolver(guardada), ESPERA_RED_MS)),
+  ]);
+}

@@ -22,6 +22,28 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // original), así que el body puede pesar varios MB.
 app.use(express.json({ limit: '25mb' }));
 
+// App de Android con la pantalla empaquetada (ver
+// server/scripts/prepararAppAndroid.js): la página corre en
+// https://localhost dentro del celular y llama a este servidor desde
+// otro origen, así que:
+//  - se le da permiso (CORS) SOLO a esos orígenes de la app;
+//  - se acepta el cuerpo como text/plain (así el WebView no hace la
+//    pregunta previa OPTIONS: una sola ida y vuelta con señal débil).
+const ORIGENES_APP = new Set(['https://localhost', 'http://localhost', 'capacitor://localhost']);
+app.use('/api', (req, res, next) => {
+  const origen = req.headers.origin;
+  if (origen && ORIGENES_APP.has(origen)) {
+    res.set('Access-Control-Allow-Origin', origen);
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Max-Age', '86400');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+  }
+  next();
+});
+app.use('/api', express.text({ type: 'text/plain', limit: '25mb' }));
+
 // Fotos/videos: en tu computadora se sirven directo desde la carpeta
 // /uploads (igual que siempre); si el sistema está configurado para
 // guardarlas en la nube (ver server/storage.js), en vez de eso se
@@ -64,7 +86,11 @@ app.post('/api/:fn', async (req, res) => {
   if (typeof fn !== 'function') {
     return res.status(404).json({ error: 'Función no encontrada: ' + req.params.fn });
   }
-  const args = Array.isArray(req.body && req.body.args) ? req.body.args : [];
+  let cuerpo = req.body;
+  if (typeof cuerpo === 'string') { // viene de la app empaquetada como text/plain
+    try { cuerpo = JSON.parse(cuerpo); } catch (e) { return res.status(400).json({ error: 'Cuerpo inválido.' }); }
+  }
+  const args = Array.isArray(cuerpo && cuerpo.args) ? cuerpo.args : [];
   try {
     const resultado = await fn(...args);
     res.json(resultado === undefined ? null : resultado);

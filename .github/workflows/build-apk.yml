@@ -23,6 +23,11 @@ on:
       - 'android/**'
       - 'capacitor.config.ts'
       - 'www/**'
+      # La pantalla del celular va empaquetada dentro del APK: si cambia,
+      # se compila un APK nuevo.
+      - 'public/Index.html'
+      - 'server/versionApp.js'
+      - 'server/scripts/prepararAppAndroid.js'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/build-apk.yml'
@@ -61,6 +66,9 @@ jobs:
 
       - name: Instalar las dependencias del proyecto
         run: npm ci
+
+      - name: Empaquetar la pantalla del celular dentro de la app
+        run: node server/scripts/prepararAppAndroid.js
 
       - name: Sincronizar Capacitor con el proyecto de Android
         run: npx cap sync android

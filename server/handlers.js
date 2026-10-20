@@ -5165,15 +5165,33 @@ async function iniciarAvance(huerta, nombre, trabajo, porcentaje, codigoUnidad) 
   // esta pantalla, pero una versión vieja de la app que no lo mande no debe
   // tronar).
   try {
+    const trabajoNorm = normalizarTrabajoAvance_(trabajo);
+    const unidad = (codigoUnidad || '').toString().trim() || null;
+    // El celular reintenta solo si no le llegó la respuesta (señal débil).
+    // Si el primer intento SÍ llegó y se guardó, no se crea un segundo
+    // registro: se regresa el mismo avance abierto hace menos de 3 minutos
+    // por la misma persona, con la misma actividad y equipo, y sin puntos.
+    const [abiertos] = await pool.query(
+      `SELECT a.id FROM avance_huerta a
+        WHERE a.huerta = ? AND a.nombre = ? AND a.fecha_fin IS NULL
+          AND a.trabajo <=> ? AND a.codigo_unidad <=> ?
+          AND a.fecha_inicio >= NOW() - INTERVAL ${AVANCE_REINTENTO_MINUTOS} MINUTE
+          AND NOT EXISTS (SELECT 1 FROM avance_huerta_puntos p WHERE p.avance_id = a.id)
+        ORDER BY a.id DESC LIMIT 1`,
+      [nombreHuerta, nombrePersona, trabajoNorm, unidad]
+    );
+    if (abiertos.length > 0) return { success: true, avanceId: abiertos[0].id, reutilizado: true };
     const [result] = await pool.query(
       'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio, codigo_unidad) VALUES (?, ?, ?, ?, NOW(), ?)',
-      [nombreHuerta, nombrePersona, normalizarTrabajoAvance_(trabajo), porcentajeNum, (codigoUnidad || '').toString().trim() || null]
+      [nombreHuerta, nombrePersona, trabajoNorm, porcentajeNum, unidad]
     );
     return { success: true, avanceId: result.insertId };
   } catch (err) {
+    console.error('[iniciarAvance] huerta=' + nombreHuerta + ' nombre=' + nombrePersona + ':', err.message);
     return { success: false, error: err.toString() };
   }
 }
+const AVANCE_REINTENTO_MINUTOS = 3;
 
 // Se llama repetidamente (cada vez que el celular capta una posición
 // nueva) mientras el registro esté abierto. Si el registro ya no existe o
@@ -7823,7 +7841,14 @@ async function cancelarOrdenesPreventivasYaNoVencidas_(codigoUnidad, nombreUsuar
   }
 }
 
+// Abierta (sin clave): solo regresa la versión de la pantalla del celular
+// -- ver server/versionApp.js y appRevisarVersion_ en public/Index.html.
+function getVersionApp() {
+  return { version: require('./versionApp').versionActual() };
+}
+
 module.exports = {
+  getVersionApp,
   submitReporte,
   crearOrdenPanel,
   getReportes,

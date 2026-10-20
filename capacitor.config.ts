@@ -1,22 +1,22 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-// Esta app nativa NO trae el sitio empaquetado adentro -- lo carga en vivo
-// desde la misma dirección donde ya vive en Render (server.url), para que
-// sea EXACTAMENTE el mismo sitio de siempre (Reportar, Historial, Taller,
-// Panel, Movimientos, Avance) y cualquier cambio futuro que subamos al
-// sitio se vea también aquí, sin tener que volver a compilar la app. Lo
-// único que agrega esta app nativa es el plugin de rastreo en segundo
-// plano (ver android/.../BackgroundLocationPlugin.kt) para el GPS de
-// "Avance Huerta" cuando el celular está bloqueado.
+// Esta app nativa TRAE ADENTRO la pantalla del celular (www/index.html,
+// que arma server/scripts/prepararAppAndroid.js a partir de
+// public/Index.html cada vez que GitHub compila el APK). Antes la cargaba
+// en vivo desde Render (server.url), y con señal débil Android mostraba
+// "Página web no disponible -- net::ERR_TIMED_OUT" al abrir (oct-2026).
+// Ahora abre al instante; los datos se piden a Render
+// (window.APP_SERVIDOR). Cuando el sitio tiene una versión más nueva de
+// la pantalla, la app avisa que hay un APK nuevo. Lo nativo extra sigue
+// siendo el plugin de rastreo en segundo plano
+// (android/.../BackgroundLocationPlugin.kt) para "Avance Huerta".
 const config: CapacitorConfig = {
   appId: 'mx.chulabrand.reportefallas',
   appName: 'Reporte de Fallas',
   webDir: 'www',
   server: {
-    url: 'https://reporte-fallas-chula.onrender.com',
-    // Necesario porque el sitio real sirve contenido de otros orígenes
-    // (fuentes de Google, S3 si la nube de archivos está activa, etc.) --
-    // sin esto el WebView bloquearía la navegación a esos dominios.
+    // Para poder abrir fotos/enlaces de esos dominios (Render, fuentes de
+    // Google, S3 si la nube de archivos está activa) sin salir de la app.
     allowNavigation: [
       'reporte-fallas-chula.onrender.com',
       '*.onrender.com',

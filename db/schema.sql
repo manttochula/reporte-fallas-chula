@@ -2374,6 +2374,23 @@ PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
 
+-- direccion_surcos (oct-2026): rumbo de los surcos del cuadro, en grados
+-- desde el norte en el sentido del reloj (0 a 180), a partir de la línea
+-- que Carlos traza sobre una hilera en el Panel. Si está capturado, solo
+-- cuenta como avance el recorrido que va a lo largo de los surcos (hasta
+-- 20° de desviación) -- ver avanceDeTramo_ en handlers.js. NULL = sin
+-- dirección (cuenta en cualquier dirección, como antes).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'huerta_cuadros' AND column_name = 'direccion_surcos'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE huerta_cuadros ADD COLUMN direccion_surcos DECIMAL(6,2) NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
 -- estado: 'pendiente' -> 'completado' (pasa solo, por GPS; ver arriba).
 -- avance_id queda NULL hasta que se completa, y entonces guarda a qué
 -- registro de avance_huerta (qué recorrido) se le atribuye la completada.

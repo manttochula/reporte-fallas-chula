@@ -5437,7 +5437,7 @@ function calcularResumenRango_(sesiones, cuadros, ventanas, minutosRalenti, ahor
       for (const [pa, pb] of tramosDeRecorrido_(pts)) {
         g.metros += distanciaMetros_(pa, pb);
         for (const c of cuadrosValidos) {
-          const tr = avanceDeTramo_(pa, pb, c.poligono);
+          const tr = avanceDeTramo_(pa, pb, c.poligono, c.direccion_surcos);
           if (tr.pasadas > 0) g.pasadasPorCuadro[c.id] = (g.pasadasPorCuadro[c.id] || 0) + tr.pasadas;
         }
       }
@@ -5545,7 +5545,7 @@ async function getAvancePorRango(code, nombreUsuario, huerta, ventanas, minutosR
   const elegidas = sesiones.filter((x) => (!operador || x.nombre === operador)
     && (!trabajo || normalizarTrabajoAvance_(x.trabajo) === trabajo));
   const [cuadros] = await pool.query(
-    'SELECT id, nombre, poligono, surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
+    'SELECT id, nombre, poligono, surcos, direccion_surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
     [nombreHuerta]
   );
   if (elegidas.length === 0) return { success: true, grupos: [], sesiones: [], minutosRalenti: minutosRalentiValidos_(minutosRalenti) };
@@ -5742,10 +5742,53 @@ function puntoDentroLocal_(p, verts) {
   return dentro;
 }
 
+// ------------------------------------------------------------
+// DIRECCIÓN de los surcos (petición de Carlos, oct-2026): "hay que
+// habilitar la dirección para la que van los surcos y hacia esa dirección
+// tiene que ir el avance del tractor". Carlos traza en el Panel una línea
+// sobre una hilera del cuadro; se guarda como RUMBO (grados desde el
+// norte, en el sentido del reloj, 0 a 180 -- un surco no tiene "ida" ni
+// "vuelta": 10° y 190° son la misma dirección). Si el cuadro tiene
+// dirección, un tramo del recorrido SOLO cuenta como avance si va a lo
+// largo de los surcos, con hasta SURCOS_TOLERANCIA_GRADOS de desviación
+// (en cualquiera de los 2 sentidos); cruces de lado, diagonales y vueltas
+// en la cabecera ya no suman. Con tramos de 15 m (ver
+// AVANCE_TRAMO_MINIMO_METROS), 20° no pierde avance real ni con ±3 m de
+// error del GPS (probado en tests/unitarias/test_direccion_surcos.js). Sin
+// dirección capturada, el cuadro sigue como antes.
+const SURCOS_TOLERANCIA_GRADOS = 20;
+
+// Rumbo de a hacia b, normalizado a [0, 180).
+function rumboTramo_(a, b) {
+  const p = aMetrosLocal_(a, b); // x = este, y = norte
+  if (Math.abs(p.x) < 1e-9 && Math.abs(p.y) < 1e-9) return null;
+  const grados = (Math.atan2(p.x, p.y) * 180) / Math.PI; // 0 = norte, 90 = este
+  return ((grados % 180) + 180) % 180;
+}
+
+// Diferencia entre 2 rumbos de surco, de 0 a 90 grados.
+function diferenciaRumbos_(r1, r2) {
+  const d = Math.abs(Number(r1) - Number(r2)) % 180;
+  return Math.min(d, 180 - d);
+}
+
+function direccionValida_(d) {
+  if (d === null || d === undefined || d === '') return null;
+  const n = Number(d);
+  return Number.isFinite(n) ? ((n % 180) + 180) % 180 : null;
+}
+
 // Regresa { metros, pasadas } de UN tramo (de a a b) respecto a un cuadro.
-function avanceDeTramo_(a, b, poligono) {
+// direccionSurcos (opcional): rumbo de los surcos de ese cuadro; si el
+// tramo no va a lo largo de ellos, no cuenta como avance.
+function avanceDeTramo_(a, b, poligono, direccionSurcos) {
   const cero = { metros: 0, pasadas: 0 };
   if (!a || !b || !poligono || poligono.length < 3) return cero;
+  const dirSurcos = direccionValida_(direccionSurcos);
+  if (dirSurcos !== null) {
+    const rumbo = rumboTramo_(a, b);
+    if (rumbo === null || diferenciaRumbos_(rumbo, dirSurcos) > SURCOS_TOLERANCIA_GRADOS) return cero;
+  }
   const origen = poligono[0];
   const verts = poligono.map((v) => aMetrosLocal_(origen, v));
   const A = aMetrosLocal_(origen, a);
@@ -6024,6 +6067,30 @@ async function actualizarSurcosCuadro(code, nombreUsuario, cuadroId, surcos) {
   return { success: true, surcos: surcosNum };
 }
 
+// Acción del Panel: guarda (o quita) la DIRECCIÓN de los surcos de un
+// cuadro a partir de la línea que Carlos trazó sobre una hilera (2 puntos
+// {lat,lng}). puntoA/puntoB = null -> quita la dirección (el cuadro vuelve
+// a contar avance en cualquier dirección). Como cambia qué recorridos
+// cuentan, recalcula de inmediato el avance de las actividades de ESE
+// cuadro con el historial de GPS (puede regresar a pendiente una
+// actividad que se había completado con cruces de lado).
+async function guardarDireccionSurcosCuadro(code, nombreUsuario, cuadroId, puntoA, puntoB) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const id = Number(cuadroId);
+  if (!id) return { success: false, error: 'Falta indicar qué cuadro.' };
+  const [cuadros] = await pool.query('SELECT id FROM huerta_cuadros WHERE id = ?', [id]);
+  if (cuadros.length === 0) return { success: false, error: 'Ese cuadro ya no existe.' };
+  let direccion = null;
+  if (puntoA || puntoB) {
+    if (!poligonoValido_([puntoA, puntoB, puntoA])) return { success: false, error: 'La línea trazada no es válida.' };
+    if (distanciaMetros_(puntoA, puntoB) < 5) return { success: false, error: 'La línea es muy corta: trázala de un extremo a otro de una hilera (al menos 5 m).' };
+    direccion = Math.round(rumboTramo_(puntoA, puntoB) * 100) / 100;
+  }
+  await pool.query('UPDATE huerta_cuadros SET direccion_surcos = ? WHERE id = ?', [direccion, id]);
+  const cambios = await recalcularAvanceActividadesHuerta_(true, { cuadroId: id });
+  return { success: true, direccionSurcos: direccion, actividadesRecalculadas: cambios.length };
+}
+
 // mysql2 regresa una columna JSON ya parseada a JS en la mayoría de los
 // casos, pero según la versión/driver puede llegar como texto -- esta
 // función cubre los dos casos sin tronar.
@@ -6042,10 +6109,13 @@ async function getCuadrosHuerta(huerta) {
   const nombreHuerta = (huerta || '').toString().trim();
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
-    'SELECT id, nombre, poligono, surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
+    'SELECT id, nombre, poligono, surcos, direccion_surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY nombre',
     [nombreHuerta]
   );
-  return rows.map((r) => ({ id: r.id, nombre: r.nombre, poligono: parsearPoligono_(r.poligono), surcos: r.surcos }));
+  return rows.map((r) => ({
+    id: r.id, nombre: r.nombre, poligono: parsearPoligono_(r.poligono), surcos: r.surcos,
+    direccionSurcos: direccionValida_(r.direccion_surcos),
+  }));
 }
 
 // ------------------------------------------------------------
@@ -6338,7 +6408,7 @@ function coincideConAsignado_(asignado, real) {
 async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, avanceNombre, avanceEquipo) {
   const actual = { lat, lng };
   const [cuadros] = await pool.query(
-    `SELECT c.id, c.nombre AS cuadroNombre, c.poligono, c.surcos FROM huerta_cuadros c
+    `SELECT c.id, c.nombre AS cuadroNombre, c.poligono, c.surcos, c.direccion_surcos FROM huerta_cuadros c
      WHERE LOWER(TRIM(c.huerta)) = LOWER(TRIM(?))
        AND EXISTS (SELECT 1 FROM huerta_actividades a WHERE a.cuadro_id = c.id AND a.estado = 'pendiente')`,
     [huerta]
@@ -6362,7 +6432,7 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
     const poligono = parsearPoligono_(c.poligono);
     // Ver avanceDeTramo_: solo la parte del tramo DENTRO del cuadro, en
     // fracción de pasada (atravesada completa = 1).
-    const tramo = avanceDeTramo_(anterior, actual, poligono);
+    const tramo = avanceDeTramo_(anterior, actual, poligono, c.direccion_surcos);
     if (tramo.pasadas <= 0) continue;
     const [actividades] = await pool.query(
       `SELECT id, trabajo, intervalo_surcos, avance_metros, avance_pasadas, equipo_codigo, operador_nombre FROM huerta_actividades WHERE cuadro_id = ? AND estado = 'pendiente'`,
@@ -6412,12 +6482,18 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
 // HARÍA (para revisarlos antes). aplicar = true -> además los guarda.
 // Termina en "_" a propósito: no se expone por HTTP (ver server.js); solo
 // la usa el script recalcular_avance_cuadros_nube.js.
-async function recalcularAvanceActividadesHuerta_(aplicar) {
+// opciones.cuadroId (opcional): solo las actividades de ese cuadro (lo usa
+// guardarDireccionSurcosCuadro para recalcular en cuanto cambia la
+// dirección de sus surcos).
+async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
+  const soloCuadro = opciones && Number(opciones.cuadroId) ? Number(opciones.cuadroId) : null;
   const [acts] = await pool.query(
     `SELECT a.id, a.huerta, a.trabajo, a.estado, a.creado_en, a.completado_en, a.intervalo_surcos, a.avance_metros, a.avance_pasadas,
-            a.equipo_codigo, a.operador_nombre, c.nombre AS cuadroNombre, c.poligono, c.surcos
+            a.equipo_codigo, a.operador_nombre, c.nombre AS cuadroNombre, c.poligono, c.surcos, c.direccion_surcos
      FROM huerta_actividades a JOIN huerta_cuadros c ON c.id = a.cuadro_id
-     ORDER BY a.huerta, c.nombre, a.id`
+     ${soloCuadro ? 'WHERE c.id = ?' : ''}
+     ORDER BY a.huerta, c.nombre, a.id`,
+    soloCuadro ? [soloCuadro] : []
   );
   const sesionesPorHuerta = {};
   async function sesionesDe_(huerta) {
@@ -6458,7 +6534,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar) {
       if (!coincideConAsignado_(a.equipo_codigo, ses.codigo_unidad) || !coincideConAsignado_(a.operador_nombre, ses.nombre)) continue;
       for (const [pa, pb] of tramosDeRecorrido_(ses.puntos)) {
         if (pb.t < desde) continue;
-        const tramo = avanceDeTramo_(pa, pb, poligono);
+        const tramo = avanceDeTramo_(pa, pb, poligono, a.direccion_surcos);
         if (tramo.pasadas <= 0) continue;
         pasadas += tramo.pasadas;
         metros += tramo.metros;
@@ -7822,6 +7898,9 @@ module.exports = {
   tramosDeRecorrido_,
   margenCompletado_,
   normalizarTrabajoAvance_,
+  guardarDireccionSurcosCuadro,
+  rumboTramo_,
+  diferenciaRumbos_,
   getAvancePorRango,
   calcularResumenRango_,
   validarVentanasRango_,

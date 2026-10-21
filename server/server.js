@@ -10,6 +10,7 @@ const handlers = require('./handlers');
 const { UPLOADS_DIR, NUBE_ARCHIVOS_ACTIVA, S3_PUBLIC_BASE_URL } = require('./storage');
 const { construirLibroExcel } = require('./excelExport');
 const { construirPdfOrdenes, construirPdfReporteSimple } = require('./pdfExport');
+const { construirPdfIndicadores, construirExcelIndicadores } = require('./indicadoresExport');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -201,6 +202,34 @@ app.post('/export/pdf-simple', async (req, res) => {
     res.send(buffer);
   } catch (err) {
     console.error('[export/pdf-simple] Falló la generación del PDF:', err);
+    res.status(400).json({ error: err.message || String(err) });
+  }
+});
+
+// Indicadores (Panel → Indicadores → Exportar PDF / Excel): mismo diseño
+// que se ve en el Panel. El Panel manda el "modelo" ya armado (ver
+// indModeloExportacion_ en public/Panel.html y server/indicadoresExport.js).
+app.post('/export/indicadores/:formato', async (req, res) => {
+  try {
+    const { code, modelo, nombreArchivo } = req.body || {};
+    if (code !== TALLER_ACCESS_CODE) return res.status(401).json({ error: 'Clave de acceso incorrecta.' });
+    if (!modelo || !Array.isArray(modelo.semanas)) return res.status(400).json({ error: 'No hay datos para exportar.' });
+    const nombre = (nombreArchivo || 'indicador_cumplimiento').toString().replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 100) || 'indicador_cumplimiento';
+    if (req.params.formato === 'pdf') {
+      const buffer = await construirPdfIndicadores(modelo);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '.pdf"');
+      return res.send(buffer);
+    }
+    if (req.params.formato === 'excel') {
+      const buffer = await construirExcelIndicadores(modelo);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '.xlsx"');
+      return res.send(Buffer.from(buffer));
+    }
+    return res.status(404).json({ error: 'Formato no soportado.' });
+  } catch (err) {
+    console.error('[export/indicadores] Falló la exportación:', err);
     res.status(400).json({ error: err.message || String(err) });
   }
 });

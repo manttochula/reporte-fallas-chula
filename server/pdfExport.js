@@ -273,20 +273,16 @@ function anchosColumnas_(columnas, anchoUtil) {
 }
 
 function dibujarEncabezadoTabla_(doc, columnas, anchos, xInicio) {
-  // Los encabezados largos se acomodan en 2 renglones (antes se encimaban
-  // con la primera fila).
-  const alturas = columnas.map((col, i) => doc.font('Helvetica-Bold').fontSize(7.5).heightOfString(col.header || '', { width: anchos[i] - PAD_CELDA * 2 }));
-  const altoEncabezado = Math.max(ALTO_FILA_MIN, Math.max.apply(null, alturas.concat([0])) + 4);
-  asegurarEspacio_(doc, altoEncabezado + 4);
+  asegurarEspacio_(doc, ALTO_FILA_MIN + 4);
   const y = doc.y;
   let x = xInicio;
   columnas.forEach((col, i) => {
     doc
       .font('Helvetica-Bold').fontSize(7.5).fillColor(COLOR_TEXTO_SUAVE)
-      .text(col.header || '', x + PAD_CELDA, y + 2, { width: anchos[i] - PAD_CELDA * 2, align: col.align || 'left' });
+      .text(col.header || '', x + PAD_CELDA, y + 2, { width: anchos[i] - PAD_CELDA * 2, lineBreak: false });
     x += anchos[i];
   });
-  doc.y = y + altoEncabezado;
+  doc.y = y + ALTO_FILA_MIN;
   doc.x = xInicio;
   doc.moveTo(xInicio, doc.y).lineTo(xInicio + anchos.reduce((s, a) => s + a, 0), doc.y).strokeColor(COLOR_BORDE).lineWidth(0.75).stroke();
   doc.moveDown(0.1);
@@ -309,7 +305,7 @@ function dibujarFilaTabla_(doc, columnas, anchos, xInicio, fila, esPar) {
   columnas.forEach((col, i) => {
     doc
       .font('Helvetica').fontSize(8).fillColor(COLOR_TEXTO)
-      .text(formatearValor_(fila[col.key]), x + PAD_CELDA, y + 2, { width: anchos[i] - PAD_CELDA * 2, align: col.align || 'left' });
+      .text(formatearValor_(fila[col.key]), x + PAD_CELDA, y + 2, { width: anchos[i] - PAD_CELDA * 2 });
     x += anchos[i];
   });
   doc.x = xInicio;
@@ -330,9 +326,7 @@ function dibujarSeccion_(doc, seccion) {
     .text(seccion.titulo || '', MARGEN + 8, yBarra + 3, { width: anchoUtil - 90, lineBreak: false });
   doc
     .fillColor('#FFFFFF').font('Helvetica').fontSize(8)
-    // conteoTexto (opcional): texto propio a la derecha de la barra (p.ej.
-    // "4 programadas · 75%" en Indicadores); si no viene, el de siempre.
-    .text(seccion.conteoTexto != null ? String(seccion.conteoTexto) : (totalFilas + (totalFilas === 1 ? ' pendiente' : ' pendientes')), MARGEN, yBarra + 3.5, { width: anchoUtil - 8, align: 'right', lineBreak: false });
+    .text(totalFilas + (totalFilas === 1 ? ' pendiente' : ' pendientes'), MARGEN, yBarra + 3.5, { width: anchoUtil - 8, align: 'right', lineBreak: false });
   doc.x = MARGEN;
   doc.y = yBarra + ALTO_BARRA_SECCION + 5;
   doc.fillColor(COLOR_TEXTO);
@@ -351,24 +345,6 @@ function dibujarSeccion_(doc, seccion) {
   seccion.filas.forEach((fila, idx) => {
     dibujarFilaTabla_(doc, columnas, anchos, MARGEN, fila, idx % 2 === 1);
   });
-  if (seccion.filaTotal) {
-    // Fila de total (opcional, igual que en Excel): fondo ámbar suave.
-    const filaTotal = {};
-    columnas.forEach((c) => { const v = seccion.filaTotal[c.key]; filaTotal[c.key] = (v === undefined || v === null) ? '' : v; });
-    const yTotal = doc.y;
-    const altoTotal = ALTO_FILA_MIN + 2;
-    asegurarEspacio_(doc, altoTotal + 2);
-    doc.rect(MARGEN, doc.y, anchos.reduce((a, b) => a + b, 0), altoTotal).fill(COLOR_AMBER_SUAVE);
-    let x = MARGEN;
-    const yTexto = doc.y;
-    columnas.forEach((col, i) => {
-      doc.font('Helvetica-Bold').fontSize(8).fillColor(COLOR_TEXTO)
-        .text(String(filaTotal[col.key]), x + PAD_CELDA, yTexto + 3, { width: anchos[i] - PAD_CELDA * 2, align: col.align || 'left', lineBreak: false });
-      x += anchos[i];
-    });
-    doc.x = MARGEN;
-    doc.y = Math.max(yTotal, yTexto) + altoTotal;
-  }
   doc.moveDown(0.3);
 }
 

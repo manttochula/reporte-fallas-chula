@@ -43,7 +43,7 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // Panel, ver requierePermisoAvanceHuerta_) para dejar calibrar el mapa
 // desde el celular -- no cualquier operador puede recalibrar, solo a quien
 // Carlos le dé este permiso.
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta'];
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -251,6 +251,7 @@ const REPORTE_SELECT = `
     reportes.es_terceros                                 AS EsTerceros,
     reportes.costo_reparacion                             AS CostoReparacion,
     reportes.en_proceso_sin_fecha                       AS EnProcesoSinFecha,
+    reportes.semana_en_proceso                          AS SemanaEnProceso,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden) AS RefaccionesNecesariasCount,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden AND rrn.entregado = 1) AS RefaccionesEntregadasCount,
     mo.regla_id                          AS ReglaMantenimientoId,
@@ -694,7 +695,7 @@ async function actualizarOrden(code, nombreUsuario, orden, campos) {
   await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])));
   campos = campos || {};
   try {
-    const [existe] = await pool.query('SELECT id, unidad, descripcion, huerta FROM reportes WHERE orden = ?', [orden]);
+    const [existe] = await pool.query('SELECT id, unidad, descripcion, huerta, fecha_atencion FROM reportes WHERE orden = ?', [orden]);
     if (existe.length === 0) throw new Error('No se encontró la orden ' + orden);
     const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
     if (!huertaPermitida_(huertasRestringidas, existe[0].huerta)) {
@@ -752,6 +753,12 @@ async function actualizarOrden(code, nombreUsuario, orden, campos) {
     if (sets.length > 0) {
       values.push(orden);
       await pool.query(`UPDATE reportes SET ${sets.join(', ')} WHERE orden = ?`, values);
+    }
+    // Indicadores: si se puso o cambió la Fecha de atención, queda en el
+    // historial de programación de la orden.
+    if (Object.prototype.hasOwnProperty.call(campos, 'FechaAtencion') && campos.FechaAtencion
+        && fechaYmd_(campos.FechaAtencion) !== fechaYmd_(existe[0].fecha_atencion)) {
+      await registrarProgramacionOrden_(orden, campos.FechaAtencion, 'fecha_atencion', nombreUsuario);
     }
 
     // Si esta orden se generó desde una regla de Mantenimiento preventivo
@@ -830,7 +837,7 @@ async function actualizarOrden(code, nombreUsuario, orden, campos) {
 // adelante, cuando la tenga. Taller.html NO puede llamar a esta función
 // (no tiene botón para ello) ni poner la Fecha de atención directamente;
 // eso sigue siendo exclusivo del Panel.
-async function marcarOrdenEnProceso(code, nombreUsuario, orden) {
+async function marcarOrdenEnProceso(code, nombreUsuario, orden, semanaCodigo) {
   const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
   await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])), 'capturar');
@@ -850,16 +857,248 @@ async function marcarOrdenEnProceso(code, nombreUsuario, orden) {
     if (rows[0].fecha_atencion) {
       return { success: false, error: 'Esta orden ya tiene Fecha de atención asignada.' };
     }
-    await pool.query('UPDATE reportes SET en_proceso_sin_fecha = 1 WHERE orden = ?', [orden]);
+    // Semana en que se planea atender (Indicadores, oct-2026). Opcional
+    // para no romper llamadas viejas; el Panel siempre la manda.
+    let semana = null;
+    const codigoSemana = (semanaCodigo || '').toString().trim();
+    if (codigoSemana) {
+      const [sem] = await pool.query('SELECT codigo, fecha_inicio, fecha_fin FROM semanas WHERE codigo = ?', [codigoSemana]);
+      if (sem.length === 0) return { success: false, error: 'La semana ' + codigoSemana + ' no está en el catálogo de semanas.' };
+      semana = sem[0];
+    }
+    const [antes] = await pool.query('SELECT semana_en_proceso FROM reportes WHERE orden = ?', [orden]);
+    const semanaAnterior = antes.length ? antes[0].semana_en_proceso : null;
+    await pool.query('UPDATE reportes SET en_proceso_sin_fecha = 1, semana_en_proceso = COALESCE(?, semana_en_proceso) WHERE orden = ?', [semana ? semana.codigo : null, orden]);
+    if (semana && semana.codigo !== semanaAnterior) {
+      await registrarProgramacionOrden_(orden, semana.fecha_inicio, 'en_proceso', nombreUsuario);
+    }
     await agregarObservacionOrden_(
       orden,
-      'Marcada "En proceso" (todavía sin Fecha de atención) por ' + (nombreUsuario || 'alguien del Panel') + '.'
+      (semanaAnterior && semana && semanaAnterior !== semana.codigo
+        ? 'Reprogramada "En proceso" de la semana ' + semanaAnterior + ' a la ' + semana.codigo
+        : 'Marcada "En proceso"' + (semana ? ' para la semana ' + semana.codigo : '')) +
+      ' (todavía sin Fecha de atención) por ' + (nombreUsuario || 'alguien del Panel') + '.'
     );
     await registrarAuditoria_('reportes', orden, 'marcar-en-proceso', nombreUsuario, (rows[0].unidad || '') + ' — ' + (rows[0].descripcion || ''));
     return { success: true };
   } catch (err) {
     return { success: false, error: err.toString() };
   }
+}
+
+
+// ------------------------------------------------------------------
+// INDICADORES (oct-2026): cumplimiento semanal de órdenes. Petición de
+// Carlos: de las órdenes que se programaron para una semana (por Fecha de
+// atención dentro de esa semana, o marcadas "En proceso" para esa semana),
+// qué porcentaje se cerró (Fecha de salida) en esa misma semana.
+//  - Si se reprograma a otra semana, cuenta en todas las semanas en que se
+//    programó (en las anteriores como no cumplida).
+//  - Si se cerró ANTES de la semana programada: dato aparte ("cerradas
+//    antes, fuera de programación"), no cuenta como cumplida.
+// ------------------------------------------------------------------
+function fechaYmd_(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  if (valor instanceof Date) {
+    if (Number.isNaN(valor.getTime())) return null;
+    return valor.getFullYear() + '-' + String(valor.getMonth() + 1).padStart(2, '0') + '-' + String(valor.getDate()).padStart(2, '0');
+  }
+  const m = valor.toString().trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[1] + '-' + m[2] + '-' + m[3] : null;
+}
+
+// Guarda en el historial de programación que la orden quedó programada
+// para "fecha" (no repite si es la misma fecha que la última vez).
+async function registrarProgramacionOrden_(orden, fecha, origen, usuario) {
+  const ymd = fechaYmd_(fecha);
+  if (!orden || !ymd) return false;
+  const [ultima] = await pool.query('SELECT fecha_programada FROM ordenes_programacion WHERE orden = ? ORDER BY id DESC LIMIT 1', [orden]);
+  if (ultima.length && fechaYmd_(ultima[0].fecha_programada) === ymd) return false;
+  await pool.query(
+    'INSERT INTO ordenes_programacion (orden, fecha_programada, origen, registrado_por) VALUES (?, ?, ?, ?)',
+    [orden, ymd, origen, (usuario || '').toString().trim() || null]
+  );
+  return true;
+}
+
+const SECCIONES_INDICADOR = [
+  { clave: 'principal', nombre: 'Agrícola' },
+  { clave: 'soldadura', nombre: 'Soldadura' },
+  { clave: 'automotriz', nombre: 'Automotriz' },
+  { clave: 'llantas', nombre: 'Llantas y Ponches' },
+  { clave: 'terceros', nombre: 'Reparaciones con terceros' },
+];
+const PERMISOS_VER_SEMANAS = ['indicadores', 'ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'];
+
+function semanaDeFila_(f) {
+  return { id: f.id, codigo: f.codigo, inicio: fechaYmd_(f.fecha_inicio), fin: fechaYmd_(f.fecha_fin) };
+}
+
+// Catálogo de semanas (para el indicador y para "Marcar en proceso").
+async function getSemanas(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PERMISOS_VER_SEMANAS, 'visualizar');
+  const [rows] = await pool.query('SELECT id, codigo, fecha_inicio, fecha_fin FROM semanas ORDER BY fecha_inicio');
+  return { success: true, semanas: rows.map(semanaDeFila_), hoy: fechaYmd_(new Date()) };
+}
+
+async function guardarSemana(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'capturar');
+  const d = datos || {};
+  const id = d.id ? Number(d.id) : null;
+  const codigo = (d.codigo || '').toString().trim().toUpperCase();
+  const inicio = fechaYmd_(d.inicio);
+  const fin = fechaYmd_(d.fin);
+  if (!codigo) return { success: false, error: 'Escribe el número de semana (ej. S01-2027).' };
+  if (codigo.length > 20) return { success: false, error: 'El número de semana es demasiado largo.' };
+  if (!inicio || !fin) return { success: false, error: 'Pon la fecha de inicio y la de cierre.' };
+  if (fin < inicio) return { success: false, error: 'La fecha de cierre no puede ser antes del inicio.' };
+  const dias = Math.round((new Date(fin + 'T00:00:00') - new Date(inicio + 'T00:00:00')) / 86400000) + 1;
+  if (dias > 14) return { success: false, error: 'Una semana no puede durar más de 14 días (' + dias + ').' };
+  const [repetida] = await pool.query('SELECT id FROM semanas WHERE codigo = ? AND (? IS NULL OR id <> ?)', [codigo, id, id]);
+  if (repetida.length) return { success: false, error: 'Ya existe la semana ' + codigo + '.' };
+  const [encimada] = await pool.query(
+    'SELECT codigo FROM semanas WHERE fecha_inicio <= ? AND fecha_fin >= ? AND (? IS NULL OR id <> ?) LIMIT 1',
+    [fin, inicio, id, id]
+  );
+  if (encimada.length) return { success: false, error: 'Esas fechas se enciman con la semana ' + encimada[0].codigo + '.' };
+  if (id) {
+    const [r] = await pool.query('UPDATE semanas SET codigo = ?, fecha_inicio = ?, fecha_fin = ? WHERE id = ?', [codigo, inicio, fin, id]);
+    if (!r.affectedRows) return { success: false, error: 'No se encontró esa semana.' };
+    await registrarAuditoria_('semanas', String(id), 'editar', nombreUsuario, codigo + ' ' + inicio + ' a ' + fin);
+    return { success: true, id };
+  }
+  const [r] = await pool.query('INSERT INTO semanas (codigo, fecha_inicio, fecha_fin) VALUES (?, ?, ?)', [codigo, inicio, fin]);
+  await registrarAuditoria_('semanas', String(r.insertId), 'crear', nombreUsuario, codigo + ' ' + inicio + ' a ' + fin);
+  return { success: true, id: r.insertId };
+}
+
+async function eliminarSemana(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'capturar');
+  const [rows] = await pool.query('SELECT codigo FROM semanas WHERE id = ?', [Number(id)]);
+  if (!rows.length) return { success: false, error: 'No se encontró esa semana.' };
+  const [uso] = await pool.query('SELECT COUNT(*) n FROM reportes WHERE semana_en_proceso = ?', [rows[0].codigo]);
+  if (uso[0].n > 0) return { success: false, error: 'No se puede eliminar: hay ' + uso[0].n + ' orden(es) marcadas "En proceso" para la ' + rows[0].codigo + '.' };
+  await pool.query('DELETE FROM semanas WHERE id = ?', [Number(id)]);
+  await registrarAuditoria_('semanas', String(id), 'eliminar', nombreUsuario, rows[0].codigo);
+  return { success: true };
+}
+
+// Cálculo puro (sin BD) del indicador -- se prueba aparte.
+//   semanas: [{codigo, inicio, fin}] (YYYY-MM-DD), en orden
+//   programaciones: [{orden, fecha}]   (historial, cualquier orden)
+//   ordenes: { [orden]: {seccion, fechaSalida, unidad, huerta, descripcion} }
+function calcularIndicadorCumplimiento_(semanas, programaciones, ordenes) {
+  const resultado = [];
+  semanas.forEach((sem) => {
+    const enSemana = {};
+    programaciones.forEach((p) => {
+      if (p.fecha >= sem.inicio && p.fecha <= sem.fin && ordenes[p.orden]) {
+        if (!enSemana[p.orden]) enSemana[p.orden] = [];
+        enSemana[p.orden].push(p);
+      }
+    });
+    const totales = {};
+    const nuevo = () => ({ programadas: 0, cumplidas: 0, cerradasAntes: 0, cerradasDespues: 0, pendientes: 0, reprogramadas: 0 });
+    totales.todas = nuevo();
+    SECCIONES_INDICADOR.forEach((s) => { totales[s.clave] = nuevo(); });
+    const detalle = [];
+    Object.keys(enSemana).sort().forEach((orden) => {
+      const o = ordenes[orden];
+      const salida = o.fechaSalida || null;
+      // ¿Se volvió a programar después para una fecha POSTERIOR a esta semana?
+      const posteriores = programaciones.filter((p) => p.orden === orden && p.fecha > sem.fin).map((p) => p.fecha).sort();
+      let resultadoOrden;
+      if (salida && salida >= sem.inicio && salida <= sem.fin) resultadoOrden = 'cumplida';
+      else if (salida && salida < sem.inicio) resultadoOrden = 'cerrada_antes';
+      else if (salida && salida > sem.fin) resultadoOrden = 'cerrada_despues';
+      else resultadoOrden = 'pendiente';
+      const reprogramada = resultadoOrden !== 'cumplida' && resultadoOrden !== 'cerrada_antes' && posteriores.length > 0;
+      [totales.todas, totales[o.seccion] || totales.principal].forEach((t) => {
+        t.programadas++;
+        if (resultadoOrden === 'cumplida') t.cumplidas++;
+        else if (resultadoOrden === 'cerrada_antes') t.cerradasAntes++;
+        else if (resultadoOrden === 'cerrada_despues') t.cerradasDespues++;
+        else t.pendientes++;
+        if (reprogramada) t.reprogramadas++;
+      });
+      detalle.push({
+        orden,
+        seccion: o.seccion,
+        unidad: o.unidad || '',
+        huerta: o.huerta || '',
+        descripcion: o.descripcion || '',
+        fechasProgramadas: enSemana[orden].map((p) => p.fecha).sort(),
+        origen: enSemana[orden][enSemana[orden].length - 1].origen || '',
+        fechaSalida: salida,
+        resultado: resultadoOrden,
+        reprogramadaA: reprogramada ? posteriores[0] : null,
+      });
+    });
+    Object.keys(totales).forEach((k) => {
+      const t = totales[k];
+      // % de cumplimiento: cerradas dentro de la semana / programadas.
+      t.porcentaje = t.programadas ? Math.round((t.cumplidas / t.programadas) * 10000) / 100 : null;
+    });
+    resultado.push({ codigo: sem.codigo, inicio: sem.inicio, fin: sem.fin, totales, detalle });
+  });
+  return resultado;
+}
+
+// Indicador para un rango de semanas del catálogo (códigos desde/hasta).
+async function getIndicadorCumplimientoSemanal(code, nombreUsuario, desdeCodigo, hastaCodigo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'visualizar');
+  const [todas] = await pool.query('SELECT id, codigo, fecha_inicio, fecha_fin FROM semanas ORDER BY fecha_inicio');
+  const lista = todas.map(semanaDeFila_);
+  if (!lista.length) return { success: false, error: 'El catálogo de semanas está vacío.' };
+  let i = lista.findIndex((s) => s.codigo === desdeCodigo);
+  let j = lista.findIndex((s) => s.codigo === hastaCodigo);
+  if (i === -1 || j === -1) {
+    // Por defecto: las últimas 8 semanas hasta la actual.
+    const hoy = fechaYmd_(new Date());
+    let actual = lista.findIndex((s) => s.inicio <= hoy && s.fin >= hoy);
+    if (actual === -1) actual = lista.length - 1;
+    if (j === -1) j = actual;
+    if (i === -1) i = Math.max(0, j - 7);
+  }
+  if (i > j) { const t = i; i = j; j = t; }
+  if (j - i > 104) return { success: false, error: 'Elige un rango de máximo 2 años.' };
+  const rango = lista.slice(i, j + 1);
+  const desde = rango[0].inicio;
+  const hasta = rango[rango.length - 1].fin;
+  const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  // Órdenes programadas en el rango (y su historial completo, para saber si se reprogramaron).
+  const [progs] = await pool.query(
+    `SELECT p.orden, p.fecha_programada, p.origen FROM ordenes_programacion p
+      WHERE p.orden IN (SELECT DISTINCT orden FROM ordenes_programacion WHERE fecha_programada BETWEEN ? AND ?)
+      ORDER BY p.id`,
+    [desde, hasta]
+  );
+  const folios = Array.from(new Set(progs.map((p) => p.orden)));
+  const ordenes = {};
+  if (folios.length) {
+    const [rows] = await pool.query(
+      `SELECT orden, unidad, codigo_unidad, huerta, descripcion, fecha_salida, es_soldadura, es_automotriz, es_llantas, es_terceros
+         FROM reportes WHERE orden IN (?)`,
+      [folios]
+    );
+    rows.forEach((r) => {
+      if (!huertaPermitida_(huertasRestringidas, r.huerta)) return;
+      ordenes[r.orden] = {
+        seccion: seccionDeFila_(r),
+        fechaSalida: fechaYmd_(r.fecha_salida),
+        unidad: r.unidad || r.codigo_unidad || '',
+        huerta: r.huerta || '',
+        descripcion: r.descripcion || '',
+      };
+    });
+  }
+  const programaciones = progs.map((p) => ({ orden: p.orden, fecha: fechaYmd_(p.fecha_programada), origen: p.origen }));
+  return {
+    success: true,
+    secciones: SECCIONES_INDICADOR,
+    semanas: calcularIndicadorCumplimiento_(rango, programaciones, ordenes),
+    catalogo: lista,
+  };
 }
 
 async function getMisOrdenes(nombre) {
@@ -1016,6 +1255,12 @@ async function editarOrden(code, nombreUsuario, orden, data) {
        WHERE orden = ?`,
       [huerta, descripcion, nombre, fecha, fechaAtencion, fechaSalida, refaccionamiento, atendioPor, trabajoRealizado, vistoBueno, diasAtencion, esSoldadura, esAutomotriz, esLlantas, esTerceros, enProcesoSinFecha, modificadoPor, orden]
     );
+
+    // Indicadores: si se puso o cambió la Fecha de atención, queda en el
+    // historial de programación de la orden.
+    if (fechaAtencion && fechaYmd_(fechaAtencion) !== fechaYmd_(anterior.fecha_atencion)) {
+      await registrarProgramacionOrden_(orden, fechaAtencion, 'fecha_atencion', modificadoPor);
+    }
 
     // Bitácora: qué campos cambiaron de verdad, más la nota libre si el
     // usuario escribió una.
@@ -7936,6 +8181,13 @@ function getVersionApp() {
 
 module.exports = {
   getVersionApp,
+  getSemanas,
+  guardarSemana,
+  eliminarSemana,
+  getIndicadorCumplimientoSemanal,
+  calcularIndicadorCumplimiento_,
+  registrarProgramacionOrden_,
+  fechaYmd_,
   sincronizarAvance,
   segundosDeMs_,
   submitReporte,

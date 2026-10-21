@@ -2664,3 +2664,114 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Indicadores (oct-2026): cumplimiento semanal de órdenes
+-- ------------------------------------------------------------
+-- Catálogo de semanas de trabajo (petición de Carlos: "guárdamelos en un
+-- catálogo para poder agregarte más en un futuro"). Se cargan las 52
+-- semanas de 2026 de su archivo "listado semanas.xlsx"; las siguientes se
+-- agregan desde el Panel (Indicadores → Catálogo de semanas).
+CREATE TABLE IF NOT EXISTS semanas (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  codigo        VARCHAR(20) NOT NULL UNIQUE,   -- ej. S43-2026
+  fecha_inicio  DATE NOT NULL,
+  fecha_fin     DATE NOT NULL,
+  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_semanas_inicio (fecha_inicio)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO semanas (codigo, fecha_inicio, fecha_fin) VALUES
+  ('S01-2026', '2025-12-29', '2026-01-04'),
+  ('S02-2026', '2026-01-05', '2026-01-11'),
+  ('S03-2026', '2026-01-12', '2026-01-18'),
+  ('S04-2026', '2026-01-19', '2026-01-25'),
+  ('S05-2026', '2026-01-26', '2026-02-01'),
+  ('S06-2026', '2026-02-02', '2026-02-08'),
+  ('S07-2026', '2026-02-09', '2026-02-15'),
+  ('S08-2026', '2026-02-16', '2026-02-22'),
+  ('S09-2026', '2026-02-23', '2026-03-01'),
+  ('S10-2026', '2026-03-02', '2026-03-08'),
+  ('S11-2026', '2026-03-09', '2026-03-15'),
+  ('S12-2026', '2026-03-16', '2026-03-22'),
+  ('S13-2026', '2026-03-23', '2026-03-29'),
+  ('S14-2026', '2026-03-30', '2026-04-05'),
+  ('S15-2026', '2026-04-06', '2026-04-12'),
+  ('S16-2026', '2026-04-13', '2026-04-19'),
+  ('S17-2026', '2026-04-20', '2026-04-26'),
+  ('S18-2026', '2026-04-27', '2026-05-03'),
+  ('S19-2026', '2026-05-04', '2026-05-10'),
+  ('S20-2026', '2026-05-11', '2026-05-17'),
+  ('S21-2026', '2026-05-18', '2026-05-24'),
+  ('S22-2026', '2026-05-25', '2026-05-31'),
+  ('S23-2026', '2026-06-01', '2026-06-07'),
+  ('S24-2026', '2026-06-08', '2026-06-14'),
+  ('S25-2026', '2026-06-15', '2026-06-21'),
+  ('S26-2026', '2026-06-22', '2026-06-28'),
+  ('S27-2026', '2026-06-29', '2026-07-05'),
+  ('S28-2026', '2026-07-06', '2026-07-12'),
+  ('S29-2026', '2026-07-13', '2026-07-19'),
+  ('S30-2026', '2026-07-20', '2026-07-26'),
+  ('S31-2026', '2026-07-27', '2026-08-02'),
+  ('S32-2026', '2026-08-03', '2026-08-09'),
+  ('S33-2026', '2026-08-10', '2026-08-16'),
+  ('S34-2026', '2026-08-17', '2026-08-23'),
+  ('S35-2026', '2026-08-24', '2026-08-30'),
+  ('S36-2026', '2026-08-31', '2026-09-06'),
+  ('S37-2026', '2026-09-07', '2026-09-13'),
+  ('S38-2026', '2026-09-14', '2026-09-20'),
+  ('S39-2026', '2026-09-21', '2026-09-27'),
+  ('S40-2026', '2026-09-28', '2026-10-04'),
+  ('S41-2026', '2026-10-05', '2026-10-11'),
+  ('S42-2026', '2026-10-12', '2026-10-18'),
+  ('S43-2026', '2026-10-19', '2026-10-25'),
+  ('S44-2026', '2026-10-26', '2026-11-01'),
+  ('S45-2026', '2026-11-02', '2026-11-08'),
+  ('S46-2026', '2026-11-09', '2026-11-15'),
+  ('S47-2026', '2026-11-16', '2026-11-22'),
+  ('S48-2026', '2026-11-23', '2026-11-29'),
+  ('S49-2026', '2026-11-30', '2026-12-06'),
+  ('S50-2026', '2026-12-07', '2026-12-13'),
+  ('S51-2026', '2026-12-14', '2026-12-20'),
+  ('S52-2026', '2026-12-21', '2026-12-27');
+
+-- Historial de PROGRAMACIÓN de cada orden: una fila cada vez que se le
+-- pone (o cambia) la Fecha de atención, o se marca "En proceso" para una
+-- semana. Con esto el indicador sabe en qué semana(s) se programó cada
+-- orden: si se reprograma a otra semana, cuenta en las dos (en la
+-- original como no cumplida). Se guarda la FECHA (no la semana), así que
+-- si después se agregan semanas al catálogo el indicador las toma solo.
+--   origen: 'fecha_atencion' | 'en_proceso' | 'historico' (las que ya
+--   tenían Fecha de atención antes de este cambio).
+CREATE TABLE IF NOT EXISTS ordenes_programacion (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  orden             VARCHAR(20) NOT NULL,
+  fecha_programada  DATE NOT NULL,
+  origen            VARCHAR(20) NOT NULL,
+  registrado_por    VARCHAR(255) DEFAULT NULL,
+  registrado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_prog_orden (orden),
+  INDEX idx_prog_fecha (fecha_programada)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Las órdenes que ya tenían Fecha de atención cuentan en la semana de esa
+-- fecha (solo se agrega si la orden todavía no tiene historial).
+INSERT INTO ordenes_programacion (orden, fecha_programada, origen)
+SELECT r.orden, r.fecha_atencion, 'historico'
+  FROM reportes r
+ WHERE r.fecha_atencion IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM ordenes_programacion p WHERE p.orden = r.orden);
+
+-- reportes.semana_en_proceso: semana (código del catálogo, ej. S43-2026)
+-- en que se planea atender una orden marcada "En proceso" sin Fecha de
+-- atención todavía.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'semana_en_proceso'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE reportes ADD COLUMN semana_en_proceso VARCHAR(20) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

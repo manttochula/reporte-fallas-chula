@@ -1164,6 +1164,54 @@
   .dz-entregas-status.show{ display:block; }
   .dz-entregas-status.ok{ color: var(--ok); }
   .dz-entregas-status.err{ color: var(--danger); }
+
+  /* --- Indicadores (cumplimiento semanal) --- */
+  .ind-encabezado{ margin-bottom:6px; }
+  .ind-titulo{ font-family:'Oswald',sans-serif; font-size:20px; letter-spacing:0.02em; margin:4px 0 4px; color:var(--text); }
+  .ind-ayuda{ color:var(--text-dim); font-size:13px; max-width:980px; margin:0 0 10px; line-height:1.45; }
+  .ind-toolbar{ align-items:flex-end; flex-wrap:wrap; gap:10px; }
+  .ind-toolbar .maq-field{ margin-bottom:0; min-width:200px; }
+  .ind-toolbar .maq-field label{ color:var(--text-dim); font-size:12px; display:block; margin-bottom:4px; }
+  .ind-toolbar select{ background:#fff; color:#1c1c1c; border:1px solid #ccc; border-radius:4px; padding:7px 8px; font-size:13px; }
+  .ind-status{ display:none; font-size:13px; padding:6px 0; color:var(--text-dim); }
+  .ind-status.show{ display:block; }
+  .ind-status.err{ color:#ff8a80; }
+  .ind-tarjeta{ background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; margin:12px 0; }
+  .ind-tarjeta-titulo{ font-family:'Oswald',sans-serif; font-size:15px; letter-spacing:0.03em; color:var(--text); margin-bottom:10px; text-transform:uppercase; }
+  .ind-sub{ font-family:'Inter',sans-serif; text-transform:none; color:var(--text-dim); font-size:12px; letter-spacing:0; }
+  .ind-tabla-wrap{ border-top:1px solid #ddd; border-radius:6px; background:#fff; }
+  .ind-tabla{ color:#1c1c1c; }
+  .ind-tabla th.ind-num, .ind-tabla td.ind-num{ text-align:right; font-variant-numeric:tabular-nums; }
+  .ind-th-sub{ text-transform:none; font-weight:400; font-size:10.5px; color:#666; letter-spacing:0; }
+  .ind-tabla tr.ind-fila-activa td{ background:#fff4e5; }
+  .ind-tabla tr.ind-fila-total td{ background:#f3f5f4; font-weight:600; cursor:default; }
+  .ind-pct{ display:flex; align-items:center; gap:8px; min-width:150px; }
+  .ind-pct-barra{ flex:1; height:8px; background:#e5e7e6; border-radius:4px; overflow:hidden; }
+  .ind-pct-relleno{ height:100%; border-radius:4px; }
+  .ind-pct-relleno.ind-pct-ok{ background:#2e7d4f; }
+  .ind-pct-relleno.ind-pct-medio{ background:#d98b1e; }
+  .ind-pct-relleno.ind-pct-bajo{ background:#c0392b; }
+  .ind-pct-texto{ font-weight:600; min-width:52px; text-align:right; font-variant-numeric:tabular-nums; }
+  .ind-pct-texto.ind-pct-na{ color:#888; font-weight:400; }
+  .ind-chip-actual{ display:inline-block; font-size:10.5px; background:#e8871e; color:#1c1c1c; border-radius:10px; padding:1px 7px; margin-left:4px; font-weight:600; }
+  .ind-res{ display:inline-block; font-size:12px; border-radius:10px; padding:2px 8px; font-weight:600; white-space:nowrap; }
+  .ind-res-ok{ background:#dcefe2; color:#1e6b3e; }
+  .ind-res-antes{ background:#e3edf6; color:#2c5a80; }
+  .ind-res-tarde{ background:#fbead2; color:#8a5410; }
+  .ind-res-pend{ background:#f7dcd9; color:#8f2a20; }
+  .ind-repro{ font-size:11.5px; color:#8a5410; margin-top:3px; }
+  .ind-desc{ max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ind-semana-form{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:6px; }
+  .ind-semana-form .maq-field{ margin-bottom:0; }
+  .ind-semana-form .maq-field label{ color:var(--text-dim); font-size:12px; display:block; margin-bottom:4px; }
+  .ind-semana-form input{ background:#fff; color:#1c1c1c; border:1px solid #ccc; border-radius:4px; padding:7px 8px; font-size:13px; }
+  .ind-semana-form .maq-save-btn{ width:auto; flex:0 0 auto; margin:0; padding:9px 18px; }
+  .ind-folio{ font-family:'IBM Plex Mono',monospace; font-weight:600; color:#1c1c1c; white-space:nowrap; }
+  .ind-catalogo-wrap{ max-height:320px; overflow-y:auto; }
+  .ind-acciones{ white-space:nowrap; text-align:right; }
+  .ind-btn-mini{ background:#fff; border:1px solid #bbb; border-radius:4px; padding:3px 9px; font-size:12px; cursor:pointer; color:#1c1c1c; }
+  .ind-btn-mini.ind-btn-borrar{ color:#a5281c; border-color:#e0b4ae; }
+  .ord-semana-chip{ display:inline-block; margin-top:4px; font-size:11.5px; border:1px solid #4c8dae; color:#4c8dae; background:transparent; border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -1213,7 +1261,22 @@
       <div class="panel-tab" id="ptab-refacciones">Refacciones</div>
       <div class="panel-tab" id="ptab-insumos">Insumos</div>
       <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
+      <div class="panel-tab" id="ptab-indicadores">Indicadores</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
+    </div>
+
+    <div class="maq-modal-overlay" id="ord-semana-overlay">
+      <div class="maq-modal">
+        <span class="maq-modal-close" id="ord-semana-close">&times;</span>
+        <h3 style="margin-top:0;">Marcar en proceso — <span id="ord-semana-orden"></span></h3>
+        <p class="avance-aviso" style="padding:0 0 8px; color:#555;">El jefe de taller la verá de inmediato en su lista de "En proceso". Elige en qué semana se va a atender: cuenta para el indicador de cumplimiento de esa semana. La Fecha de atención real se puede poner después.</p>
+        <div class="maq-field">
+          <label for="ord-semana-select">Semana</label>
+          <select id="ord-semana-select"></select>
+        </div>
+        <div class="maq-modal-status" id="ord-semana-status"></div>
+        <button type="button" class="maq-save-btn" id="ord-semana-guardar">Marcar en proceso</button>
+      </div>
     </div>
 
     <div id="pview-ordenes">
@@ -3676,6 +3739,73 @@
       </div>
     </div>
 
+    <div id="pview-indicadores" style="display:none;">
+      <div class="ind-encabezado">
+        <h2 class="ind-titulo">Cumplimiento de programación semanal</h2>
+        <p class="ind-ayuda">De las órdenes programadas para cada semana (Fecha de atención dentro de la semana, o "Marcar en proceso" para esa semana), cuántas se cerraron (Fecha de salida) dentro de la misma semana. Si una orden se reprograma, cuenta en cada semana en que se programó. Las que ya estaban cerradas antes de su semana se cuentan aparte (fuera de programación).</p>
+      </div>
+      <div class="toolbar ind-toolbar">
+        <div class="maq-field"><label for="ind-f-desde">Desde la semana</label><select id="ind-f-desde"></select></div>
+        <div class="maq-field"><label for="ind-f-hasta">Hasta la semana</label><select id="ind-f-hasta"></select></div>
+        <div class="maq-field"><label for="ind-f-seccion">Tipo de orden</label>
+          <select id="ind-f-seccion">
+            <option value="todas">Todas</option>
+            <option value="principal">Agrícola</option>
+            <option value="soldadura">Soldadura</option>
+            <option value="automotriz">Automotriz</option>
+            <option value="llantas">Llantas y Ponches</option>
+            <option value="terceros">Reparaciones con terceros</option>
+          </select>
+        </div>
+        <button class="export-btn" id="ind-btn-actualizar">Actualizar</button>
+      </div>
+      <div class="ind-status" id="ind-status"></div>
+      <div class="ind-tarjeta">
+        <div class="ind-tarjeta-titulo">Por semana <span class="ind-sub">(toca una semana para ver el detalle)</span></div>
+        <div class="maq-table-wrap ind-tabla-wrap">
+          <table class="maq-table ind-tabla" id="ind-tabla-semanas">
+            <thead><tr>
+              <th>Semana</th><th>Fechas</th><th class="ind-num">Programadas</th><th class="ind-num">Cumplidas en la semana</th><th>% Cumplimiento</th>
+              <th class="ind-num">Cerradas antes<br><span class="ind-th-sub">fuera de programación</span></th><th class="ind-num">Cerradas después</th><th class="ind-num">Sin cerrar</th><th class="ind-num">Reprogramadas</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ind-tarjeta" id="ind-detalle" style="display:none;">
+        <div class="ind-tarjeta-titulo">Semana <span id="ind-detalle-semana"></span></div>
+        <div class="maq-table-wrap ind-tabla-wrap">
+          <table class="maq-table ind-tabla" id="ind-tabla-secciones">
+            <thead><tr><th>Tipo de orden</th><th class="ind-num">Programadas</th><th class="ind-num">Cumplidas</th><th>% Cumplimiento</th><th class="ind-num">Cerradas antes</th><th class="ind-num">Cerradas después</th><th class="ind-num">Sin cerrar</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="maq-table-wrap ind-tabla-wrap" style="margin-top:12px;">
+          <table class="maq-table ind-tabla" id="ind-tabla-ordenes">
+            <thead><tr><th>Orden</th><th>Tipo</th><th>Unidad</th><th>Huerta</th><th>Descripción</th><th>Programada</th><th>Fecha de salida</th><th>Resultado</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ind-tarjeta">
+        <div class="ind-tarjeta-titulo">Catálogo de semanas</div>
+        <div class="ind-semana-form" id="ind-semana-form">
+          <div class="maq-field"><label for="ind-sem-codigo">Número de semana</label><input type="text" id="ind-sem-codigo" placeholder="S01-2027" maxlength="20"></div>
+          <div class="maq-field"><label for="ind-sem-inicio">Inicio de semana</label><input type="date" id="ind-sem-inicio"></div>
+          <div class="maq-field"><label for="ind-sem-fin">Cierre de semana</label><input type="date" id="ind-sem-fin"></div>
+          <button type="button" class="maq-save-btn" id="ind-sem-guardar">Agregar semana</button>
+          <button type="button" class="ah-btn-marcar" id="ind-sem-cancelar" style="display:none;">Cancelar</button>
+        </div>
+        <div class="ind-status" id="ind-sem-status"></div>
+        <div class="maq-table-wrap ind-tabla-wrap ind-catalogo-wrap">
+          <table class="maq-table ind-tabla" id="ind-tabla-catalogo">
+            <thead><tr><th>Número de semana</th><th>Inicio</th><th>Cierre</th><th class="ind-acciones-th"></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="pview-usuarios" style="display:none;">
       <div class="usr-form">
         <input type="text" id="usr-nombre" placeholder="Nombre exacto de la persona">
@@ -3703,6 +3833,7 @@
             <div class="usr-permiso-row"><label>Refacciones</label><select id="usr-perm-refacciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Insumos</label><select id="usr-perm-insumos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
+            <div class="usr-permiso-row"><label>Indicadores</label><select id="usr-perm-indicadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (catálogo de semanas)</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
           </div>
         </div>
@@ -3946,7 +4077,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'avance_huerta', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'avance_huerta', 'indicadores', 'usuarios'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -4056,6 +4187,7 @@ function aplicarPermisosPanelUI(){
     ['refacciones', ptabRefacciones, pviewRefacciones],
     ['insumos', ptabInsumos, pviewInsumos],
     ['avance_huerta', ptabAvanceHuerta, pviewAvanceHuerta],
+    ['indicadores', ptabIndicadores, pviewIndicadores],
     ['usuarios', ptabUsuarios, pviewUsuarios],
   ];
   let primeraVisible = null;
@@ -4866,19 +4998,8 @@ function asignarFechaAtencionDesdeAviso_(orden){
 // guarde una fecha de verdad, esta bandera se quita sola (ver
 // actualizarOrden/editarOrden en el servidor).
 function marcarEnProcesoSinFecha_(orden){
-  if(!confirm('¿Marcar esta orden como "En proceso" sin asignar todavía la Fecha de atención?\n\nEl jefe de taller la verá de inmediato en su lista de "En proceso". La fecha real se puede asignar después desde esta misma tabla.')) return;
-  google.script.run
-    .withSuccessHandler((result) => {
-      if(!result || !result.success){
-        alert(result && result.error ? result.error : 'Error al guardar.');
-        return;
-      }
-      const rec = ALL_RECORDS.find(r => r.Orden === orden);
-      if(rec){ rec.EnProcesoSinFecha = 1; }
-      renderTable();
-    })
-    .withFailureHandler(() => alert('Error al guardar.'))
-    .marcarOrdenEnProceso(ACCESS_CODE, PANEL_USUARIO, orden);
+  // Desde oct-2026 se elige la semana (Indicadores): ver ordAbrirSemana_.
+  ordAbrirSemana_(orden);
 }
 
 // Valor comparable de una orden para un criterio de orden dado — usado por
@@ -4950,6 +5071,7 @@ function filaOrdenHtml_(r){
     <td data-col="fecha_atencion">
       <input type="date" id="fa-${orden}" value="${dateInputValue(r.FechaAtencion)}">
       ${(!r.FechaAtencion && !r.FechaSalida && !r.EnProcesoSinFecha) ? `<button type="button" class="btn-en-proceso-sf" onclick="marcarEnProcesoSinFecha_('${orden}')" title="Marca la orden como En proceso sin asignar todavía la fecha — útil para que el jefe de taller la vea de inmediato en su lista.">Marcar en proceso</button>` : ''}
+      ${(!r.FechaAtencion && !r.FechaSalida && r.EnProcesoSinFecha) ? `<button type="button" class="ord-semana-chip" onclick="ordAbrirSemana_('${orden}')" title="Semana en que se planea atender (cuenta para el indicador). Toca para cambiarla.">📅 ${r.SemanaEnProceso ? escapeHtml(r.SemanaEnProceso) : 'Elegir semana'}</button>` : ''}
     </td>
     <td class="readonly-cell" data-col="fecha_salida">${r.FechaSalida ? new Date(r.FechaSalida).toLocaleDateString('es-MX') : '—'}</td>
     <td class="readonly-cell" data-col="atendio">${escapeHtml(r.AtendioPor || '—')}</td>
@@ -6191,6 +6313,7 @@ const ptabRefacciones = document.getElementById('ptab-refacciones');
 const ptabInsumos = document.getElementById('ptab-insumos');
 const ptabAvanceHuerta = document.getElementById('ptab-avancehuerta');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
+const ptabIndicadores = document.getElementById('ptab-indicadores');
 const pviewOrdenes = document.getElementById('pview-ordenes');
 const pviewDiesel = document.getElementById('pview-diesel');
 const pviewCombustibleAutomotriz = document.getElementById('pview-combustible-automotriz');
@@ -6204,6 +6327,7 @@ const pviewRefacciones = document.getElementById('pview-refacciones');
 const pviewInsumos = document.getElementById('pview-insumos');
 const pviewAvanceHuerta = document.getElementById('pview-avancehuerta');
 const pviewUsuarios = document.getElementById('pview-usuarios');
+const pviewIndicadores = document.getElementById('pview-indicadores');
 let USUARIOS_CARGADOS = false;
 let DIESEL_CARGADO = false;
 let CA_CARGADO = false;
@@ -6217,8 +6341,8 @@ let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
 let AVANCE_HUERTA_HUERTAS_CARGADAS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabAvanceHuerta, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewAvanceHuerta, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -19755,6 +19879,358 @@ document.getElementById('cot-ver-modal-close').addEventListener('click', functio
 });
 cotVerModalOverlay.addEventListener('click', function(e){
   if(e.target === cotVerModalOverlay) cotVerModalOverlay.classList.remove('open');
+});
+
+
+// ---------------------------------------------------------------
+// INDICADORES (oct-2026, petición de Carlos): cumplimiento semanal de la
+// programación de órdenes. Ver getIndicadorCumplimientoSemanal en
+// server/handlers.js para las reglas. Aquí: filtros, tabla por semana,
+// detalle de una semana (por tipo de orden y orden por orden) y el
+// catálogo de semanas (agregar / corregir / eliminar).
+// ---------------------------------------------------------------
+let IND_SEMANAS = [];        // catálogo [{id, codigo, inicio, fin}]
+let IND_HOY = '';
+let IND_DATOS = null;        // respuesta del indicador
+let IND_SEMANA_DETALLE = ''; // código de la semana abierta en el detalle
+let IND_SEMANA_EDITANDO = null;
+let INDICADORES_CARGADOS = false;
+const IND_RESULTADOS = {
+  cumplida: { texto: 'Cumplida', cls: 'ind-res-ok' },
+  cerrada_antes: { texto: 'Cerrada antes (fuera de programación)', cls: 'ind-res-antes' },
+  cerrada_despues: { texto: 'Cerrada después', cls: 'ind-res-tarde' },
+  pendiente: { texto: 'Sin cerrar', cls: 'ind-res-pend' },
+};
+
+function indFecha_(ymd){
+  if(!ymd) return '—';
+  const p = String(ymd).split('-');
+  return p.length === 3 ? (p[2] + '/' + p[1] + '/' + p[0]) : String(ymd);
+}
+function indFechaCorta_(ymd){
+  const p = String(ymd || '').split('-');
+  return p.length === 3 ? (p[2] + '/' + p[1]) : '';
+}
+// Índice de la semana que contiene "hoy" (o la última, si hoy no está en el catálogo).
+function indIndiceSemanaDe_(semanas, ymd){
+  const i = semanas.findIndex(function(s){ return s.inicio <= ymd && s.fin >= ymd; });
+  if(i !== -1) return i;
+  let ultimaAntes = -1;
+  semanas.forEach(function(s, k){ if(s.fin < ymd) ultimaAntes = k; });
+  return ultimaAntes !== -1 ? ultimaAntes : 0;
+}
+function indColorPorcentaje_(p){
+  if(p === null || p === undefined) return 'ind-pct-na';
+  if(p >= 90) return 'ind-pct-ok';
+  if(p >= 70) return 'ind-pct-medio';
+  return 'ind-pct-bajo';
+}
+function indBarraPorcentaje_(p){
+  if(p === null || p === undefined) return '<span class="ind-pct-texto ind-pct-na">Sin programadas</span>';
+  const ancho = Math.max(0, Math.min(100, p));
+  return '<div class="ind-pct"><div class="ind-pct-barra"><div class="ind-pct-relleno ' + indColorPorcentaje_(p) + '" style="width:' + ancho + '%"></div></div>'
+    + '<span class="ind-pct-texto">' + p.toFixed(p % 1 === 0 ? 0 : 2) + '%</span></div>';
+}
+
+function indPoblarSelectsSemanas_(){
+  const desde = document.getElementById('ind-f-desde');
+  const hasta = document.getElementById('ind-f-hasta');
+  const valDesde = desde.value, valHasta = hasta.value;
+  const opciones = IND_SEMANAS.map(function(s){
+    return '<option value="' + escapeHtml(s.codigo) + '">' + escapeHtml(s.codigo) + ' (' + indFechaCorta_(s.inicio) + ' al ' + indFechaCorta_(s.fin) + ')</option>';
+  }).join('');
+  desde.innerHTML = opciones;
+  hasta.innerHTML = opciones;
+  if(!IND_SEMANAS.length) return;
+  const actual = indIndiceSemanaDe_(IND_SEMANAS, IND_HOY);
+  const existe = function(c){ return IND_SEMANAS.some(function(s){ return s.codigo === c; }); };
+  desde.value = existe(valDesde) ? valDesde : IND_SEMANAS[Math.max(0, actual - 7)].codigo;
+  hasta.value = existe(valHasta) ? valHasta : IND_SEMANAS[actual].codigo;
+}
+
+function indCargarSemanas_(alTerminar){
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('ind-status', (r && r.error) || 'No se pudo cargar el catálogo de semanas.', true); return; }
+      IND_SEMANAS = r.semanas || [];
+      IND_HOY = r.hoy || '';
+      indPoblarSelectsSemanas_();
+      indRenderCatalogo_();
+      if(alTerminar) alTerminar();
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('ind-status', (err && err.message) || 'No se pudo cargar el catálogo de semanas.', true); })
+    .getSemanas(ACCESS_CODE, PANEL_USUARIO);
+}
+
+function indMostrarStatus_(id, texto, esError){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.textContent = texto || '';
+  el.className = 'ind-status' + (texto ? ' show' : '') + (esError ? ' err' : '');
+}
+
+function indCargarIndicador_(){
+  const desde = document.getElementById('ind-f-desde').value;
+  const hasta = document.getElementById('ind-f-hasta').value;
+  indMostrarStatus_('ind-status', 'Calculando...', false);
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('ind-status', (r && r.error) || 'No se pudo calcular el indicador.', true); return; }
+      IND_DATOS = r;
+      indMostrarStatus_('ind-status', '', false);
+      indRenderSemanas_();
+      const sigueAbierta = IND_SEMANA_DETALLE && r.semanas.some(function(s){ return s.codigo === IND_SEMANA_DETALLE; });
+      if(sigueAbierta) indRenderDetalle_(IND_SEMANA_DETALLE);
+      else document.getElementById('ind-detalle').style.display = 'none';
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('ind-status', (err && err.message) || 'No se pudo calcular el indicador.', true); })
+    .getIndicadorCumplimientoSemanal(ACCESS_CODE, PANEL_USUARIO, desde, hasta);
+}
+
+function indRenderSemanas_(){
+  const tbody = document.querySelector('#ind-tabla-semanas tbody');
+  if(!IND_DATOS){ tbody.innerHTML = ''; return; }
+  const seccion = document.getElementById('ind-f-seccion').value || 'todas';
+  const filas = IND_DATOS.semanas.slice().reverse(); // la más reciente arriba
+  if(!filas.length){ tbody.innerHTML = '<tr><td colspan="9" class="maq-empty">No hay semanas en ese rango.</td></tr>'; return; }
+  let suma = { programadas: 0, cumplidas: 0, cerradasAntes: 0, cerradasDespues: 0, pendientes: 0, reprogramadas: 0 };
+  tbody.innerHTML = filas.map(function(s){
+    const t = s.totales[seccion] || s.totales.todas;
+    Object.keys(suma).forEach(function(k){ suma[k] += t[k] || 0; });
+    const esActual = IND_HOY && s.inicio <= IND_HOY && s.fin >= IND_HOY;
+    return '<tr data-semana="' + escapeHtml(s.codigo) + '" class="' + (s.codigo === IND_SEMANA_DETALLE ? 'ind-fila-activa' : '') + '">'
+      + '<td><strong>' + escapeHtml(s.codigo) + '</strong>' + (esActual ? ' <span class="ind-chip-actual">en curso</span>' : '') + '</td>'
+      + '<td>' + indFecha_(s.inicio) + ' al ' + indFecha_(s.fin) + '</td>'
+      + '<td class="ind-num">' + t.programadas + '</td>'
+      + '<td class="ind-num">' + t.cumplidas + '</td>'
+      + '<td>' + indBarraPorcentaje_(t.porcentaje) + '</td>'
+      + '<td class="ind-num">' + t.cerradasAntes + '</td>'
+      + '<td class="ind-num">' + t.cerradasDespues + '</td>'
+      + '<td class="ind-num">' + t.pendientes + '</td>'
+      + '<td class="ind-num">' + t.reprogramadas + '</td>'
+      + '</tr>';
+  }).join('');
+  const pctTotal = suma.programadas ? Math.round(suma.cumplidas / suma.programadas * 10000) / 100 : null;
+  tbody.insertAdjacentHTML('beforeend', '<tr class="ind-fila-total">'
+    + '<td colspan="2"><strong>Total del rango</strong></td>'
+    + '<td class="ind-num">' + suma.programadas + '</td><td class="ind-num">' + suma.cumplidas + '</td>'
+    + '<td>' + indBarraPorcentaje_(pctTotal) + '</td>'
+    + '<td class="ind-num">' + suma.cerradasAntes + '</td><td class="ind-num">' + suma.cerradasDespues + '</td>'
+    + '<td class="ind-num">' + suma.pendientes + '</td><td class="ind-num">' + suma.reprogramadas + '</td></tr>');
+}
+
+function indRenderDetalle_(codigo){
+  const sem = IND_DATOS && IND_DATOS.semanas.find(function(s){ return s.codigo === codigo; });
+  const caja = document.getElementById('ind-detalle');
+  if(!sem){ caja.style.display = 'none'; return; }
+  IND_SEMANA_DETALLE = codigo;
+  caja.style.display = '';
+  document.getElementById('ind-detalle-semana').textContent = sem.codigo + ' (' + indFecha_(sem.inicio) + ' al ' + indFecha_(sem.fin) + ')';
+  const secciones = (IND_DATOS.secciones || []);
+  const nombreSeccion = {};
+  secciones.forEach(function(s){ nombreSeccion[s.clave] = s.nombre; });
+  document.querySelector('#ind-tabla-secciones tbody').innerHTML = secciones.concat([{ clave: 'todas', nombre: 'Total' }]).map(function(s){
+    const t = sem.totales[s.clave];
+    return '<tr class="' + (s.clave === 'todas' ? 'ind-fila-total' : '') + '"><td>' + escapeHtml(s.nombre) + '</td>'
+      + '<td class="ind-num">' + t.programadas + '</td><td class="ind-num">' + t.cumplidas + '</td><td>' + indBarraPorcentaje_(t.porcentaje) + '</td>'
+      + '<td class="ind-num">' + t.cerradasAntes + '</td><td class="ind-num">' + t.cerradasDespues + '</td><td class="ind-num">' + t.pendientes + '</td></tr>';
+  }).join('');
+  const seccion = document.getElementById('ind-f-seccion').value || 'todas';
+  const ordenes = sem.detalle.filter(function(d){ return seccion === 'todas' || d.seccion === seccion; });
+  document.querySelector('#ind-tabla-ordenes tbody').innerHTML = ordenes.length ? ordenes.map(function(d){
+    const res = IND_RESULTADOS[d.resultado] || { texto: d.resultado, cls: '' };
+    const repro = d.reprogramadaA ? '<div class="ind-repro">Reprogramada al ' + indFecha_(d.reprogramadaA) + '</div>' : '';
+    return '<tr><td class="ind-folio">' + escapeHtml(d.orden) + '</td><td>' + escapeHtml(nombreSeccion[d.seccion] || d.seccion) + '</td>'
+      + '<td>' + escapeHtml(d.unidad) + '</td><td>' + escapeHtml(d.huerta) + '</td>'
+      + '<td class="ind-desc" title="' + escapeHtml(d.descripcion) + '">' + escapeHtml(d.descripcion) + '</td>'
+      + '<td>' + d.fechasProgramadas.map(indFecha_).join(', ') + (d.origen === 'en_proceso' ? ' <span class="ind-sub">(en proceso)</span>' : '') + '</td>'
+      + '<td>' + indFecha_(d.fechaSalida) + '</td>'
+      + '<td><span class="ind-res ' + res.cls + '">' + res.texto + '</span>' + repro + '</td></tr>';
+  }).join('') : '<tr><td colspan="8" class="maq-empty">No hay órdenes programadas de este tipo en esta semana.</td></tr>';
+  document.querySelectorAll('#ind-tabla-semanas tbody tr').forEach(function(tr){ tr.classList.toggle('ind-fila-activa', tr.dataset.semana === codigo); });
+}
+
+function indRenderCatalogo_(){
+  const puedeEditar = puedeCapturarPestana('indicadores');
+  document.getElementById('ind-semana-form').style.display = puedeEditar ? '' : 'none';
+  const tbody = document.querySelector('#ind-tabla-catalogo tbody');
+  tbody.innerHTML = IND_SEMANAS.slice().reverse().map(function(s){
+    const acciones = puedeEditar
+      ? '<button type="button" class="ind-btn-mini" data-accion="editar" data-id="' + s.id + '">Editar</button> <button type="button" class="ind-btn-mini ind-btn-borrar" data-accion="eliminar" data-id="' + s.id + '">Eliminar</button>'
+      : '';
+    return '<tr><td>' + escapeHtml(s.codigo) + '</td><td>' + indFecha_(s.inicio) + '</td><td>' + indFecha_(s.fin) + '</td><td class="ind-acciones">' + acciones + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" class="maq-empty">El catálogo está vacío.</td></tr>';
+}
+
+function indLimpiarFormSemana_(){
+  IND_SEMANA_EDITANDO = null;
+  document.getElementById('ind-sem-codigo').value = '';
+  document.getElementById('ind-sem-inicio').value = '';
+  document.getElementById('ind-sem-fin').value = '';
+  document.getElementById('ind-sem-guardar').textContent = 'Agregar semana';
+  document.getElementById('ind-sem-cancelar').style.display = 'none';
+}
+
+// Sugerencia para la siguiente semana: la que sigue a la última del catálogo.
+function indSugerirSiguienteSemana_(){
+  if(!IND_SEMANAS.length) return;
+  const ultima = IND_SEMANAS[IND_SEMANAS.length - 1];
+  const inicio = new Date(ultima.fin + 'T00:00:00');
+  inicio.setDate(inicio.getDate() + 1);
+  const fin = new Date(inicio); fin.setDate(fin.getDate() + 6);
+  const ymd = function(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const m = String(ultima.codigo).match(/^S(\d+)-(\d{4})$/i);
+  let codigo = '';
+  if(m){
+    // Semana 1 del año nuevo: la que contiene el primer jueves (como en el Excel: S01-2026 empezó el 29/12/2025).
+    const jueves = new Date(inicio); jueves.setDate(jueves.getDate() + 3);
+    codigo = (jueves.getFullYear() > Number(m[2])) ? ('S01-' + jueves.getFullYear()) : ('S' + String(Number(m[1]) + 1).padStart(2, '0') + '-' + m[2]);
+  }
+  document.getElementById('ind-sem-codigo').placeholder = codigo || 'S01-2027';
+  document.getElementById('ind-sem-inicio').value = ymd(inicio);
+  document.getElementById('ind-sem-fin').value = ymd(fin);
+  if(!document.getElementById('ind-sem-codigo').value) document.getElementById('ind-sem-codigo').value = codigo;
+}
+
+function indGuardarSemana_(){
+  const datos = {
+    id: IND_SEMANA_EDITANDO,
+    codigo: document.getElementById('ind-sem-codigo').value.trim(),
+    inicio: document.getElementById('ind-sem-inicio').value,
+    fin: document.getElementById('ind-sem-fin').value,
+  };
+  const btn = document.getElementById('ind-sem-guardar');
+  btn.disabled = true;
+  indMostrarStatus_('ind-sem-status', 'Guardando...', false);
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ indMostrarStatus_('ind-sem-status', (r && r.error) || 'No se pudo guardar.', true); return; }
+      indMostrarStatus_('ind-sem-status', datos.id ? 'Semana corregida.' : 'Semana agregada.', false);
+      indLimpiarFormSemana_();
+      indCargarSemanas_(function(){ indSugerirSiguienteSemana_(); });
+    })
+    .withFailureHandler(function(err){ btn.disabled = false; indMostrarStatus_('ind-sem-status', (err && err.message) || 'No se pudo guardar.', true); })
+    .guardarSemana(ACCESS_CODE, PANEL_USUARIO, datos);
+}
+
+document.querySelector('#ind-tabla-catalogo tbody').addEventListener('click', function(ev){
+  const btn = ev.target.closest('button[data-accion]');
+  if(!btn) return;
+  const sem = IND_SEMANAS.find(function(s){ return String(s.id) === btn.dataset.id; });
+  if(!sem) return;
+  if(btn.dataset.accion === 'editar'){
+    IND_SEMANA_EDITANDO = sem.id;
+    document.getElementById('ind-sem-codigo').value = sem.codigo;
+    document.getElementById('ind-sem-inicio').value = sem.inicio;
+    document.getElementById('ind-sem-fin').value = sem.fin;
+    document.getElementById('ind-sem-guardar').textContent = 'Guardar cambios';
+    document.getElementById('ind-sem-cancelar').style.display = '';
+    document.getElementById('ind-sem-codigo').focus();
+    return;
+  }
+  if(!confirm('¿Eliminar la semana ' + sem.codigo + ' del catálogo?')) return;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('ind-sem-status', (r && r.error) || 'No se pudo eliminar.', true); return; }
+      indMostrarStatus_('ind-sem-status', 'Semana eliminada.', false);
+      indCargarSemanas_();
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('ind-sem-status', (err && err.message) || 'No se pudo eliminar.', true); })
+    .eliminarSemana(ACCESS_CODE, PANEL_USUARIO, sem.id);
+});
+document.getElementById('ind-sem-guardar').addEventListener('click', indGuardarSemana_);
+document.getElementById('ind-sem-cancelar').addEventListener('click', function(){ indLimpiarFormSemana_(); indSugerirSiguienteSemana_(); });
+document.getElementById('ind-btn-actualizar').addEventListener('click', indCargarIndicador_);
+document.getElementById('ind-f-seccion').addEventListener('change', function(){
+  indRenderSemanas_();
+  if(IND_SEMANA_DETALLE) indRenderDetalle_(IND_SEMANA_DETALLE);
+});
+document.getElementById('ind-f-desde').addEventListener('change', indCargarIndicador_);
+document.getElementById('ind-f-hasta').addEventListener('change', indCargarIndicador_);
+document.querySelector('#ind-tabla-semanas tbody').addEventListener('click', function(ev){
+  const tr = ev.target.closest('tr[data-semana]');
+  if(tr) indRenderDetalle_(tr.dataset.semana);
+});
+ptabIndicadores.addEventListener('click', function(){
+  activarPanelTab(ptabIndicadores, pviewIndicadores);
+  if(!INDICADORES_CARGADOS){
+    INDICADORES_CARGADOS = true;
+    indCargarSemanas_(function(){ indSugerirSiguienteSemana_(); indCargarIndicador_(); });
+  }
+});
+
+// ---------------------------------------------------------------
+// "Marcar en proceso" con SEMANA (Indicadores, oct-2026): al marcar una
+// orden en proceso sin Fecha de atención se elige en qué semana se va a
+// atender; así cuenta en el indicador de esa semana. También se puede
+// cambiar después (reprogramar) desde el mismo botón de la fila.
+// ---------------------------------------------------------------
+let ORD_SEMANAS = null;
+let ORD_SEMANA_ORDEN = '';
+function ordCargarSemanas_(alTerminar){
+  if(ORD_SEMANAS){ alTerminar(); return; }
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(r && r.success){ ORD_SEMANAS = r.semanas || []; IND_HOY = IND_HOY || r.hoy || ''; }
+      alTerminar((r && r.success) ? null : ((r && r.error) || 'No se pudo cargar el catálogo de semanas.'));
+    })
+    .withFailureHandler(function(err){ alTerminar((err && err.message) || 'No se pudo cargar el catálogo de semanas.'); })
+    .getSemanas(ACCESS_CODE, PANEL_USUARIO);
+}
+function ordAbrirSemana_(orden){
+  ORD_SEMANA_ORDEN = orden;
+  const rec = ALL_RECORDS.find(function(r){ return r.Orden === orden; });
+  document.getElementById('ord-semana-orden').textContent = orden;
+  const status = document.getElementById('ord-semana-status');
+  status.textContent = 'Cargando semanas...';
+  status.className = 'maq-modal-status';
+  document.getElementById('ord-semana-guardar').textContent = (rec && rec.EnProcesoSinFecha) ? 'Cambiar semana' : 'Marcar en proceso';
+  document.getElementById('ord-semana-overlay').classList.add('open');
+  ordCargarSemanas_(function(error){
+    const sel = document.getElementById('ord-semana-select');
+    if(error){ status.textContent = error; status.className = 'maq-modal-status err'; sel.innerHTML = ''; return; }
+    status.textContent = '';
+    const hoy = IND_HOY || new Date().toISOString().slice(0, 10);
+    const actual = indIndiceSemanaDe_(ORD_SEMANAS, hoy);
+    // De la semana actual a 12 semanas adelante (más la ya elegida, si quedó atrás).
+    const lista = ORD_SEMANAS.slice(actual, actual + 13);
+    if(rec && rec.SemanaEnProceso && !lista.some(function(s){ return s.codigo === rec.SemanaEnProceso; })){
+      const vieja = ORD_SEMANAS.find(function(s){ return s.codigo === rec.SemanaEnProceso; });
+      if(vieja) lista.unshift(vieja);
+    }
+    sel.innerHTML = lista.map(function(s){
+      const etiqueta = s.codigo + ' (' + indFecha_(s.inicio) + ' al ' + indFecha_(s.fin) + ')' + (s.inicio <= hoy && s.fin >= hoy ? ' — esta semana' : '');
+      return '<option value="' + escapeHtml(s.codigo) + '">' + escapeHtml(etiqueta) + '</option>';
+    }).join('');
+    // Por defecto: la que ya tenía, o la semana siguiente (se programa para la próxima).
+    const sugerida = (rec && rec.SemanaEnProceso) || (ORD_SEMANAS[actual + 1] || ORD_SEMANAS[actual] || {}).codigo;
+    if(sugerida) sel.value = sugerida;
+    if(!lista.length){ status.textContent = 'El catálogo de semanas no tiene semanas próximas. Agrégalas en Indicadores → Catálogo de semanas.'; status.className = 'maq-modal-status err'; }
+  });
+}
+function ordCerrarSemana_(){ document.getElementById('ord-semana-overlay').classList.remove('open'); }
+document.getElementById('ord-semana-close').addEventListener('click', ordCerrarSemana_);
+document.getElementById('ord-semana-guardar').addEventListener('click', function(){
+  const orden = ORD_SEMANA_ORDEN;
+  const semana = document.getElementById('ord-semana-select').value;
+  const status = document.getElementById('ord-semana-status');
+  if(!semana){ status.textContent = 'Elige la semana.'; status.className = 'maq-modal-status err'; return; }
+  const btn = this;
+  btn.disabled = true;
+  status.textContent = 'Guardando...';
+  status.className = 'maq-modal-status';
+  google.script.run
+    .withSuccessHandler(function(result){
+      btn.disabled = false;
+      if(!result || !result.success){ status.textContent = (result && result.error) || 'Error al guardar.'; status.className = 'maq-modal-status err'; return; }
+      const rec = ALL_RECORDS.find(function(r){ return r.Orden === orden; });
+      if(rec){ rec.EnProcesoSinFecha = 1; rec.SemanaEnProceso = semana; }
+      ordCerrarSemana_();
+      renderTable();
+    })
+    .withFailureHandler(function(){ btn.disabled = false; status.textContent = 'Error al guardar.'; status.className = 'maq-modal-status err'; })
+    .marcarOrdenEnProceso(ACCESS_CODE, PANEL_USUARIO, orden, semana);
 });
 
 </script>

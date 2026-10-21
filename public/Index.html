@@ -4219,7 +4219,17 @@ function avanceDetenerRastreoSiActivo_(){
   });
 }
 
+// Lecturas con poca precisión (la ubicación "de red" por antenas/WiFi, o
+// el GPS recién encendiendo) caen a decenas o cientos de metros y hacen
+// que el recorrido brinque e infle los km (oct-2026: 731 km en un día).
+// Se descartan; el GPS bueno manda la siguiente en unos segundos.
+var AVANCE_PRECISION_MAX_METROS = 30;
+function avancePrecisionAceptable_(precision){
+  var n = Number(precision);
+  return !isFinite(n) || n <= 0 || n <= AVANCE_PRECISION_MAX_METROS;
+}
 function avanceNuevaPosicion_(pos){
+  if(!avancePrecisionAceptable_(pos.coords.accuracy)) return;
   avanceRegistrarPunto_(pos.coords.latitude, pos.coords.longitude);
 }
 

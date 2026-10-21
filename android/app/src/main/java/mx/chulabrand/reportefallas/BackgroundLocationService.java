@@ -86,6 +86,8 @@ public class BackgroundLocationService extends Service implements LocationListen
     private volatile long ultimoIntentoMs = 0L;
     private volatile boolean creadoEnServidor = false;
     private boolean reintentoProgramado = false;
+    /** Hora de la última lectura buena del GPS (ver FiltroUbicacion). */
+    private volatile long ultimoGpsMs = 0L;
 
     @Override
     public void onCreate() {
@@ -154,6 +156,11 @@ public class BackgroundLocationService extends Service implements LocationListen
 
     @Override
     public void onLocationChanged(Location location) {
+        final long ahora = System.currentTimeMillis();
+        if (!FiltroUbicacion.aceptar(location.getProvider(), location.hasAccuracy(), location.getAccuracy(), ahora, ultimoGpsMs)) {
+            return; // poca precisión, o lectura de red teniendo GPS: brincaría el recorrido
+        }
+        if (LocationManager.GPS_PROVIDER.equals(location.getProvider())) ultimoGpsMs = ahora;
         final double lat = location.getLatitude();
         final double lng = location.getLongitude();
         final long t = System.currentTimeMillis();

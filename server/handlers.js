@@ -5586,7 +5586,7 @@ async function getAvanceAbierto(huerta, nombre) {
   if (sesiones.length === 0) return { existe: false };
   const sesion = sesiones[0];
   const [puntos] = await pool.query(
-    'SELECT lat, lng FROM avance_huerta_puntos WHERE avance_id = ? ORDER BY capturado_en, id',
+    'SELECT lat, lng, capturado_en FROM avance_huerta_puntos WHERE avance_id = ? ORDER BY capturado_en, id',
     [sesion.id]
   );
   return {
@@ -5595,7 +5595,8 @@ async function getAvanceAbierto(huerta, nombre) {
     trabajo: normalizarTrabajoAvance_(sesion.trabajo),
     porcentaje: sesion.porcentaje !== null ? Number(sesion.porcentaje) : null,
     fechaInicio: sesion.fecha_inicio,
-    puntos: puntos.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) })),
+    puntos: filtrarSaltosGps_(puntos.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), t: new Date(p.capturado_en).getTime() })))
+      .map((p) => ({ lat: p.lat, lng: p.lng })),
   };
 }
 
@@ -5620,7 +5621,10 @@ async function getAvanceHuerta(huerta) {
   const puntosPorSesion = {};
   puntos.forEach((p) => {
     if (!puntosPorSesion[p.avance_id]) puntosPorSesion[p.avance_id] = [];
-    puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng) });
+    puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), t: new Date(p.capturado_en).getTime() });
+  });
+  Object.keys(puntosPorSesion).forEach((k) => {
+    puntosPorSesion[k] = filtrarSaltosGps_(puntosPorSesion[k]).map((p) => ({ lat: p.lat, lng: p.lng }));
   });
   // codigoUnidad/equipoUnidad: petición de Carlos -- quiere saber con QUÉ
   // equipo (tractor) se hizo cada recorrido cuando hay varios en la misma
@@ -5683,6 +5687,7 @@ async function getRecorridosPorFecha(code, nombreUsuario, huerta, fecha) {
     if (!puntosPorSesion[p.avance_id]) puntosPorSesion[p.avance_id] = [];
     puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), capturadoEn: p.capturado_en });
   });
+  Object.keys(puntosPorSesion).forEach((k) => { puntosPorSesion[k] = filtrarSaltosGps_(puntosPorSesion[k]); });
   return sesiones.map((s) => ({
     avanceId: s.id,
     nombre: s.nombre,
@@ -5774,7 +5779,7 @@ function calcularResumenRango_(sesiones, cuadros, ventanas, minutosRalenti, ahor
     if (ses.nombre && !g.nombres.includes(ses.nombre)) g.nombres.push(ses.nombre);
     if (ses.trabajo && !g.trabajos.includes(ses.trabajo)) g.trabajos.push(ses.trabajo);
     g.avanceIds.push(ses.avanceId);
-    const todos = (ses.puntos || []).filter((p) => Number.isFinite(p.t)).sort((a, b) => a.t - b.t);
+    const todos = filtrarSaltosGps_((ses.puntos || []).filter((p) => Number.isFinite(p.t)).sort((a, b) => a.t - b.t));
     const finSesionMs = ses.fechaFin ? new Date(ses.fechaFin).getTime() : ahoraMs;
     const puntosSalida = [];
 
@@ -6283,6 +6288,66 @@ const AVANCE_TRAMO_MINIMO_METROS = 15;
 // realmente se miden (ancla -> primer punto a >= AVANCE_TRAMO_MINIMO_METROS,
 // y así sucesivamente) -- la misma regla que se aplica en vivo punto por
 // punto en marcarCuadrosCompletadosPorPunto_. Regresa [[a, b], ...].
+// ------------------------------------------------------------
+// Saltos del GPS (oct-2026, Carlos: "731.86 km" en 2 h 34 min de
+// movimiento -- imposible para un tractor). El celular, además del GPS,
+// usaba la ubicación "de red" (antenas/WiFi), que puede caer a cientos de
+// metros (p.ej. en las bodegas): el recorrido brincaba ida y vuelta cada
+// pocos segundos e inflaba km, pasadas, ralentí y "sin señal". Esto quita
+// esos puntos ANTES de cualquier cálculo o dibujo:
+//  - "pico": un punto que se aleja > SALTO_GPS_MIN_METROS del anterior y
+//    del siguiente, cuando el anterior y el siguiente están cerca entre sí
+//    (ida y vuelta);
+//  - "demasiado rápido": implica más de VELOCIDAD_MAX_TRACTOR_MS desde el
+//    último punto bueno. Si de verdad se movió (p.ej. después de un hueco
+//    sin señal), en cuanto llegan PUNTOS_PARA_REUBICAR puntos seguidos
+//    coherentes entre sí, se aceptan.
+// Sirve con o sin hora (t en ms, Date o capturadoEn); sin hora solo aplica
+// la regla de "pico".
+const SALTO_GPS_MIN_METROS = 40;
+const VELOCIDAD_MAX_TRACTOR_MS = 15; // 54 km/h
+const PUNTOS_PARA_REUBICAR = 3;
+function tiempoPuntoMs_(p) {
+  const v = p.t !== undefined ? p.t : p.capturadoEn;
+  if (v === undefined || v === null) return null;
+  const n = v instanceof Date ? v.getTime() : (typeof v === 'number' ? v : new Date(v).getTime());
+  return Number.isFinite(n) ? n : null;
+}
+function demasiadoRapido_(a, b) {
+  const ta = tiempoPuntoMs_(a);
+  const tb = tiempoPuntoMs_(b);
+  if (ta === null || tb === null) return false;
+  const d = distanciaMetros_(a, b);
+  if (d <= SALTO_GPS_MIN_METROS) return false;
+  const dt = (tb - ta) / 1000;
+  return dt <= 0 ? true : d / dt > VELOCIDAD_MAX_TRACTOR_MS;
+}
+function filtrarSaltosGps_(puntos) {
+  const pts = (puntos || []).filter((p) => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
+  const buenos = [];
+  let dudosos = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (!buenos.length) { buenos.push(p); continue; }
+    const prev = buenos[buenos.length - 1];
+    const sig = pts[i + 1];
+    const dPrev = distanciaMetros_(prev, p);
+    if (sig) {
+      const dSig = distanciaMetros_(p, sig);
+      if (dPrev > SALTO_GPS_MIN_METROS && dSig > SALTO_GPS_MIN_METROS && distanciaMetros_(prev, sig) < 0.5 * Math.min(dPrev, dSig)) continue; // pico
+    }
+    if (demasiadoRapido_(prev, p)) {
+      if (dudosos.length && demasiadoRapido_(dudosos[dudosos.length - 1], p)) dudosos = [];
+      dudosos.push(p);
+      if (dudosos.length >= PUNTOS_PARA_REUBICAR) { dudosos.forEach((x) => buenos.push(x)); dudosos = []; }
+      continue;
+    }
+    dudosos = [];
+    buenos.push(p);
+  }
+  return buenos;
+}
+
 function tramosDeRecorrido_(puntos) {
   const tramos = [];
   let ancla = null;
@@ -6939,7 +7004,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
         puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), t: new Date(p.capturado_en) });
       });
     }
-    sesionesPorHuerta[clave] = sesiones.map((x) => ({ ...x, puntos: puntosPorSesion[x.id] || [] }));
+    sesionesPorHuerta[clave] = sesiones.map((x) => ({ ...x, puntos: filtrarSaltosGps_(puntosPorSesion[x.id] || []) }));
     return sesionesPorHuerta[clave];
   }
 
@@ -8336,6 +8401,7 @@ module.exports = {
   avanceDeTramo_,
   pasadasNecesarias_,
   tramosDeRecorrido_,
+  filtrarSaltosGps_,
   margenCompletado_,
   normalizarTrabajoAvance_,
   getEquiposAvanceHuerta,

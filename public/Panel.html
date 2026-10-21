@@ -20695,21 +20695,36 @@ if('serviceWorker' in navigator){
 // muestra "Disponible sin internet" cuando ya se puede abrir sin conexión.
 function panelAsegurarCopiaSinInternet_(){
   if(!('serviceWorker' in navigator)) return Promise.resolve(false);
-  return navigator.serviceWorker.ready.then(function(reg){
-    const sw = reg.active;
-    if(!sw) return false;
-    return new Promise(function(ok){
-      const canal = new MessageChannel();
-      const t = setTimeout(function(){ ok(false); }, 60000);
-      canal.port1.onmessage = function(ev){ clearTimeout(t); ok(!!(ev.data && ev.data.lista)); };
-      sw.postMessage({ tipo: 'asegurar-copia', ruta: '/panel' }, [canal.port2]);
-    });
-  }).then(function(lista){
+  const mostrar = function(lista){
     const chip = document.getElementById('panel-chip-sin-internet');
     if(chip) chip.style.display = lista ? '' : 'none';
+    return lista;
+  };
+  // 1) Si la copia ya está guardada, se muestra de inmediato (sin esperar al Service Worker).
+  const yaGuardada = (window.caches ? caches.match('/panel').then(function(r){ return !!r; }).catch(function(){ return false; }) : Promise.resolve(false));
+  return yaGuardada.then(function(ok){
+    if(ok) mostrar(true);
+    // 2) Pedir al Service Worker que complete lo que falte. Recién publicado, puede contestar
+    //    todavía el Service Worker anterior (que no conoce este mensaje): se espera poco y se
+    //    reintenta cuando toma el control el nuevo.
+    return navigator.serviceWorker.ready.then(function(reg){
+      const sw = reg.active;
+      if(!sw) return ok;
+      return new Promise(function(listo){
+        const canal = new MessageChannel();
+        const t = setTimeout(function(){ listo(ok); }, 10000);
+        canal.port1.onmessage = function(ev){ clearTimeout(t); listo(!!(ev.data && ev.data.lista)); };
+        sw.postMessage({ tipo: 'asegurar-copia', ruta: '/panel' }, [canal.port2]);
+      });
+    });
+  }).then(function(lista){
+    mostrar(lista);
     if(!lista && navigator.onLine !== false) setTimeout(panelAsegurarCopiaSinInternet_, 30000);
     return lista;
   }).catch(function(){ return false; });
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('controllerchange', function(){ panelAsegurarCopiaSinInternet_(); });
 }
 
 </script>

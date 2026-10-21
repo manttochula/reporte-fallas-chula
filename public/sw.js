@@ -61,6 +61,31 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// La página pide "asegúrate de tener la copia" (Panel/Index al cargar). Si
+// al instalarse el Service Worker el servidor estaba despertando (Render
+// gratis) o lento, la copia no se guardó y sin internet no abría nada
+// (oct-2026: "quité el internet, cerré y volví a abrir" -> ERR_NAME_NOT_RESOLVED).
+// Contesta si ya está guardada, para mostrar "Disponible sin internet".
+self.addEventListener('message', (event) => {
+  const datos = event.data || {};
+  if (datos.tipo !== 'asegurar-copia') return;
+  const ruta = RUTAS_SHELL.includes(datos.ruta) ? datos.ruta : null;
+  const puerto = event.ports && event.ports[0];
+  event.waitUntil(completarCopia_(ruta).then((lista) => { if (puerto) puerto.postMessage({ lista }); }));
+});
+
+async function completarCopia_(rutaPrincipal) {
+  const cache = await caches.open(CACHE_NOMBRE);
+  await Promise.all(RUTAS_SHELL.map(async (ruta) => {
+    if (await cache.match(ruta)) return;
+    try {
+      const r = await fetch(ruta, { cache: 'no-store' });
+      if (r && r.ok) await cache.put(ruta, r);
+    } catch (e) { /* sin internet: se intenta la próxima vez */ }
+  }));
+  return rutaPrincipal ? !!(await cache.match(rutaPrincipal)) : true;
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 

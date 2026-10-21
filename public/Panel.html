@@ -1217,6 +1217,7 @@
   .ord-semana-chip{ display:inline-block; margin-top:4px; font-size:11.5px; border:1px solid #4c8dae; color:#4c8dae; background:transparent; border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
 
   /* --- Panel sin internet --- */
+  .panel-chip-sin-internet{ display:block; margin-top:6px; font-size:11px; color:#7fc98f; letter-spacing:.3px; text-align:right; }
   .panel-aviso-conexion{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; background:#2F3234; border:1px solid var(--line); border-left:4px solid var(--steel); color:var(--text); border-radius:6px; padding:9px 12px; margin:10px 0; font-size:13px; line-height:1.4; }
   .panel-aviso-conexion.sin-internet{ border-left-color:var(--amber); }
   .panel-aviso-conexion.con-error{ border-left-color:var(--danger); }
@@ -1268,6 +1269,7 @@
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
         <button id="btn-refresh" style="background:transparent;border:1px solid var(--line);color:var(--text-dim);padding:9px 14px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer;white-space:nowrap;">🔄 Actualizar</button>
         <span class="change-user-link" id="btn-change-user">Cambiar usuario</span>
+        <span id="panel-chip-sin-internet" class="panel-chip-sin-internet" style="display:none;" title="Esta computadora ya tiene guardada una copia del Panel: abre aunque no haya internet.">&#10003; Disponible sin internet</span>
       </div>
     </header>
 
@@ -20684,7 +20686,30 @@ window.addEventListener('load', function(){ setTimeout(function(){ panelActualiz
 setInterval(function(){ if(PANEL_HAY_PENDIENTES) panelEnviarPendientes_(); }, 30000);
 // Guarda una copia de esta pantalla para abrirla sin internet (ver /sw.js).
 if('serviceWorker' in navigator){
-  window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){ /* no es crítico */ }); });
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/sw.js').catch(function(){ /* no es crítico */ });
+    panelAsegurarCopiaSinInternet_();
+  });
+}
+// Pide al Service Worker que confirme (o complete) la copia del Panel y
+// muestra "Disponible sin internet" cuando ya se puede abrir sin conexión.
+function panelAsegurarCopiaSinInternet_(){
+  if(!('serviceWorker' in navigator)) return Promise.resolve(false);
+  return navigator.serviceWorker.ready.then(function(reg){
+    const sw = reg.active;
+    if(!sw) return false;
+    return new Promise(function(ok){
+      const canal = new MessageChannel();
+      const t = setTimeout(function(){ ok(false); }, 60000);
+      canal.port1.onmessage = function(ev){ clearTimeout(t); ok(!!(ev.data && ev.data.lista)); };
+      sw.postMessage({ tipo: 'asegurar-copia', ruta: '/panel' }, [canal.port2]);
+    });
+  }).then(function(lista){
+    const chip = document.getElementById('panel-chip-sin-internet');
+    if(chip) chip.style.display = lista ? '' : 'none';
+    if(!lista && navigator.onLine !== false) setTimeout(panelAsegurarCopiaSinInternet_, 30000);
+    return lista;
+  }).catch(function(){ return false; });
 }
 
 </script>

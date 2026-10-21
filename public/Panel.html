@@ -1199,6 +1199,9 @@
   .ind-res-antes{ background:#e3edf6; color:#2c5a80; }
   .ind-res-tarde{ background:#fbead2; color:#8a5410; }
   .ind-res-pend{ background:#f7dcd9; color:#8f2a20; }
+  .ind-tabla tr.ind-grupo td{ background:#26292B; color:#EDECE7; font-family:'Oswald',sans-serif; letter-spacing:0.04em; text-transform:uppercase; font-size:13px; padding:8px 12px; cursor:default; }
+  .ind-tabla tr.ind-grupo:hover td{ background:#26292B; }
+  .ind-grupo-resumen{ font-family:'Inter',sans-serif; text-transform:none; letter-spacing:0; color:#E8871E; font-size:12px; margin-left:8px; }
   .ind-repro{ font-size:11.5px; color:#8a5410; margin-top:3px; }
   .ind-desc{ max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ind-semana-form{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:6px; }
@@ -3782,7 +3785,7 @@
         </div>
         <div class="maq-table-wrap ind-tabla-wrap" style="margin-top:12px;">
           <table class="maq-table ind-tabla" id="ind-tabla-ordenes">
-            <thead><tr><th>Orden</th><th>Tipo</th><th>Unidad</th><th>Huerta</th><th>Descripción</th><th>Programada</th><th>Fecha de salida</th><th>Resultado</th></tr></thead>
+            <thead><tr><th>Orden</th><th>Unidad</th><th>Huerta</th><th>Descripción</th><th>Programada</th><th>Fecha de salida</th><th>Resultado</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -20027,8 +20030,6 @@ function indRenderDetalle_(codigo){
   caja.style.display = '';
   document.getElementById('ind-detalle-semana').textContent = sem.codigo + ' (' + indFecha_(sem.inicio) + ' al ' + indFecha_(sem.fin) + ')';
   const secciones = (IND_DATOS.secciones || []);
-  const nombreSeccion = {};
-  secciones.forEach(function(s){ nombreSeccion[s.clave] = s.nombre; });
   document.querySelector('#ind-tabla-secciones tbody').innerHTML = secciones.concat([{ clave: 'todas', nombre: 'Total' }]).map(function(s){
     const t = sem.totales[s.clave];
     return '<tr class="' + (s.clave === 'todas' ? 'ind-fila-total' : '') + '"><td>' + escapeHtml(s.nombre) + '</td>'
@@ -20037,17 +20038,38 @@ function indRenderDetalle_(codigo){
   }).join('');
   const seccion = document.getElementById('ind-f-seccion').value || 'todas';
   const ordenes = sem.detalle.filter(function(d){ return seccion === 'todas' || d.seccion === seccion; });
-  document.querySelector('#ind-tabla-ordenes tbody').innerHTML = ordenes.length ? ordenes.map(function(d){
+  document.querySelector('#ind-tabla-ordenes tbody').innerHTML = ordenes.length ? indHtmlOrdenesPorTipo_(ordenes, secciones, sem.totales) : '<tr><td colspan="7" class="maq-empty">No hay órdenes programadas de este tipo en esta semana.</td></tr>';
+  document.querySelectorAll('#ind-tabla-semanas tbody tr').forEach(function(tr){ tr.classList.toggle('ind-fila-activa', tr.dataset.semana === codigo); });
+}
+
+// Detalle orden por orden, SEPARADO por tipo de orden (petición de Carlos):
+// un encabezado por tipo con su resumen (programadas, cumplidas, %) y
+// debajo sus órdenes. Los tipos sin órdenes en la semana no se muestran.
+function indHtmlOrdenesPorTipo_(ordenes, secciones, totales){
+  const filaOrden = function(d){
     const res = IND_RESULTADOS[d.resultado] || { texto: d.resultado, cls: '' };
     const repro = d.reprogramadaA ? '<div class="ind-repro">Reprogramada al ' + indFecha_(d.reprogramadaA) + '</div>' : '';
-    return '<tr><td class="ind-folio">' + escapeHtml(d.orden) + '</td><td>' + escapeHtml(nombreSeccion[d.seccion] || d.seccion) + '</td>'
+    return '<tr><td class="ind-folio">' + escapeHtml(d.orden) + '</td>'
       + '<td>' + escapeHtml(d.unidad) + '</td><td>' + escapeHtml(d.huerta) + '</td>'
       + '<td class="ind-desc" title="' + escapeHtml(d.descripcion) + '">' + escapeHtml(d.descripcion) + '</td>'
       + '<td>' + d.fechasProgramadas.map(indFecha_).join(', ') + (d.origen === 'en_proceso' ? ' <span class="ind-sub">(en proceso)</span>' : '') + '</td>'
       + '<td>' + indFecha_(d.fechaSalida) + '</td>'
       + '<td><span class="ind-res ' + res.cls + '">' + res.texto + '</span>' + repro + '</td></tr>';
-  }).join('') : '<tr><td colspan="8" class="maq-empty">No hay órdenes programadas de este tipo en esta semana.</td></tr>';
-  document.querySelectorAll('#ind-tabla-semanas tbody tr').forEach(function(tr){ tr.classList.toggle('ind-fila-activa', tr.dataset.semana === codigo); });
+  };
+  const conocidas = {};
+  secciones.forEach(function(s){ conocidas[s.clave] = true; });
+  const grupos = secciones.slice();
+  // Por si llega un tipo que no está en la lista: se agrupa aparte.
+  ordenes.forEach(function(d){ if(!conocidas[d.seccion]){ conocidas[d.seccion] = true; grupos.push({ clave: d.seccion, nombre: d.seccion }); } });
+  return grupos.map(function(g){
+    const suyas = ordenes.filter(function(d){ return d.seccion === g.clave; });
+    if(!suyas.length) return '';
+    const t = (totales && totales[g.clave]) || null;
+    const resumen = t
+      ? ' <span class="ind-grupo-resumen">' + t.programadas + ' programada' + (t.programadas === 1 ? '' : 's') + ' · ' + t.cumplidas + ' cumplida' + (t.cumplidas === 1 ? '' : 's') + (t.porcentaje === null ? '' : ' · ' + t.porcentaje + '%') + '</span>'
+      : ' <span class="ind-grupo-resumen">' + suyas.length + ' orden' + (suyas.length === 1 ? '' : 'es') + '</span>';
+    return '<tr class="ind-grupo"><td colspan="7">' + escapeHtml(g.nombre) + resumen + '</td></tr>' + suyas.map(filaOrden).join('');
+  }).join('');
 }
 
 function indRenderCatalogo_(){

@@ -1215,6 +1215,26 @@
   .ind-btn-mini{ background:#fff; border:1px solid #bbb; border-radius:4px; padding:3px 9px; font-size:12px; cursor:pointer; color:#1c1c1c; }
   .ind-btn-mini.ind-btn-borrar{ color:#a5281c; border-color:#e0b4ae; }
   .ord-semana-chip{ display:inline-block; margin-top:4px; font-size:11.5px; border:1px solid #4c8dae; color:#4c8dae; background:transparent; border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
+
+  /* --- Panel sin internet --- */
+  .panel-aviso-conexion{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; background:#2F3234; border:1px solid var(--line); border-left:4px solid var(--steel); color:var(--text); border-radius:6px; padding:9px 12px; margin:10px 0; font-size:13px; line-height:1.4; }
+  .panel-aviso-conexion.sin-internet{ border-left-color:var(--amber); }
+  .panel-aviso-conexion.con-error{ border-left-color:var(--danger); }
+  .panel-aviso-punto{ width:9px; height:9px; border-radius:50%; background:var(--steel); flex-shrink:0; }
+  .panel-aviso-conexion.sin-internet .panel-aviso-punto{ background:var(--amber); }
+  .panel-aviso-conexion.con-error .panel-aviso-punto{ background:var(--danger); }
+  .panel-aviso-err{ color:#ff8a80; }
+  .panel-aviso-btn{ background:transparent; border:1px solid var(--amber); color:var(--amber); border-radius:4px; padding:3px 10px; font-size:12px; cursor:pointer; }
+  .panel-pend-item{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start; border:1px solid #e3e3e3; border-left:4px solid #4c8dae; border-radius:6px; padding:8px 10px; margin-bottom:8px; }
+  .panel-pend-item.err{ border-left-color:#c0392b; background:#fdf3f2; }
+  .panel-pend-meta{ color:#777; font-size:12px; margin-top:2px; }
+  .panel-pend-error{ color:#a5281c; font-size:12.5px; margin-top:4px; }
+  .panel-pend-acc{ display:flex; gap:6px; flex-shrink:0; }
+  .panel-pend-acc button{ background:#fff; border:1px solid #bbb; border-radius:4px; padding:3px 9px; font-size:12px; cursor:pointer; color:#1c1c1c; }
+  .panel-pend-acc button.descartar{ color:#a5281c; border-color:#e0b4ae; }
+  #panel-aviso-breve{ position:fixed; right:18px; bottom:18px; max-width:380px; background:#2F3234; color:var(--text); border:1px solid var(--line); border-left:4px solid var(--amber); border-radius:6px; padding:10px 14px; font-size:13px; box-shadow:0 6px 20px rgba(0,0,0,0.35); z-index:300; opacity:0; transform:translateY(10px); transition:opacity .2s, transform .2s; pointer-events:none; }
+  #panel-aviso-breve.show{ opacity:1; transform:none; }
+  .panel-pend-vacio{ color:#777; font-size:13px; padding:10px 0; }
 </style>
 </head>
 <body>
@@ -1251,6 +1271,15 @@
       </div>
     </header>
 
+    <div id="panel-aviso-conexion" class="panel-aviso-conexion" style="display:none;"></div>
+    <div class="maq-modal-overlay" id="panel-pendientes-overlay">
+      <div class="maq-modal maq-modal-wide">
+        <span class="maq-modal-close" id="panel-pendientes-close">&times;</span>
+        <h3 style="margin-top:0;">Cambios hechos sin internet</h3>
+        <p style="margin:0 0 10px; color:#555; font-size:13px;">Se envían solos, en este orden, en cuanto hay internet. Si el servidor rechazó alguno (por ejemplo, porque alguien ya lo cambió desde otra computadora), aquí aparece el motivo: puedes reintentarlo o descartarlo.</p>
+        <div id="panel-pendientes-lista"></div>
+      </div>
+    </div>
     <div class="panel-tabs">
       <div class="panel-tab active" id="ptab-ordenes">Órdenes</div>
       <div class="panel-tab" id="ptab-diesel">Combustible Agrícola</div>
@@ -3929,14 +3958,111 @@
 
 <script>
 // ============================================================
+// Panel SIN INTERNET (oct-2026, petición de Carlos: "una versión offline del
+// panel para la computadora", consultar Y capturar).
+//  - CONSULTAS (funciones get...): cada respuesta buena se guarda en esta
+//    computadora (IndexedDB 'rf-panel-cache'). Sin internet -- o si el
+//    servidor no contesta en PANEL_CACHE_ESPERA_MS -- se usa esa copia.
+//  - CAMBIOS (todo lo demás): si no hay internet, se guardan en una COLA en
+//    esta computadora (IndexedDB 'rf-panel-cola') y la pantalla sigue como
+//    si se hubiera guardado. En cuanto regresa el internet se mandan solos,
+//    en el mismo orden. Si el servidor rechaza alguno (p.ej. alguien ya
+//    cerró esa orden desde otra computadora), se queda marcado con el
+//    motivo en "Cambios pendientes" para revisarlo o descartarlo.
+//  - Lo que de plano necesita internet (leer fotos con IA, mandar
+//    solicitudes de cotización, subir el mapa...) avisa que se necesita
+//    conexión, en vez de quedarse en la cola.
+// ============================================================
+var PANEL_CACHE_ESPERA_MS = 8000;
+var PANEL_SOLO_EN_LINEA = {
+  interpretarRefaccionesFoto: true, interpretarRefaccionesTexto: true, leerBitacoraDiesel: true, leerTicketsGasolina: true,
+  crearSolicitudesCotizacion: true, reactivarSolicitudCotizacion: true, cancelarSolicitudCotizacion: true,
+  importarServiciosAutomotrices: true, guardarImagenMapaHuerta: true, validarUsuario: true,
+};
+function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
+function panelAbrirDb_(nombre, store, opciones){
+  var clave = '__db_' + nombre;
+  if(panelAbrirDb_[clave]) return panelAbrirDb_[clave];
+  panelAbrirDb_[clave] = new Promise(function(ok, mal){
+    if(!window.indexedDB){ mal(new Error('sin IndexedDB')); return; }
+    var req = indexedDB.open(nombre, 1);
+    req.onupgradeneeded = function(){ if(!req.result.objectStoreNames.contains(store)) req.result.createObjectStore(store, opciones); };
+    req.onsuccess = function(){ ok(req.result); };
+    req.onerror = function(){ panelAbrirDb_[clave] = null; mal(req.error); };
+  });
+  return panelAbrirDb_[clave];
+}
+function panelTx_(nombre, store, opciones, modo, fn){
+  return panelAbrirDb_(nombre, store, opciones).then(function(db){
+    return new Promise(function(ok, mal){
+      var tx = db.transaction(store, modo);
+      var caja = { valor: undefined };
+      try { fn(tx.objectStore(store), caja); } catch(e){ mal(e); return; }
+      tx.oncomplete = function(){ ok(caja.valor); };
+      tx.onerror = tx.onabort = function(){ mal(tx.error); };
+    });
+  });
+}
+// --- copia de consultas ---
+function panelCacheClave_(fn, args){
+  // La clave compartida del Panel no es parte de "qué se consultó".
+  var codigo = '';
+  try { codigo = ACCESS_CODE; } catch(e){}
+  var sinClave = (args || []).map(function(a, i){ return (i === 0 && typeof a === 'string' && codigo && a === codigo) ? '·' : a; });
+  return fn + '|' + JSON.stringify(sinClave);
+}
+function panelCacheGuardar_(clave, valor){
+  return panelTx_('rf-panel-cache', 'r', undefined, 'readwrite', function(st){ st.put({ valor: valor, guardado: Date.now() }, clave); }).catch(function(){});
+}
+function panelCacheLeer_(clave){
+  return panelTx_('rf-panel-cache', 'r', undefined, 'readonly', function(st, caja){ st.get(clave).onsuccess = function(e){ caja.valor = e.target.result || null; }; }).catch(function(){ return null; });
+}
+// --- cola de cambios ---
+var PANEL_COLA_OPC = { keyPath: 'id', autoIncrement: true };
+function panelColaAgregar_(fn, args){
+  return panelTx_('rf-panel-cola', 'ops', PANEL_COLA_OPC, 'readwrite', function(st, caja){
+    st.add({ fn: fn, args: args, creado: Date.now(), usuario: (typeof PANEL_USUARIO !== 'undefined' ? PANEL_USUARIO : ''), estado: 'pendiente', error: '' }).onsuccess = function(e){ caja.valor = e.target.result; };
+  });
+}
+function panelColaListar_(){
+  return panelTx_('rf-panel-cola', 'ops', PANEL_COLA_OPC, 'readonly', function(st, caja){ st.getAll().onsuccess = function(e){ caja.valor = e.target.result || []; }; }).catch(function(){ return []; });
+}
+function panelColaGuardar_(op){
+  return panelTx_('rf-panel-cola', 'ops', PANEL_COLA_OPC, 'readwrite', function(st){ st.put(op); });
+}
+function panelColaBorrar_(id){
+  return panelTx_('rf-panel-cola', 'ops', PANEL_COLA_OPC, 'readwrite', function(st){ st.delete(id); });
+}
+var PANEL_HAY_PENDIENTES = false; // para no adelantar cambios nuevos a los que ya están en la cola
+// ============================================================
+
+// ============================================================
 // Shim de compatibilidad: reemplaza google.script.run por llamadas
 // fetch() al servidor local (Node.js), SIN tocar el resto del código
 // de este archivo. El resto del archivo sigue usando exactamente el
 // mismo patrón:
 //   google.script.run.withSuccessHandler(cb).withFailureHandler(cb).nombreFuncion(args)
 // y aquí simplemente lo traducimos a: POST /api/nombreFuncion  { args: [...] }
+// (con la copia de consultas y la cola de cambios de arriba).
 (function () {
   const API_BASE = '/api';
+
+  function llamarServidor(prop, args) {
+    return fetch(`${API_BASE}/${prop}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args }),
+    }).then(async (res) => {
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const err = new Error((data && data.error) || ('Error HTTP ' + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    });
+  }
+  window.panelLlamarServidor_ = llamarServidor;
 
   function crearRunner(successCb, failCb) {
     return new Proxy(
@@ -3952,26 +4078,73 @@
           // Cualquier otro nombre de propiedad se trata como el nombre de la
           // función a invocar en el servidor (igual que google.script.run).
           return function (...args) {
-            fetch(`${API_BASE}/${prop}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ args }),
-            })
-              .then(async (res) => {
-                const data = await res.json().catch(() => null);
-                if (!res.ok) {
-                  const err = new Error((data && data.error) || ('Error HTTP ' + res.status));
-                  throw err;
-                }
-                return data;
-              })
-              .then((data) => {
-                if (successCb) successCb(data);
-              })
-              .catch((err) => {
-                if (failCb) failCb(err);
-                else console.error(err);
+            const entregar = (data) => {
+              if (successCb) {
+                try { successCb(data); } catch (e) { console.error('[' + prop + '] error en la pantalla al procesar la respuesta:', e); }
+              }
+            };
+            const fallar = (err) => { if (failCb) failCb(err); else console.error(err); };
+            const sinRespuesta = (err) => !(err && err.status); // no hubo respuesta del servidor (sin internet)
+
+            if (panelEsConsulta_(prop)) {
+              const clave = panelCacheClave_(prop, args);
+              let resuelto = false;
+              const usarCopia = () => panelCacheLeer_(clave).then((copia) => {
+                if (resuelto || !copia) return !!(copia && resuelto);
+                resuelto = true;
+                panelMarcarDatosGuardados_(copia.guardado);
+                entregar(copia.valor);
+                return true;
               });
+              if (navigator.onLine === false) {
+                usarCopia().then((ok) => {
+                  if (!ok && !resuelto) { resuelto = true; const e = new Error('Sin internet y esta información no está guardada en esta computadora (ábrela una vez con internet).'); e.sinInternet = true; fallar(e); }
+                });
+                return;
+              }
+              const timer = setTimeout(() => { usarCopia(); }, PANEL_CACHE_ESPERA_MS);
+              llamarServidor(prop, args).then((data) => {
+                clearTimeout(timer);
+                panelCacheGuardar_(clave, data);
+                if (!resuelto) { resuelto = true; entregar(data); }
+              }, (err) => {
+                clearTimeout(timer);
+                if (resuelto) return;
+                if (err && err.status && err.status < 500) { resuelto = true; fallar(err); return; }
+                usarCopia().then((ok) => { if (!ok && !resuelto) { resuelto = true; fallar(err); } });
+              });
+              return;
+            }
+
+            // --- Cambios ---
+            const encolar = () => panelColaAgregar_(prop, args).then(() => {
+              PANEL_HAY_PENDIENTES = true;
+              panelActualizarAvisoConexion_();
+              panelAvisoBreve_('Sin internet: el cambio quedó guardado en esta computadora y se enviará solo al regresar la conexión.');
+              entregar({ success: true, enCola: true });
+            }, () => {
+              const e = new Error('Sin internet y no se pudo guardar el cambio en esta computadora.');
+              e.sinInternet = true;
+              fallar(e);
+            });
+            if (PANEL_SOLO_EN_LINEA[prop]) {
+              if (navigator.onLine === false) { const e = new Error('Esto necesita internet. Inténtalo cuando haya conexión.'); e.sinInternet = true; fallar(e); return; }
+              llamarServidor(prop, args).then(entregar, (err) => {
+                if (sinRespuesta(err)) { const e = new Error('Esto necesita internet. Inténtalo cuando haya conexión.'); e.sinInternet = true; fallar(e); return; }
+                fallar(err);
+              });
+              return;
+            }
+            // Sin internet, o con cambios todavía en la cola (para respetar el orden): a la cola.
+            if (navigator.onLine === false || PANEL_HAY_PENDIENTES) {
+              encolar();
+              if (navigator.onLine !== false) panelEnviarPendientes_();
+              return;
+            }
+            llamarServidor(prop, args).then(entregar, (err) => {
+              if (sinRespuesta(err)) { encolar(); return; } // se cayó el internet a medio camino
+              fallar(err);
+            });
           };
         },
       }
@@ -20362,6 +20535,157 @@ document.getElementById('ord-semana-guardar').addEventListener('click', function
     .withFailureHandler(function(){ btn.disabled = false; status.textContent = 'Error al guardar.'; status.className = 'maq-modal-status err'; })
     .marcarOrdenEnProceso(ACCESS_CODE, PANEL_USUARIO, orden, semana);
 });
+
+
+// ---------------------------------------------------------------
+// Panel SIN INTERNET: aviso de conexión, envío de la cola de cambios y
+// la ventana "Cambios pendientes" (ver la capa del principio de este
+// script: panelColaAgregar_, panelCacheLeer_, etc.).
+// ---------------------------------------------------------------
+var PANEL_ENVIANDO = false;
+var PANEL_DATOS_GUARDADOS_DESDE = null; // hora de la copia más vieja que se está mostrando
+var PANEL_ENVIADOS_RECIENTES = 0;
+const PANEL_ETIQUETAS_CAMBIO = {
+  actualizarOrden: 'Orden: fecha / datos de atención', editarOrden: 'Editar orden', marcarOrdenEnProceso: 'Marcar orden en proceso',
+  crearOrdenPanel: 'Nueva orden', eliminarOrden: 'Eliminar orden', guardarOrdPendAtencionDias: 'Días de atención',
+  crearCargaDieselPanel: 'Nueva carga de diesel', editarCargaDiesel: 'Editar carga de diesel', eliminarCargaDiesel: 'Eliminar carga de diesel',
+  guardarCargasDieselLote: 'Cargas de diesel (lote)', crearCargaGasolinaPanel: 'Nueva carga de gasolina', editarCargaGasolina: 'Editar carga de gasolina',
+  eliminarCargaGasolina: 'Eliminar carga de gasolina', guardarCargasGasolinaLote: 'Cargas de gasolina (lote)',
+  crearMovimientoPanel: 'Nuevo movimiento', editarMovimiento: 'Editar movimiento', eliminarMovimiento: 'Eliminar movimiento',
+  guardarMaquinaria: 'Guardar equipo', eliminarMaquinaria: 'Eliminar equipo', guardarRefaccion: 'Guardar refacción', guardarInsumo: 'Guardar insumo',
+  marcarRefaccionNecesariaEntregada: 'Refacción entregada', marcarRefaccionNecesariaPendiente: 'Refacción pendiente',
+  guardarUsuario: 'Guardar usuario', guardarSemana: 'Guardar semana', eliminarSemana: 'Eliminar semana',
+  guardarCuadroHuerta: 'Guardar cuadro', guardarActividadHuerta: 'Guardar actividad', actualizarSurcosCuadro: 'Surcos del cuadro',
+};
+function panelDescribirCambio_(op){
+  const nombre = PANEL_ETIQUETAS_CAMBIO[op.fn] || op.fn.replace(/([A-Z])/g, ' $1').replace(/^./, function(c){ return c.toUpperCase(); });
+  // Lo que identifica al registro (folio de orden, etc.) suele ir después de la clave y el usuario.
+  const ref = (op.args || []).slice(2).find(function(a){ return typeof a === 'string' && a.length && a.length < 40; });
+  return nombre + (ref ? ' — ' + ref : '');
+}
+function panelFechaHora_(ms){
+  if(!ms) return '';
+  const d = new Date(ms);
+  return d.toLocaleDateString('es-MX') + ' ' + d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+}
+// Aviso flotante breve (abajo a la derecha).
+function panelAvisoBreve_(texto){
+  let el = document.getElementById('panel-aviso-breve');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'panel-aviso-breve';
+    document.body.appendChild(el);
+  }
+  el.textContent = texto;
+  el.classList.add('show');
+  clearTimeout(panelAvisoBreve_.timer);
+  panelAvisoBreve_.timer = setTimeout(function(){ el.classList.remove('show'); }, 5000);
+}
+function panelMarcarDatosGuardados_(ms){
+  if(!ms) return;
+  if(!PANEL_DATOS_GUARDADOS_DESDE || ms < PANEL_DATOS_GUARDADOS_DESDE) PANEL_DATOS_GUARDADOS_DESDE = ms;
+  panelActualizarAvisoConexion_();
+}
+
+function panelActualizarAvisoConexion_(){
+  const aviso = document.getElementById('panel-aviso-conexion');
+  if(!aviso) return Promise.resolve();
+  return panelColaListar_().then(function(ops){
+    const pendientes = ops.filter(function(o){ return o.estado === 'pendiente'; }).length;
+    const conError = ops.filter(function(o){ return o.estado === 'error'; }).length;
+    PANEL_HAY_PENDIENTES = pendientes > 0;
+    const sinInternet = navigator.onLine === false;
+    const partes = [];
+    if(sinInternet){
+      partes.push('<strong>Sin internet.</strong> ' + (PANEL_DATOS_GUARDADOS_DESDE ? 'Mostrando la información guardada en esta computadora (del ' + escapeHtml(panelFechaHora_(PANEL_DATOS_GUARDADOS_DESDE)) + ').' : 'Mostrando la información guardada en esta computadora.') + ' Puedes seguir capturando: se envía sola al regresar el internet.');
+    }
+    if(pendientes) partes.push('<strong>' + pendientes + ' cambio' + (pendientes === 1 ? '' : 's') + ' por enviar</strong>' + (sinInternet ? '' : ' (enviando...)'));
+    if(conError) partes.push('<strong class="panel-aviso-err">' + conError + ' cambio' + (conError === 1 ? '' : 's') + ' no se pudo guardar</strong>');
+    if(PANEL_ENVIADOS_RECIENTES && !pendientes && !sinInternet){
+      partes.push('Se enviaron ' + PANEL_ENVIADOS_RECIENTES + ' cambio' + (PANEL_ENVIADOS_RECIENTES === 1 ? '' : 's') + ' que se hicieron sin internet. <button type="button" class="panel-aviso-btn" id="panel-aviso-recargar">Actualizar datos</button>');
+    }
+    if(!partes.length){ aviso.style.display = 'none'; aviso.innerHTML = ''; return; }
+    aviso.className = 'panel-aviso-conexion' + (sinInternet ? ' sin-internet' : '') + (conError ? ' con-error' : '');
+    aviso.innerHTML = '<span class="panel-aviso-punto"></span><span>' + partes.join(' · ') + '</span>'
+      + ((pendientes || conError) ? ' <button type="button" class="panel-aviso-btn" id="panel-aviso-ver">Ver cambios pendientes</button>' : '');
+    aviso.style.display = '';
+  });
+}
+
+// Manda la cola en orden. Sin internet se detiene y se reintenta después.
+function panelEnviarPendientes_(){
+  if(PANEL_ENVIANDO || navigator.onLine === false) return Promise.resolve(false);
+  PANEL_ENVIANDO = true;
+  let enviados = 0;
+  return panelColaListar_().then(function(ops){
+    const lista = ops.filter(function(o){ return o.estado === 'pendiente'; }).sort(function(a, b){ return a.id - b.id; });
+    return lista.reduce(function(cadena, op){
+      return cadena.then(function(seguir){
+        if(!seguir) return false;
+        return panelLlamarServidor_(op.fn, op.args).then(function(r){
+          if(r && r.success === false){
+            op.estado = 'error'; op.error = r.error || 'El servidor no lo aceptó.';
+            return panelColaGuardar_(op).then(function(){ return true; });
+          }
+          enviados++;
+          return panelColaBorrar_(op.id).then(function(){ return true; });
+        }, function(err){
+          if(!(err && err.status) || err.status >= 500) return false; // sin internet o servidor caído: luego
+          op.estado = 'error'; op.error = err.message || 'El servidor no lo aceptó.';
+          return panelColaGuardar_(op).then(function(){ return true; });
+        });
+      });
+    }, Promise.resolve(true));
+  }).catch(function(){}).then(function(){
+    PANEL_ENVIANDO = false;
+    if(enviados) PANEL_ENVIADOS_RECIENTES += enviados;
+    return panelActualizarAvisoConexion_().then(function(){ return enviados; });
+  });
+}
+
+function panelAbrirPendientes_(){
+  const overlay = document.getElementById('panel-pendientes-overlay');
+  const lista = document.getElementById('panel-pendientes-lista');
+  panelColaListar_().then(function(ops){
+    ops.sort(function(a, b){ return a.id - b.id; });
+    lista.innerHTML = ops.length ? ops.map(function(o){
+      return '<div class="panel-pend-item' + (o.estado === 'error' ? ' err' : '') + '" data-id="' + o.id + '">'
+        + '<div class="panel-pend-txt"><strong>' + escapeHtml(panelDescribirCambio_(o)) + '</strong>'
+        + '<div class="panel-pend-meta">' + escapeHtml(panelFechaHora_(o.creado)) + (o.usuario ? ' · ' + escapeHtml(o.usuario) : '') + ' · ' + (o.estado === 'error' ? 'No se pudo guardar' : 'Por enviar') + '</div>'
+        + (o.error ? '<div class="panel-pend-error">' + escapeHtml(o.error) + '</div>' : '') + '</div>'
+        + '<div class="panel-pend-acc">' + (o.estado === 'error' ? '<button type="button" data-acc="reintentar">Reintentar</button>' : '')
+        + '<button type="button" data-acc="descartar" class="descartar">Descartar</button></div></div>';
+    }).join('') : '<div class="panel-pend-vacio">No hay cambios pendientes.</div>';
+    overlay.classList.add('open');
+  });
+}
+
+document.addEventListener('click', function(ev){
+  if(ev.target && ev.target.id === 'panel-aviso-ver'){ panelAbrirPendientes_(); return; }
+  if(ev.target && ev.target.id === 'panel-aviso-recargar'){ location.reload(); return; }
+  if(ev.target && ev.target.id === 'panel-pendientes-close'){ document.getElementById('panel-pendientes-overlay').classList.remove('open'); return; }
+  const btn = ev.target && ev.target.closest && ev.target.closest('#panel-pendientes-lista button[data-acc]');
+  if(!btn) return;
+  const id = Number(btn.closest('[data-id]').dataset.id);
+  panelColaListar_().then(function(ops){
+    const op = ops.find(function(o){ return o.id === id; });
+    if(!op) return;
+    if(btn.dataset.acc === 'descartar'){
+      if(!confirm('¿Descartar este cambio? No se va a guardar.\n\n' + panelDescribirCambio_(op))) return;
+      return panelColaBorrar_(id);
+    }
+    op.estado = 'pendiente'; op.error = '';
+    return panelColaGuardar_(op);
+  }).then(function(){ return panelActualizarAvisoConexion_(); }).then(function(){ panelAbrirPendientes_(); panelEnviarPendientes_(); });
+});
+window.addEventListener('online', function(){ panelActualizarAvisoConexion_(); panelEnviarPendientes_(); });
+window.addEventListener('offline', function(){ panelActualizarAvisoConexion_(); });
+window.addEventListener('load', function(){ setTimeout(function(){ panelActualizarAvisoConexion_(); panelEnviarPendientes_(); }, 1500); });
+setInterval(function(){ if(PANEL_HAY_PENDIENTES) panelEnviarPendientes_(); }, 30000);
+// Guarda una copia de esta pantalla para abrirla sin internet (ver /sw.js).
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){ /* no es crítico */ }); });
+}
 
 </script>
 </body>

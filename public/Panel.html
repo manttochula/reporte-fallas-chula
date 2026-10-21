@@ -3761,6 +3761,8 @@
           </select>
         </div>
         <button class="export-btn" id="ind-btn-actualizar">Actualizar</button>
+        <button class="export-btn" id="ind-btn-pdf" title="Exporta la tabla por semana y, si tienes abierta una semana, su detalle separado por tipo de orden.">Exportar PDF</button>
+        <button class="export-btn" id="ind-btn-excel" title="Exporta la tabla por semana y, si tienes abierta una semana, su detalle separado por tipo de orden.">Exportar Excel</button>
       </div>
       <div class="ind-status" id="ind-status"></div>
       <div class="ind-tarjeta">
@@ -20180,6 +20182,124 @@ ptabIndicadores.addEventListener('click', function(){
     INDICADORES_CARGADOS = true;
     indCargarSemanas_(function(){ indSugerirSiguienteSemana_(); indCargarIndicador_(); });
   }
+});
+
+// ---------------------------------------------------------------
+// Exportar Indicadores a PDF / Excel (petición de Carlos): lo mismo que se
+// ve en pantalla -- tabla por semana (con el filtro de tipo de orden) y,
+// si hay una semana abierta, su resumen por tipo y sus órdenes separadas
+// por tipo. Usa /export/pdf-simple y /export/excel (mismo formato de
+// secciones). En Excel los números y el % quedan como números reales.
+// ---------------------------------------------------------------
+function indArmarExportacion_(paraPdf){
+  if(!IND_DATOS || !IND_DATOS.semanas || !IND_DATOS.semanas.length) return null;
+  const seccionSel = document.getElementById('ind-f-seccion').value || 'todas';
+  const secciones = IND_DATOS.secciones || [];
+  const nombreTipo = { todas: 'Todas' };
+  secciones.forEach(function(s){ nombreTipo[s.clave] = s.nombre; });
+  const pct = function(p){
+    if(p === null || p === undefined) return paraPdf ? '—' : null;
+    return paraPdf ? (p + '%') : (p / 100);
+  };
+  const num = { width: 11, align: 'right', numFmt: '0' };
+  const colPct = { header: '% Cumplimiento', key: 'pct', width: 13, align: 'right', numFmt: '0.00%' };
+  const semanasOrden = IND_DATOS.semanas.slice().reverse();
+  const primera = IND_DATOS.semanas[0], ultima = IND_DATOS.semanas[IND_DATOS.semanas.length - 1];
+  const suma = { programadas: 0, cumplidas: 0, cerradasAntes: 0, cerradasDespues: 0, pendientes: 0, reprogramadas: 0 };
+  const filasSemanas = semanasOrden.map(function(s){
+    const t = s.totales[seccionSel] || s.totales.todas;
+    Object.keys(suma).forEach(function(k){ suma[k] += t[k] || 0; });
+    return { semana: s.codigo, fechas: paraPdf ? (indFechaCorta_(s.inicio) + ' al ' + indFechaCorta_(s.fin)) : (indFecha_(s.inicio) + ' al ' + indFecha_(s.fin)), programadas: t.programadas, cumplidas: t.cumplidas, pct: pct(t.porcentaje),
+      antes: t.cerradasAntes, despues: t.cerradasDespues, pendientes: t.pendientes, reprogramadas: t.reprogramadas };
+  });
+  const pctTotal = suma.programadas ? Math.round(suma.cumplidas / suma.programadas * 10000) / 100 : null;
+  const out = [{
+    titulo: 'Por semana — tipo de orden: ' + nombreTipo[seccionSel],
+    conteoTexto: semanasOrden.length + ' semanas · ' + (pctTotal === null ? 'sin programadas' : pctTotal + '% en el rango'),
+    columnas: [
+      { header: 'Semana', key: 'semana', width: 9 },
+      { header: 'Fechas', key: 'fechas', width: 16 },
+      Object.assign({}, num, { header: 'Programadas', key: 'programadas', width: 13 }),
+      Object.assign({}, num, { header: 'Cumplidas', key: 'cumplidas', width: 12 }),
+      colPct,
+      Object.assign({}, num, { header: 'Cerradas antes', key: 'antes', width: 12 }),
+      Object.assign({}, num, { header: 'Cerradas después', key: 'despues', width: 12 }),
+      Object.assign({}, num, { header: 'Sin cerrar', key: 'pendientes', width: 11 }),
+      Object.assign({}, num, { header: 'Reprogramadas', key: 'reprogramadas', width: 15 }),
+    ],
+    filas: filasSemanas,
+    filaTotal: { semana: 'TOTAL', fechas: '', programadas: suma.programadas, cumplidas: suma.cumplidas, pct: pct(pctTotal),
+      antes: suma.cerradasAntes, despues: suma.cerradasDespues, pendientes: suma.pendientes, reprogramadas: suma.reprogramadas },
+  }];
+  const sem = IND_SEMANA_DETALLE && IND_DATOS.semanas.find(function(x){ return x.codigo === IND_SEMANA_DETALLE; });
+  if(sem){
+    out.push({
+      titulo: 'Semana ' + sem.codigo + ' (' + indFecha_(sem.inicio) + ' al ' + indFecha_(sem.fin) + ') — por tipo de orden',
+      conteoTexto: sem.totales.todas.programadas + ' programadas',
+      columnas: [
+        { header: 'Tipo de orden', key: 'tipo', width: 24 },
+        Object.assign({ header: 'Programadas', key: 'programadas' }, num),
+        Object.assign({ header: 'Cumplidas', key: 'cumplidas' }, num),
+        colPct,
+        Object.assign({ header: 'Cerradas antes', key: 'antes' }, num),
+        Object.assign({ header: 'Cerradas después', key: 'despues' }, num),
+        Object.assign({ header: 'Sin cerrar', key: 'pendientes' }, num),
+      ],
+      filas: secciones.map(function(sc){
+        const t = sem.totales[sc.clave];
+        return { tipo: sc.nombre, programadas: t.programadas, cumplidas: t.cumplidas, pct: pct(t.porcentaje), antes: t.cerradasAntes, despues: t.cerradasDespues, pendientes: t.pendientes };
+      }),
+      filaTotal: (function(t){ return { tipo: 'TOTAL', programadas: t.programadas, cumplidas: t.cumplidas, pct: pct(t.porcentaje), antes: t.cerradasAntes, despues: t.cerradasDespues, pendientes: t.pendientes }; })(sem.totales.todas),
+    });
+    const colsOrdenes = [
+      { header: 'Orden', key: 'orden', width: 11 },
+      { header: 'Unidad', key: 'unidad', width: 17 },
+      { header: 'Huerta', key: 'huerta', width: 14 },
+      { header: 'Descripción', key: 'descripcion', width: 34, wrap: true },
+      { header: 'Programada', key: 'programada', width: 12 },
+      { header: 'Fecha de salida', key: 'salida', width: 12 },
+      { header: 'Resultado', key: 'resultado', width: 22, wrap: true },
+    ];
+    secciones.forEach(function(sc){
+      if(seccionSel !== 'todas' && sc.clave !== seccionSel) return;
+      const suyas = sem.detalle.filter(function(d){ return d.seccion === sc.clave; });
+      if(!suyas.length) return;
+      const t = sem.totales[sc.clave];
+      out.push({
+        titulo: sem.codigo + ' · ' + sc.nombre,
+        conteoTexto: t.programadas + ' programada' + (t.programadas === 1 ? '' : 's') + ' · ' + t.cumplidas + ' cumplida' + (t.cumplidas === 1 ? '' : 's') + (t.porcentaje === null ? '' : ' · ' + t.porcentaje + '%'),
+        columnas: colsOrdenes,
+        filas: suyas.map(function(d){
+          const res = IND_RESULTADOS[d.resultado] || { texto: d.resultado };
+          return {
+            orden: d.orden, unidad: d.unidad, huerta: d.huerta, descripcion: d.descripcion,
+            programada: d.fechasProgramadas.map(indFecha_).join(', ') + (d.origen === 'en_proceso' ? ' (en proceso)' : ''),
+            salida: d.fechaSalida ? indFecha_(d.fechaSalida) : '—',
+            resultado: res.texto + (d.reprogramadaA ? ' · reprogramada al ' + indFecha_(d.reprogramadaA) : ''),
+          };
+        }),
+      });
+    });
+  }
+  const hoy = new Date();
+  return {
+    titulo: 'Cumplimiento de programación semanal',
+    subtitulo: primera.codigo + ' a ' + ultima.codigo + ' · Tipo de orden: ' + nombreTipo[seccionSel]
+      + ' · Cumplida = cerrada dentro de su semana; las cerradas antes de su semana se cuentan aparte. Generado el '
+      + hoy.toLocaleDateString('es-MX') + ' por ' + (PANEL_USUARIO || ''),
+    secciones: out,
+    nombreArchivo: 'indicador_cumplimiento_' + primera.codigo + '_a_' + ultima.codigo + (sem ? '_detalle_' + sem.codigo : ''),
+  };
+}
+document.getElementById('ind-btn-pdf').addEventListener('click', function(){
+  const e = indArmarExportacion_(true);
+  if(!e){ alert('Primero carga el indicador.'); return; }
+  descargarComoPdfSimple_(e.titulo, e.subtitulo, e.secciones, e.nombreArchivo);
+});
+document.getElementById('ind-btn-excel').addEventListener('click', function(){
+  const e = indArmarExportacion_(false);
+  if(!e){ alert('Primero carga el indicador.'); return; }
+  descargarComoExcel_(e.titulo, e.subtitulo, e.secciones, e.nombreArchivo);
 });
 
 // ---------------------------------------------------------------

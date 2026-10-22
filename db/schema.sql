@@ -2804,3 +2804,18 @@ CREATE TABLE IF NOT EXISTS push_suscripciones (
   ultimo_envio  DATETIME DEFAULT NULL,
   UNIQUE KEY uq_push_endpoint (endpoint(700))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- avance_huerta.ancla_en (oct-2026): hora del punto "ancla" (ver ancla_lat).
+-- Sirve para no acreditar avance de cuadros a un brinco del GPS (un tramo
+-- que implicaría ir a más de 54 km/h desde el ancla). Ver
+-- marcarCuadrosCompletadosPorPunto_ en server/handlers.js.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'avance_huerta' AND column_name = 'ancla_en'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE avance_huerta ADD COLUMN ancla_en DATETIME DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

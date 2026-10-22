@@ -5395,6 +5395,20 @@ function normalizarTrabajoAvance_(trabajo) {
   return (m ? m[1].trim() : t) || null;
 }
 
+// ¿El recorrido es de ESTA actividad? (oct-2026, Carlos: "me marca completa
+// la canalera en el cuadro 05 cuando viendo en el avance de canalera no
+// aparece completado ese cuadro"). Antes cualquier recorrido -- una PRIMERA
+// RASTRA, un DESVARE -- sumaba pasadas a TODAS las actividades pendientes
+// del cuadro por el que pasaba. Ahora un recorrido solo cuenta para la
+// actividad que el operador eligió al iniciarlo (sin importar mayúsculas ni
+// el "CUADRO X —" de la app vieja). Un recorrido sin actividad no cuenta
+// para ninguna.
+function mismoTrabajoAvance_(trabajoRecorrido, trabajoActividad) {
+  const a = normalizarTrabajoAvance_(trabajoRecorrido);
+  const b = normalizarTrabajoAvance_(trabajoActividad);
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+}
+
 async function iniciarAvance(huerta, nombre, trabajo, porcentaje, codigoUnidad) {
   const nombreHuerta = (huerta || '').toString().trim();
   const nombrePersona = (nombre || '').toString().trim();
@@ -5451,7 +5465,7 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   if (!id || typeof lat !== 'number' || typeof lng !== 'number' || Number.isNaN(lat) || Number.isNaN(lng)) {
     return { success: false, error: 'Datos de ubicación inválidos.' };
   }
-  const [rows] = await pool.query('SELECT huerta, fecha_fin, nombre, codigo_unidad FROM avance_huerta WHERE id = ?', [id]);
+  const [rows] = await pool.query('SELECT huerta, fecha_fin, nombre, codigo_unidad, trabajo FROM avance_huerta WHERE id = ?', [id]);
   if (rows.length === 0 || rows[0].fecha_fin !== null) {
     return { success: false, error: 'Este registro de avance ya no está abierto.' };
   }
@@ -5462,7 +5476,7 @@ async function agregarPuntoAvance(avanceId, lat, lng) {
   // guardado del punto GPS en sí, que es lo importante de esta llamada.
   let actividadesCompletadas = [];
   try {
-    actividadesCompletadas = await marcarCuadrosCompletadosPorPunto_(rows[0].huerta, id, lat, lng, rows[0].nombre, rows[0].codigo_unidad);
+    actividadesCompletadas = await marcarCuadrosCompletadosPorPunto_(rows[0].huerta, id, lat, lng, rows[0].nombre, rows[0].codigo_unidad, Date.now(), rows[0].trabajo);
   } catch (err) {
     // Se deja constancia en el log del servidor (Render > Logs): si esto
     // falla, el avance de los cuadros deja de subir aunque el punto sí se
@@ -5511,7 +5525,7 @@ async function sincronizarAvance(sesion, puntos) {
     const [[lk]] = await con.query('SELECT GET_LOCK(?, 20) AS ok', [candado]);
     if (!lk || Number(lk.ok) !== 1) return { success: false, error: 'El recorrido se está guardando desde otro envío; se reintenta solo.' };
     conCandado = true;
-    const leer = () => pool.query('SELECT id, huerta, nombre, codigo_unidad, fecha_fin, ultimo_seq FROM avance_huerta WHERE id_local = ?', [idLocal]);
+    const leer = () => pool.query('SELECT id, huerta, nombre, codigo_unidad, trabajo, fecha_fin, ultimo_seq FROM avance_huerta WHERE id_local = ?', [idLocal]);
     let avisoInicio = false;
     let avisoFin = false;
     let [filas] = await leer();
@@ -5538,7 +5552,8 @@ async function sincronizarAvance(sesion, puntos) {
           [av.id, lat, lng, segundosDeMs_(p.t)]
         );
         try {
-          const nuevas = await marcarCuadrosCompletadosPorPunto_(av.huerta, av.id, lat, lng, av.nombre, av.codigo_unidad);
+          const tSeg = segundosDeMs_(p.t);
+          const nuevas = await marcarCuadrosCompletadosPorPunto_(av.huerta, av.id, lat, lng, av.nombre, av.codigo_unidad, tSeg === null ? Date.now() : tSeg * 1000, av.trabajo);
           completadas.push(...nuevas);
         } catch (err) {
           console.error('[sincronizarAvance] No se pudo acreditar avance (avance_id=' + av.id + '):', err.message);
@@ -6913,7 +6928,7 @@ function coincideConAsignado_(asignado, real) {
 // asignado -- si la actividad no tiene equipo y/o operador asignado, ese
 // lado no filtra (sigue contando cualquiera, como siempre). Ver
 // coincideConAsignado_ más abajo.
-async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, avanceNombre, avanceEquipo) {
+async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, avanceNombre, avanceEquipo, tPuntoMs, avanceTrabajo) {
   const actual = { lat, lng };
   const [cuadros] = await pool.query(
     `SELECT c.id, c.nombre AS cuadroNombre, c.poligono, c.surcos, c.direccion_surcos FROM huerta_cuadros c
@@ -6923,18 +6938,43 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
   );
   // El tramo se mide desde el "ancla" del recorrido (avance_huerta.ancla_*),
   // no desde el punto inmediato anterior: ver AVANCE_TRAMO_MINIMO_METROS.
-  const [anclas] = await pool.query('SELECT ancla_lat, ancla_lng FROM avance_huerta WHERE id = ?', [avanceId]);
+  const [anclas] = await pool.query('SELECT ancla_lat, ancla_lng, ancla_en FROM avance_huerta WHERE id = ?', [avanceId]);
   const anterior = (anclas.length && anclas[0].ancla_lat !== null)
     ? { lat: Number(anclas[0].ancla_lat), lng: Number(anclas[0].ancla_lng) }
     : null;
+  const tPunto = Number.isFinite(Number(tPuntoMs)) ? new Date(Number(tPuntoMs)) : new Date();
   const completadas = [];
+  const moverAncla = () => pool.query('UPDATE avance_huerta SET ancla_lat = ?, ancla_lng = ?, ancla_en = ? WHERE id = ?', [lat, lng, tPunto, avanceId]);
   if (!anterior) {
     // Primer punto de la sesión: queda como ancla, todavía no hay tramo.
-    await pool.query('UPDATE avance_huerta SET ancla_lat = ?, ancla_lng = ? WHERE id = ?', [lat, lng, avanceId]);
+    await moverAncla();
     return completadas;
   }
-  if (distanciaMetros_(anterior, actual) < AVANCE_TRAMO_MINIMO_METROS) return completadas;
-  await pool.query('UPDATE avance_huerta SET ancla_lat = ?, ancla_lng = ? WHERE id = ?', [lat, lng, avanceId]);
+  const distancia = distanciaMetros_(anterior, actual);
+  if (distancia < AVANCE_TRAMO_MINIMO_METROS) {
+    // Sigue cerca del ancla: solo se actualiza CUÁNDO se vio ahí por última
+    // vez (para medir bien la velocidad de un brinco; ver abajo).
+    await pool.query('UPDATE avance_huerta SET ancla_en = ? WHERE id = ? AND (ancla_en IS NULL OR ancla_en < ?)', [tPunto, avanceId, tPunto]);
+    return completadas;
+  }
+  // Brinco del GPS (oct-2026: el CUADRO 05, junto a las bodegas, se marcó
+  // "Completado" con los brincos ida y vuelta de la ubicación "de red"): un
+  // tramo que implicaría ir a más de VELOCIDAD_MAX_TRACTOR_MS NO suma avance.
+  // Mismo criterio que filtrarSaltosGps_ (que no se puede usar aquí porque
+  // se calcula punto por punto). Si el ancla es reciente (< 60 s) se ignora
+  // el punto y el ancla se queda en el último punto bueno; si ya pasó más
+  // tiempo (de verdad se movió, p.ej. tras un hueco sin señal), solo se
+  // reubica el ancla, sin acreditar ese tramo.
+  const anclaEn = anclas[0].ancla_en ? new Date(anclas[0].ancla_en) : null;
+  if (anclaEn && distancia > SALTO_GPS_MIN_METROS) {
+    const dt = (tPunto.getTime() - anclaEn.getTime()) / 1000;
+    if (dt <= 0 || distancia / dt > VELOCIDAD_MAX_TRACTOR_MS) {
+      if (dt < 60) return completadas;
+      await moverAncla();
+      return completadas;
+    }
+  }
+  await moverAncla();
   if (cuadros.length === 0) return completadas;
   for (const c of cuadros) {
     const poligono = parsearPoligono_(c.poligono);
@@ -6947,6 +6987,7 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
       [c.id]
     );
     for (const act of actividades) {
+      if (!mismoTrabajoAvance_(avanceTrabajo, act.trabajo)) continue; // solo la actividad de ESTE recorrido
       if (!coincideConAsignado_(act.equipo_codigo, avanceEquipo) || !coincideConAsignado_(act.operador_nombre, avanceNombre)) continue;
       const necesarias = pasadasNecesarias_(c.surcos, act.intervalo_surcos);
       const nuevasPasadas = (Number(act.avance_pasadas) || 0) + tramo.pasadas;
@@ -7008,7 +7049,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     const clave = (huerta || '').toString().trim().toLowerCase();
     if (sesionesPorHuerta[clave]) return sesionesPorHuerta[clave];
     const [sesiones] = await pool.query(
-      'SELECT id, nombre, codigo_unidad, fecha_inicio FROM avance_huerta WHERE LOWER(TRIM(huerta)) = ? ORDER BY fecha_inicio, id',
+      'SELECT id, nombre, codigo_unidad, trabajo, fecha_inicio FROM avance_huerta WHERE LOWER(TRIM(huerta)) = ? ORDER BY fecha_inicio, id',
       [clave]
     );
     const ids = sesiones.map((x) => x.id);
@@ -7039,6 +7080,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     let avanceIdCompleto = null;
     for (const ses of sesiones) {
       if (completadoEn) break;
+      if (!mismoTrabajoAvance_(ses.trabajo, a.trabajo)) continue; // solo recorridos de ESTA actividad
       if (!coincideConAsignado_(a.equipo_codigo, ses.codigo_unidad) || !coincideConAsignado_(a.operador_nombre, ses.nombre)) continue;
       for (const [pa, pb] of tramosDeRecorrido_(ses.puntos)) {
         if (pb.t < desde) continue;
@@ -8478,6 +8520,7 @@ module.exports = {
   avanceDeTramo_,
   pasadasNecesarias_,
   tramosDeRecorrido_,
+  mismoTrabajoAvance_,
   filtrarSaltosGps_,
   margenCompletado_,
   normalizarTrabajoAvance_,

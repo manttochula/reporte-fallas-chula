@@ -1216,6 +1216,24 @@
   .ind-btn-mini.ind-btn-borrar{ color:#a5281c; border-color:#e0b4ae; }
   .ord-semana-chip{ display:inline-block; margin-top:4px; font-size:11.5px; border:1px solid #4c8dae; color:#4c8dae; background:transparent; border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
 
+  /* --- Avisos de recorridos --- */
+  .avisos-intro{ color:#555; font-size:13px; margin:0 0 12px; line-height:1.45; }
+  .avisos-seccion{ border:1px solid #e3e3e3; border-radius:6px; padding:12px 14px; margin-bottom:12px; }
+  .avisos-titulo{ font-weight:700; font-size:14px; margin-bottom:6px; color:#1c1c1c; }
+  .avisos-estado{ font-size:13px; color:#444; margin-bottom:8px; }
+  .avisos-estado.ok{ color:#1e7b3a; }
+  .avisos-estado.err{ color:#a5281c; }
+  .avisos-acciones{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .avisos-btn{ width:auto !important; padding:8px 16px !important; margin:0 !important; }
+  .avisos-btn-sec{ background:#fff; border:1px solid #bbb; border-radius:4px; padding:7px 12px; font-size:13px; cursor:pointer; color:#1c1c1c; }
+  .avisos-btn-quitar{ color:#a5281c; border-color:#e0b4ae; }
+  .avisos-nota{ color:#777; font-size:12px; margin-top:8px; }
+  .avisos-pasos{ margin:4px 0 8px 18px; padding:0; font-size:13px; color:#333; line-height:1.5; }
+  .avisos-pasos code{ background:#f2f2f2; padding:1px 4px; border-radius:3px; }
+  .avisos-fila{ display:flex; gap:8px; flex-wrap:wrap; }
+  .avisos-fila input{ flex:1; min-width:220px; padding:8px; border:1px solid #ccc; border-radius:4px; font-size:13px; }
+  .avisos-chat{ display:flex; justify-content:space-between; align-items:center; gap:8px; border:1px solid #e3e3e3; border-radius:5px; padding:7px 10px; margin-top:8px; font-size:13px; }
+  .avisos-chat small{ color:#777; }
   /* --- Panel sin internet --- */
   .panel-chip-sin-internet{ display:block; margin-top:6px; font-size:11px; color:#7fc98f; letter-spacing:.3px; text-align:right; }
   .panel-aviso-conexion{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; background:#2F3234; border:1px solid var(--line); border-left:4px solid var(--steel); color:var(--text); border-radius:6px; padding:9px 12px; margin:10px 0; font-size:13px; line-height:1.4; }
@@ -1297,6 +1315,54 @@
       <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
       <div class="panel-tab" id="ptab-indicadores">Indicadores</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
+    </div>
+
+    <div class="maq-modal-overlay" id="avisos-overlay">
+      <div class="maq-modal" style="max-width:640px;">
+        <span class="maq-modal-close" id="avisos-close">&times;</span>
+        <h3 style="margin-top:0;">🔔 Avisos de recorridos</h3>
+        <p class="avisos-intro">Te avisa cuando un operador <strong>inicia</strong> o <strong>termina</strong> un recorrido de Avance de huerta: quién, con qué equipo, en qué huerta y actividad; al terminar, cuánto duró y los km. Si el celular estaba sin señal, el aviso llega en cuanto la recupera (y lo indica).</p>
+
+        <div class="avisos-seccion">
+          <div class="avisos-titulo">Notificaciones en este equipo</div>
+          <div class="avisos-estado" id="avisos-push-estado">Revisando...</div>
+          <div class="avisos-acciones">
+            <button type="button" class="maq-save-btn avisos-btn" id="avisos-push-activar">Activar en este equipo</button>
+            <button type="button" class="avisos-btn-sec" id="avisos-push-probar" style="display:none;">Enviar prueba</button>
+            <button type="button" class="avisos-btn-sec avisos-btn-quitar" id="avisos-push-desactivar" style="display:none;">Desactivar</button>
+          </div>
+          <div class="avisos-nota">Actívalo en cada computadora o celular donde quieras recibirlo (con el Panel instalado llega aunque esté cerrado).</div>
+        </div>
+
+        <div class="avisos-seccion">
+          <div class="avisos-titulo">Telegram</div>
+          <div class="avisos-estado" id="avisos-tg-estado">Revisando...</div>
+          <div id="avisos-tg-paso-token" style="display:none;">
+            <ol class="avisos-pasos">
+              <li>En Telegram abre <strong>@BotFather</strong>, escribe <code>/newbot</code> y sigue los pasos (nombre del bot, p.ej. "Avisos Chula").</li>
+              <li>Te da un <strong>token</strong> (se ve como <code>123456789:AAH...</code>). Pégalo aquí:</li>
+            </ol>
+            <div class="avisos-fila">
+              <input type="password" id="avisos-tg-token" placeholder="Token del bot" autocomplete="off">
+              <button type="button" class="maq-save-btn avisos-btn" id="avisos-tg-guardar-token">Guardar token</button>
+            </div>
+          </div>
+          <div id="avisos-tg-paso-chat" style="display:none;">
+            <ol class="avisos-pasos" start="3">
+              <li>Abre tu bot <strong id="avisos-tg-bot"></strong> en Telegram y mándale cualquier mensaje (p.ej. "hola"). Si quieres los avisos en un <strong>grupo</strong>, agrega el bot al grupo y escribe algo ahí.</li>
+              <li>Luego presiona:</li>
+            </ol>
+            <button type="button" class="maq-save-btn avisos-btn" id="avisos-tg-buscar">Buscar chats</button>
+            <div id="avisos-tg-chats"></div>
+          </div>
+          <div class="avisos-acciones" id="avisos-tg-acciones" style="display:none;">
+            <button type="button" class="avisos-btn-sec" id="avisos-tg-probar">Enviar prueba</button>
+            <button type="button" class="avisos-btn-sec" id="avisos-tg-cambiar">Cambiar chat</button>
+            <button type="button" class="avisos-btn-sec avisos-btn-quitar" id="avisos-tg-quitar">Quitar Telegram</button>
+          </div>
+        </div>
+        <div class="maq-modal-status" id="avisos-status"></div>
+      </div>
     </div>
 
     <div class="maq-modal-overlay" id="ord-semana-overlay">
@@ -3494,6 +3560,7 @@
       <div class="toolbar">
         <select id="ah-f-huerta"><option value="" disabled selected>Selecciona una huerta</option></select>
         <button class="export-btn" id="ah-btn-actualizar">Actualizar</button>
+        <button class="export-btn" id="ah-btn-avisos" title="Recibe un aviso cuando un operador inicia o termina un recorrido">🔔 Avisos de recorridos</button>
       </div>
       <div id="ah-sin-huerta" class="avance-aviso">Selecciona una huerta para ver su mapa de avance.</div>
       <div id="ah-cargando" class="avance-aviso" style="display:none;">Cargando...</div>
@@ -3980,6 +4047,8 @@ var PANEL_SOLO_EN_LINEA = {
   interpretarRefaccionesFoto: true, interpretarRefaccionesTexto: true, leerBitacoraDiesel: true, leerTicketsGasolina: true,
   crearSolicitudesCotizacion: true, reactivarSolicitudCotizacion: true, cancelarSolicitudCotizacion: true,
   importarServiciosAutomotrices: true, guardarImagenMapaHuerta: true, validarUsuario: true,
+  guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
+  buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -20538,6 +20607,235 @@ document.getElementById('ord-semana-guardar').addEventListener('click', function
     .marcarOrdenEnProceso(ACCESS_CODE, PANEL_USUARIO, orden, semana);
 });
 
+
+// ---------------------------------------------------------------
+// Avisos de recorridos (oct-2026, Carlos: "mándame un aviso cuando inicien
+// y terminen recorrido", por el Panel y por Telegram). Ver server/avisos.js
+// y el 'push' de /sw.js.
+// ---------------------------------------------------------------
+function avisosLlamar_(fn){
+  const args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function(ok, mal){
+    const run = google.script.run.withSuccessHandler(function(r){
+      if(r && r.success === false){ mal(new Error(r.error || 'No se pudo.')); return; }
+      ok(r);
+    }).withFailureHandler(function(e){ mal(e instanceof Error ? e : new Error((e && e.message) || 'No se pudo.')); });
+    run[fn].apply(run, args);
+  });
+}
+function avisosStatus_(texto, tipo){
+  const el = document.getElementById('avisos-status');
+  el.textContent = texto || '';
+  el.className = 'maq-modal-status' + (texto ? ' show ' + (tipo || 'ok') : '');
+}
+function avisosLlaveBytes_(b64u){
+  const relleno = '='.repeat((4 - b64u.length % 4) % 4);
+  const bin = atob((b64u + relleno).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function avisosSoportaPush_(){
+  return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+}
+function avisosSuscripcionActual_(){
+  if(!avisosSoportaPush_()) return Promise.resolve(null);
+  return navigator.serviceWorker.ready.then(function(reg){ return reg.pushManager.getSubscription(); }).catch(function(){ return null; });
+}
+function avisosNombreEquipo_(){
+  const ua = navigator.userAgent || '';
+  const so = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone' : /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'Mac' : 'Equipo';
+  const nav = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'navegador';
+  return so + ' · ' + nav;
+}
+function avisosPintarPush_(){
+  const estado = document.getElementById('avisos-push-estado');
+  const bAct = document.getElementById('avisos-push-activar');
+  const bProb = document.getElementById('avisos-push-probar');
+  const bDes = document.getElementById('avisos-push-desactivar');
+  if(!avisosSoportaPush_()){
+    estado.textContent = 'Este navegador no puede recibir notificaciones. Usa Chrome o Edge (o instala el Panel).';
+    estado.className = 'avisos-estado err';
+    bAct.style.display = bProb.style.display = bDes.style.display = 'none';
+    return Promise.resolve();
+  }
+  if(Notification.permission === 'denied'){
+    estado.textContent = 'Las notificaciones están bloqueadas para este sitio. Da clic en el candado junto a la dirección → Notificaciones → Permitir, y vuelve a abrir esta ventana.';
+    estado.className = 'avisos-estado err';
+    bAct.style.display = bProb.style.display = bDes.style.display = 'none';
+    return Promise.resolve();
+  }
+  return avisosSuscripcionActual_().then(function(sub){
+    const activo = !!sub && Notification.permission === 'granted';
+    estado.textContent = activo ? '✓ Activadas: este equipo recibe los avisos.' : 'No activadas en este equipo.';
+    estado.className = 'avisos-estado' + (activo ? ' ok' : '');
+    bAct.style.display = activo ? 'none' : '';
+    bProb.style.display = activo ? '' : 'none';
+    bDes.style.display = activo ? '' : 'none';
+  });
+}
+function avisosActivarPush_(){
+  avisosStatus_('Activando...', 'ok');
+  let llave;
+  return avisosLlamar_('getConfigAvisos', ACCESS_CODE, PANEL_USUARIO).then(function(cfg){
+    llave = cfg.vapidPublica;
+    return Notification.requestPermission();
+  }).then(function(permiso){
+    if(permiso !== 'granted') throw new Error('No se dio permiso de notificaciones. Cuando el navegador pregunte, elige "Permitir".');
+    return navigator.serviceWorker.register('/sw.js').then(function(){ return navigator.serviceWorker.ready; });
+  }).then(function(reg){
+    return reg.pushManager.getSubscription().then(function(vieja){
+      return vieja ? vieja.unsubscribe() : null;
+    }).then(function(){
+      return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: avisosLlaveBytes_(llave) });
+    });
+  }).then(function(sub){
+    return avisosLlamar_('guardarSuscripcionAvisos', ACCESS_CODE, PANEL_USUARIO, sub.toJSON(), avisosNombreEquipo_());
+  }).then(function(){
+    avisosStatus_('Listo: este equipo va a recibir los avisos. Puedes "Enviar prueba" para verlo.', 'ok');
+    return avisosPintarPush_();
+  }).catch(function(e){
+    avisosStatus_(e.message || 'No se pudieron activar los avisos.', 'err');
+    return avisosPintarPush_();
+  });
+}
+function avisosDesactivarPush_(){
+  return avisosSuscripcionActual_().then(function(sub){
+    if(!sub) return;
+    const endpoint = sub.endpoint;
+    return sub.unsubscribe().then(function(){ return avisosLlamar_('quitarSuscripcionAvisos', ACCESS_CODE, PANEL_USUARIO, endpoint); });
+  }).then(function(){ avisosStatus_('Este equipo ya no recibe los avisos.', 'ok'); }, function(e){ avisosStatus_(e.message, 'err'); })
+    .then(avisosPintarPush_);
+}
+function avisosProbarPush_(){
+  avisosStatus_('Enviando prueba...', 'ok');
+  return avisosSuscripcionActual_().then(function(sub){
+    if(!sub) throw new Error('Este equipo no tiene los avisos activados.');
+    return avisosLlamar_('probarAvisoEquipo', ACCESS_CODE, PANEL_USUARIO, sub.endpoint);
+  }).then(function(){ avisosStatus_('Prueba enviada: debe aparecer la notificación en unos segundos.', 'ok'); }, function(e){ avisosStatus_(e.message, 'err'); });
+}
+
+var AVISOS_TG_CHATS = [];
+function avisosPintarTelegram_(cfg){
+  const tg = (cfg && cfg.telegram) || {};
+  const estado = document.getElementById('avisos-tg-estado');
+  const pasoToken = document.getElementById('avisos-tg-paso-token');
+  const pasoChat = document.getElementById('avisos-tg-paso-chat');
+  const acciones = document.getElementById('avisos-tg-acciones');
+  document.getElementById('avisos-tg-chats').innerHTML = '';
+  if(tg.tieneToken && tg.chatId){
+    estado.textContent = '✓ Avisando a: ' + (tg.chatNombre || tg.chatId) + (tg.bot ? ' (bot @' + tg.bot + ')' : '');
+    estado.className = 'avisos-estado ok';
+    pasoToken.style.display = 'none'; pasoChat.style.display = 'none'; acciones.style.display = '';
+  } else if(tg.tieneToken){
+    estado.textContent = 'Bot guardado' + (tg.bot ? ': @' + tg.bot : '') + '. Falta elegir a qué chat avisar.';
+    estado.className = 'avisos-estado';
+    document.getElementById('avisos-tg-bot').textContent = tg.bot ? '@' + tg.bot : '';
+    pasoToken.style.display = 'none'; pasoChat.style.display = ''; acciones.style.display = 'none';
+  } else {
+    estado.textContent = 'No configurado.';
+    estado.className = 'avisos-estado';
+    pasoToken.style.display = ''; pasoChat.style.display = 'none'; acciones.style.display = 'none';
+  }
+}
+function avisosCargar_(){
+  avisosStatus_('');
+  avisosPintarPush_();
+  return avisosLlamar_('getConfigAvisos', ACCESS_CODE, PANEL_USUARIO).then(avisosPintarTelegram_, function(e){
+    document.getElementById('avisos-tg-estado').textContent = e.message || 'No se pudo leer la configuración.';
+  });
+}
+function avisosAbrir_(){
+  document.getElementById('avisos-overlay').classList.add('open');
+  return avisosCargar_();
+}
+function avisosGuardarToken_(){
+  const input = document.getElementById('avisos-tg-token');
+  const token = input.value.trim();
+  if(!token){ avisosStatus_('Pega el token que te dio @BotFather.', 'err'); return Promise.resolve(); }
+  avisosStatus_('Revisando el token con Telegram...', 'ok');
+  return avisosLlamar_('guardarTelegramToken', ACCESS_CODE, PANEL_USUARIO, token).then(function(r){
+    input.value = '';
+    avisosStatus_('Bot @' + r.bot + ' guardado. Ahora mándale un mensaje y presiona "Buscar chats".', 'ok');
+    return avisosLlamar_('getConfigAvisos', ACCESS_CODE, PANEL_USUARIO).then(avisosPintarTelegram_);
+  }, function(e){ avisosStatus_(e.message, 'err'); });
+}
+function avisosBuscarChats_(){
+  avisosStatus_('Buscando...', 'ok');
+  return avisosLlamar_('buscarChatsTelegram', ACCESS_CODE, PANEL_USUARIO).then(function(r){
+    AVISOS_TG_CHATS = r.chats || [];
+    const cont = document.getElementById('avisos-tg-chats');
+    if(!AVISOS_TG_CHATS.length){
+      cont.innerHTML = '';
+      avisosStatus_('Todavía no aparece ningún chat. Mándale un mensaje al bot (o escribe en el grupo donde lo agregaste) y vuelve a buscar.', 'err');
+      return;
+    }
+    avisosStatus_('');
+    cont.innerHTML = AVISOS_TG_CHATS.map(function(c, i){
+      return '<div class="avisos-chat"><span>' + escapeHtml(c.nombre) + ' <small>(' + escapeHtml(c.tipo) + ')</small></span>'
+        + '<button type="button" class="avisos-btn-sec" data-avisos-chat="' + i + '">Avisar aquí</button></div>';
+    }).join('');
+  }, function(e){ avisosStatus_(e.message, 'err'); });
+}
+function avisosElegirChat_(i){
+  const c = AVISOS_TG_CHATS[i];
+  if(!c) return Promise.resolve();
+  avisosStatus_('Guardando...', 'ok');
+  return avisosLlamar_('guardarTelegramChat', ACCESS_CODE, PANEL_USUARIO, c.id, c.nombre).then(function(){
+    avisosStatus_('Listo: te llegó un mensaje de confirmación en Telegram.', 'ok');
+    return avisosLlamar_('getConfigAvisos', ACCESS_CODE, PANEL_USUARIO).then(avisosPintarTelegram_);
+  }, function(e){ avisosStatus_(e.message, 'err'); });
+}
+function avisosProbarTelegram_(){
+  avisosStatus_('Enviando prueba...', 'ok');
+  return avisosLlamar_('probarAvisoTelegram', ACCESS_CODE, PANEL_USUARIO)
+    .then(function(){ avisosStatus_('Prueba enviada a Telegram.', 'ok'); }, function(e){ avisosStatus_(e.message, 'err'); });
+}
+function avisosQuitarTelegram_(){
+  if(!confirm('¿Quitar los avisos por Telegram? Se borra el bot configurado.')) return Promise.resolve();
+  return avisosLlamar_('quitarTelegram', ACCESS_CODE, PANEL_USUARIO).then(function(){
+    avisosStatus_('Se quitaron los avisos por Telegram.', 'ok');
+    return avisosLlamar_('getConfigAvisos', ACCESS_CODE, PANEL_USUARIO).then(avisosPintarTelegram_);
+  }, function(e){ avisosStatus_(e.message, 'err'); });
+}
+document.addEventListener('click', function(ev){
+  const t = ev.target;
+  if(!t) return;
+  if(t.id === 'ah-btn-avisos'){ avisosAbrir_(); return; }
+  if(t.id === 'avisos-close'){ document.getElementById('avisos-overlay').classList.remove('open'); return; }
+  if(t.id === 'avisos-push-activar'){ avisosActivarPush_(); return; }
+  if(t.id === 'avisos-push-desactivar'){ avisosDesactivarPush_(); return; }
+  if(t.id === 'avisos-push-probar'){ avisosProbarPush_(); return; }
+  if(t.id === 'avisos-tg-guardar-token'){ avisosGuardarToken_(); return; }
+  if(t.id === 'avisos-tg-buscar'){ avisosBuscarChats_(); return; }
+  if(t.id === 'avisos-tg-probar'){ avisosProbarTelegram_(); return; }
+  if(t.id === 'avisos-tg-quitar'){ avisosQuitarTelegram_(); return; }
+  if(t.id === 'avisos-tg-cambiar'){
+    document.getElementById('avisos-tg-acciones').style.display = 'none';
+    document.getElementById('avisos-tg-paso-chat').style.display = '';
+    return;
+  }
+  if(t.dataset && t.dataset.avisosChat !== undefined){ avisosElegirChat_(Number(t.dataset.avisosChat)); }
+});
+// Al tocar una notificación: abrir Avance Huerta (Panel ya abierto -> mensaje
+// del Service Worker; Panel recién abierto -> ?pestana=avancehuerta).
+function avisosIrAAvanceHuerta_(){
+  const tab = document.getElementById('ptab-avancehuerta');
+  if(tab && tab.style.display !== 'none' && tab.offsetParent !== null){ tab.click(); return true; }
+  return false;
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message', function(ev){
+    if(ev.data && ev.data.tipo === 'abrir-pestana' && ev.data.pestana === 'avancehuerta') avisosIrAAvanceHuerta_();
+  });
+}
+(function(){
+  let pestana = null;
+  try { pestana = new URLSearchParams(location.search).get('pestana'); } catch(e){}
+  if(pestana !== 'avancehuerta') return;
+  let intentos = 0;
+  const t = setInterval(function(){ if(avisosIrAAvanceHuerta_() || ++intentos > 60) clearInterval(t); }, 500);
+})();
 
 // ---------------------------------------------------------------
 // Panel SIN INTERNET: aviso de conexión, envío de la cola de cambios y

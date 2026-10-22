@@ -134,3 +134,34 @@ async function responderExterno_(request) {
   if (respuesta && (respuesta.ok || respuesta.type === 'opaque')) cache.put(request, respuesta.clone());
   return respuesta;
 }
+
+// ---------------------------------------------------------------
+// Avisos de recorridos (oct-2026): el servidor manda un aviso cuando un
+// operador inicia o termina un recorrido (ver server/avisos.js). Llega
+// aquí aunque el Panel esté cerrado y se muestra como notificación; al
+// tocarla se abre (o se enfoca) el Panel en Avance Huerta.
+self.addEventListener('push', (event) => {
+  let datos = {};
+  try { datos = event.data ? event.data.json() : {}; } catch (e) { datos = { cuerpo: event.data ? event.data.text() : '' }; }
+  const titulo = datos.titulo || 'Aviso de recorrido';
+  event.waitUntil(self.registration.showNotification(titulo, {
+    body: datos.cuerpo || '',
+    tag: datos.tag || undefined,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    data: { url: datos.url || '/panel' },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const destino = new URL((event.notification.data && event.notification.data.url) || '/panel', self.location.origin).href;
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ventanas) => {
+    const panel = ventanas.find((v) => new URL(v.url).pathname === '/panel');
+    if (panel) {
+      panel.postMessage({ tipo: 'abrir-pestana', pestana: 'avancehuerta' });
+      return panel.focus();
+    }
+    return self.clients.openWindow(destino);
+  }));
+});

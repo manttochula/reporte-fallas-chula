@@ -2775,3 +2775,32 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Avisos de recorridos (oct-2026, petición de Carlos: "mándame un aviso
+-- cuando inicien y terminen recorrido", por el Panel y por Telegram). Ver
+-- server/avisos.js.
+-- configuracion: valores sueltos del sistema (clave -> valor). Aquí viven
+--   el token del bot de Telegram y el chat a donde avisar (se configuran
+--   desde el Panel: Avance Huerta → 🔔 Avisos) y las llaves VAPID de las
+--   notificaciones (se generan solas). NUNCA se mandan al navegador
+--   (salvo la llave pública VAPID).
+-- push_suscripciones: cada computadora/celular que activó "Avisos en este
+--   equipo" en el Panel. Si el navegador ya no la acepta (410), se borra sola.
+CREATE TABLE IF NOT EXISTS configuracion (
+  clave          VARCHAR(64) PRIMARY KEY,
+  valor          TEXT,
+  actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS push_suscripciones (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  usuario       VARCHAR(255) NOT NULL,
+  endpoint      VARCHAR(1000) NOT NULL,
+  p256dh        VARCHAR(200) NOT NULL,
+  auth          VARCHAR(100) NOT NULL,
+  dispositivo   VARCHAR(120) DEFAULT NULL,
+  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  ultimo_envio  DATETIME DEFAULT NULL,
+  UNIQUE KEY uq_push_endpoint (endpoint(700))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

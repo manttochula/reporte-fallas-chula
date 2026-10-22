@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const pool = require('./db');
 const { siguienteFolio_, tieneAccesoModulo_, requiereClave_, tienePermisoPanel_ } = require('./helpers');
 const { guardarArchivo_ } = require('./storage');
+const avisos = require('./avisos');
 const {
   preguntarleAClaudeSobreImagen_,
   preguntarleAClaudeSobreImagenes_,
@@ -5430,6 +5431,7 @@ async function iniciarAvance(huerta, nombre, trabajo, porcentaje, codigoUnidad) 
       'INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio, codigo_unidad) VALUES (?, ?, ?, ?, NOW(), ?)',
       [nombreHuerta, nombrePersona, trabajoNorm, porcentajeNum, unidad]
     );
+    avisos.avisarRecorrido_('inicio', result.insertId); // por fuera: no frena la respuesta
     return { success: true, avanceId: result.insertId };
   } catch (err) {
     console.error('[iniciarAvance] huerta=' + nombreHuerta + ' nombre=' + nombrePersona + ':', err.message);
@@ -5510,6 +5512,8 @@ async function sincronizarAvance(sesion, puntos) {
     if (!lk || Number(lk.ok) !== 1) return { success: false, error: 'El recorrido se está guardando desde otro envío; se reintenta solo.' };
     conCandado = true;
     const leer = () => pool.query('SELECT id, huerta, nombre, codigo_unidad, fecha_fin, ultimo_seq FROM avance_huerta WHERE id_local = ?', [idLocal]);
+    let avisoInicio = false;
+    let avisoFin = false;
     let [filas] = await leer();
     if (filas.length === 0) {
       await pool.query(
@@ -5517,6 +5521,7 @@ async function sincronizarAvance(sesion, puntos) {
         [huerta, nombre, normalizarTrabajoAvance_(s.trabajo), porcentaje, segundosDeMs_(s.fechaInicio), (s.codigoUnidad || '').toString().trim() || null, idLocal]
       );
       [filas] = await leer();
+      avisoInicio = true;
     }
     const av = filas[0];
     let ultimo = Number(av.ultimo_seq) || 0;
@@ -5545,8 +5550,13 @@ async function sincronizarAvance(sesion, puntos) {
     if (porcentaje !== null) await pool.query('UPDATE avance_huerta SET porcentaje = ? WHERE id = ?', [porcentaje, av.id]);
     let terminado = av.fecha_fin !== null;
     if (s.fechaFin && !terminado) {
-      await pool.query('UPDATE avance_huerta SET fecha_fin = COALESCE(FROM_UNIXTIME(?), NOW()) WHERE id = ? AND fecha_fin IS NULL', [segundosDeMs_(s.fechaFin), av.id]);
+      const [upd] = await pool.query('UPDATE avance_huerta SET fecha_fin = COALESCE(FROM_UNIXTIME(?), NOW()) WHERE id = ? AND fecha_fin IS NULL', [segundosDeMs_(s.fechaFin), av.id]);
       terminado = true;
+      avisoFin = !!(upd && upd.affectedRows);
+    }
+    // Avisos (Telegram / notificación del Panel): por fuera, en orden, sin frenar el envío.
+    if (avisoInicio || avisoFin) {
+      avisos.avisarRecorrido_([avisoInicio && 'inicio', avisoFin && 'fin'].filter(Boolean), av.id);
     }
     return { success: true, avanceId: av.id, ultimoSeq: ultimo, terminado, actividadesCompletadas: completadas };
   } catch (err) {
@@ -5561,7 +5571,8 @@ async function sincronizarAvance(sesion, puntos) {
 async function terminarAvance(avanceId) {
   const id = Number(avanceId);
   if (!id) return { success: false, error: 'Falta indicar qué registro terminar.' };
-  await pool.query('UPDATE avance_huerta SET fecha_fin = NOW() WHERE id = ? AND fecha_fin IS NULL', [id]);
+  const [upd] = await pool.query('UPDATE avance_huerta SET fecha_fin = NOW() WHERE id = ? AND fecha_fin IS NULL', [id]);
+  if (upd && upd.affectedRows) avisos.avisarRecorrido_('fin', id); // solo la primera vez que se cierra
   return { success: true };
 }
 
@@ -8244,7 +8255,65 @@ function getVersionApp() {
   return { version: require('./versionApp').versionActual() };
 }
 
+
+// ------------------------------------------------------------
+// Avisos de recorridos (ver server/avisos.js). Activar los avisos en SU
+// equipo: cualquiera que ve Avance Huerta. Configurar el Telegram del
+// negocio: quien puede capturar en Avance Huerta.
+async function getConfigAvisos(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  return avisos.getConfigAvisos_(nombreUsuario);
+}
+async function guardarSuscripcionAvisos(code, nombreUsuario, suscripcion, dispositivo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  return avisos.guardarSuscripcionPush_(nombreUsuario, suscripcion, dispositivo);
+}
+async function quitarSuscripcionAvisos(code, nombreUsuario, endpoint) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  return avisos.quitarSuscripcionPush_(endpoint);
+}
+async function probarAvisoEquipo(code, nombreUsuario, endpoint) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  return avisos.probarAvisoPush_(nombreUsuario, endpoint);
+}
+async function guardarTelegramToken(code, nombreUsuario, token) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const r = await avisos.guardarTelegramToken_(token);
+  if (r.success) await registrarAuditoria_('configuracion', 'telegram', 'editar', nombreUsuario, 'Bot de avisos: @' + r.bot);
+  return r;
+}
+async function buscarChatsTelegram(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  return avisos.buscarChatsTelegram_();
+}
+async function guardarTelegramChat(code, nombreUsuario, chatId, nombre) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const r = await avisos.guardarTelegramChat_(chatId, nombre);
+  if (r.success) await registrarAuditoria_('configuracion', 'telegram', 'editar', nombreUsuario, 'Avisos de recorridos a: ' + (nombre || chatId));
+  return r;
+}
+async function probarAvisoTelegram(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  return avisos.probarAvisoTelegram_();
+}
+async function quitarTelegram(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const r = await avisos.quitarTelegram_();
+  await registrarAuditoria_('configuracion', 'telegram', 'eliminar', nombreUsuario, 'Se quitaron los avisos por Telegram');
+  return r;
+}
+avisos.configurarUtilRecorrido_({ filtrarSaltosGps_, tramosDeRecorrido_, distanciaMetros_ });
+
 module.exports = {
+  getConfigAvisos,
+  guardarSuscripcionAvisos,
+  quitarSuscripcionAvisos,
+  probarAvisoEquipo,
+  guardarTelegramToken,
+  buscarChatsTelegram,
+  guardarTelegramChat,
+  probarAvisoTelegram,
+  quitarTelegram,
   getVersionApp,
   getSemanas,
   guardarSemana,

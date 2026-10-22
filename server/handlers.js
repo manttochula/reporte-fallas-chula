@@ -5634,8 +5634,13 @@ async function getAvanceHuerta(huerta) {
     if (!puntosPorSesion[p.avance_id]) puntosPorSesion[p.avance_id] = [];
     puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), t: new Date(p.capturado_en).getTime() });
   });
+  // ultimoPuntoEn: hora del último punto bueno de cada recorrido -- el Panel
+  // lo usa para el ícono del tractor ("en curso" vs. "sin datos desde...").
+  const ultimoPuntoPorSesion = {};
   Object.keys(puntosPorSesion).forEach((k) => {
-    puntosPorSesion[k] = filtrarSaltosGps_(puntosPorSesion[k]).map((p) => ({ lat: p.lat, lng: p.lng }));
+    const limpios = filtrarSaltosGps_(puntosPorSesion[k]);
+    if (limpios.length) ultimoPuntoPorSesion[k] = new Date(limpios[limpios.length - 1].t);
+    puntosPorSesion[k] = limpios.map((p) => ({ lat: p.lat, lng: p.lng }));
   });
   // codigoUnidad/equipoUnidad: petición de Carlos -- quiere saber con QUÉ
   // equipo (tractor) se hizo cada recorrido cuando hay varios en la misma
@@ -5657,6 +5662,7 @@ async function getAvanceHuerta(huerta) {
     codigoUnidad: s.codigo_unidad || null,
     equipoUnidad: s.codigo_unidad ? (equiposPorCodigo[s.codigo_unidad] || null) : null,
     puntos: puntosPorSesion[s.id] || [],
+    ultimoPuntoEn: ultimoPuntoPorSesion[s.id] || null,
   }));
 }
 
@@ -5908,8 +5914,10 @@ async function getAvancePorRango(code, nombreUsuario, huerta, ventanas, minutosR
   const f = filtros || {};
   const operador = (f.operador || '').toString().trim();
   const trabajo = normalizarTrabajoAvance_(f.trabajo);
+  const equipo = (f.equipo || '').toString().trim(); // codigo_unidad (filtro "Tractor" del Panel)
   const elegidas = sesiones.filter((x) => (!operador || x.nombre === operador)
-    && (!trabajo || normalizarTrabajoAvance_(x.trabajo) === trabajo));
+    && (!trabajo || normalizarTrabajoAvance_(x.trabajo) === trabajo)
+    && (!equipo || x.codigo_unidad === equipo));
   const [cuadros] = await pool.query(
     'SELECT id, nombre, poligono, surcos, direccion_surcos FROM huerta_cuadros WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
     [nombreHuerta]

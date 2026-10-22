@@ -3567,6 +3567,10 @@
       <div id="ah-con-mapa" style="display:none;">
         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
           <div class="maq-field" style="margin-bottom:0; min-width:200px;">
+            <label for="ah-f-historico-equipo">Tractor</label>
+            <select id="ah-f-historico-equipo"><option value="">Todos los tractores</option></select>
+          </div>
+          <div class="maq-field" style="margin-bottom:0; min-width:200px;">
             <label for="ah-f-historico-operador">Operador</label>
             <select id="ah-f-historico-operador"><option value="">Todos los operadores</option></select>
           </div>
@@ -7121,11 +7125,12 @@ function ahCargarRangoHoy_(){
       cont.innerHTML = '<div class="maq-modal-status show err">' + escapeHtml((err && err.message) || 'No se pudo calcular el avance. Revisa tu conexión.') + '</div>';
     })
     .getAvancePorRango(ACCESS_CODE, PANEL_USUARIO, huerta, ventanas, ahMinutosRalentiGuardados_(),
-      { operador: AH_HISTORICO_FILTRO_OPERADOR, trabajo: AH_HISTORICO_FILTRO_TRABAJO });
+      { operador: AH_HISTORICO_FILTRO_OPERADOR, trabajo: AH_HISTORICO_FILTRO_TRABAJO, equipo: AH_HISTORICO_FILTRO_EQUIPO });
 }
 
 var AH_HISTORICO_FILTRO_OPERADOR = ''; // '' = todos los operadores
 var AH_HISTORICO_FILTRO_TRABAJO = ''; // '' = todas las actividades
+var AH_HISTORICO_FILTRO_EQUIPO = ''; // '' = todos los tractores (codigoUnidad)
 
 // Misma idea que fechaLocalHoy_/dateTimeInputValue (más abajo en este
 // archivo): arma la fecha con los getters LOCALES del Date, no con
@@ -7189,6 +7194,7 @@ function ahSesionesHistoricoFiltradas_(){
     if(ahFechaLocalDe_(s.fechaInicio) !== hoy) return false;
     if(AH_HISTORICO_FILTRO_OPERADOR && s.nombre !== AH_HISTORICO_FILTRO_OPERADOR) return false;
     if(AH_HISTORICO_FILTRO_TRABAJO && s.trabajo !== AH_HISTORICO_FILTRO_TRABAJO) return false;
+    if(AH_HISTORICO_FILTRO_EQUIPO && s.codigoUnidad !== AH_HISTORICO_FILTRO_EQUIPO) return false;
     return true;
   });
   // Con un horario elegido (no el día completo), cada recorrido se dibuja
@@ -7212,7 +7218,7 @@ function ahAgruparSesionesPorEquipo_(sesiones){
   }).forEach(function(s){
     var clave = ahClaveGrupoHistorico_(s);
     if(!grupos[clave]){
-      grupos[clave] = { clave: clave, equipoUnidad: s.equipoUnidad || null, nombres: [], puntos: [], fechaFinUltima: null };
+      grupos[clave] = { clave: clave, codigoUnidad: s.codigoUnidad || null, equipoUnidad: s.equipoUnidad || null, nombres: [], puntos: [], fechaFinUltima: null, ultimoPuntoEn: null };
       orden.push(clave);
     }
     var g = grupos[clave];
@@ -7222,6 +7228,7 @@ function ahAgruparSesionesPorEquipo_(sesiones){
     // procesada es la más reciente de este equipo -- su fechaFin dice si
     // el grupo sigue "en curso" ahora mismo.
     g.fechaFinUltima = s.fechaFin;
+    if(s.ultimoPuntoEn && (!g.ultimoPuntoEn || new Date(s.ultimoPuntoEn) > new Date(g.ultimoPuntoEn))) g.ultimoPuntoEn = s.ultimoPuntoEn;
   });
   return orden.map(function(clave){ return grupos[clave]; });
 }
@@ -7241,12 +7248,15 @@ function ahEtiquetaGrupoHistorico_(g){
 function ahPoblarFiltrosHistoricoMapa_(){
   var selOperador = document.getElementById('ah-f-historico-operador');
   var selTrabajo = document.getElementById('ah-f-historico-trabajo');
+  var selEquipo = document.getElementById('ah-f-historico-equipo');
   if(!selOperador || !selTrabajo) return;
   var hoy = ahFechaLocalHoy_();
   var operadores = [];
   var trabajos = [];
+  var equipos = {}; // codigoUnidad -> nombre del equipo
   (AH_HISTORICO_CACHE || []).forEach(function(s){
     if(ahFechaLocalDe_(s.fechaInicio) !== hoy) return;
+    if(s.codigoUnidad && !equipos[s.codigoUnidad]) equipos[s.codigoUnidad] = s.equipoUnidad || s.codigoUnidad;
     if(s.nombre && operadores.indexOf(s.nombre) === -1) operadores.push(s.nombre);
     if(s.trabajo && trabajos.indexOf(s.trabajo) === -1) trabajos.push(s.trabajo);
   });
@@ -7260,6 +7270,35 @@ function ahPoblarFiltrosHistoricoMapa_(){
     return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>';
   }).join('');
   selTrabajo.value = AH_HISTORICO_FILTRO_TRABAJO;
+  if(selEquipo){
+    var codigos = Object.keys(equipos).sort(function(a, b){ return String(equipos[a]).localeCompare(String(equipos[b]), 'es', { numeric: true }); });
+    if(AH_HISTORICO_FILTRO_EQUIPO && codigos.indexOf(AH_HISTORICO_FILTRO_EQUIPO) === -1) AH_HISTORICO_FILTRO_EQUIPO = '';
+    selEquipo.innerHTML = '<option value="">Todos los tractores</option>' + codigos.map(function(c){
+      return '<option value="' + escapeHtml(c) + '">' + escapeHtml(equipos[c]) + '</option>';
+    }).join('');
+    selEquipo.value = AH_HISTORICO_FILTRO_EQUIPO;
+  }
+}
+
+var AH_INFO_TRACTOR = null;
+var AH_MINUTOS_SIN_DATOS = 20; // recorrido abierto sin puntos nuevos por más de esto: "sin datos desde..."
+function ahHoraCorta_(v){
+  var d = new Date(v);
+  if(isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+// Estado del tractor de un grupo (equipo) para el ícono del mapa y la lista:
+//  en_curso  -> recorrido abierto y con un punto en los últimos AH_MINUTOS_SIN_DATOS;
+//  sin_datos -> recorrido abierto pero sin puntos recientes (cerraron la app
+//               sin "Terminar", sin señal, celular apagado...);
+//  terminado -> ya presionaron "Terminar".
+function ahEstadoGrupoTractor_(g, ahora){
+  if(g.fechaFinUltima) return { estado: 'terminado', texto: 'terminó a las ' + ahHoraCorta_(g.fechaFinUltima) + ' (aquí se quedó)' };
+  var ult = g.ultimoPuntoEn ? new Date(g.ultimoPuntoEn).getTime() : null;
+  if(ult && (ahora || Date.now()) - ult > AH_MINUTOS_SIN_DATOS * 60000){
+    return { estado: 'sin_datos', texto: 'sin datos desde las ' + ahHoraCorta_(ult) + ' (no ha terminado el recorrido)' };
+  }
+  return { estado: 'en_curso', texto: 'en curso' };
 }
 
 // Una Polyline por cada EQUIPO (no por sesión), con flechas de dirección
@@ -7290,17 +7329,27 @@ function ahDibujarHistoricoGoogleAvance_(){
     pl.setMap(AH_GOOGLE_MAP_AVANCE);
     return pl;
   });
-  // Equipos todavía EN CURSO ahora mismo (su sesión más reciente no tiene
-  // fechaFin): un ícono de tractor en la punta más reciente de su trazo,
-  // del mismo color que su línea, para ver de un vistazo dónde está cada
-  // quien AHORA, no solo por dónde ya pasó.
-  AH_GOOGLE_MARCADORES_ACTUAL_AVANCE = grupos.filter(function(g){ return !g.fechaFinUltima && g.puntos.length > 0; }).map(function(g){
+  // Un ícono de tractor donde se quedó cada equipo (la punta más reciente
+  // de su trazo), del color de su línea. Petición de Carlos (oct-2026): se
+  // ve también cuando ya terminó, para saber dónde dejaron el tractor; en
+  // color completo solo si sigue trabajando (recorrido abierto y con datos
+  // recientes), desvanecido si ya terminó o dejó de mandar datos. Al darle
+  // clic dice quién, desde cuándo y en qué estado.
+  var ahora = Date.now();
+  AH_GOOGLE_MARCADORES_ACTUAL_AVANCE = grupos.filter(function(g){ return g.puntos.length > 0; }).map(function(g){
     var ultimo = g.puntos[g.puntos.length - 1];
+    var estado = ahEstadoGrupoTractor_(g, ahora);
     var marcador = new google.maps.Marker(Object.assign({
       position: { lat: ultimo.lat, lng: ultimo.lng },
       map: AH_GOOGLE_MAP_AVANCE,
-      title: ahEtiquetaGrupoHistorico_(g) + ' · en curso',
-    }, ahIconoTractor_(g.color)));
+      title: ahEtiquetaGrupoHistorico_(g) + ' · ' + estado.texto,
+    }, ahIconoTractor_(g.color), { opacity: estado.estado === 'en_curso' ? 1 : 0.6, zIndex: estado.estado === 'en_curso' ? 1000 : 998 }));
+    marcador.addListener('click', function(){
+      if(!AH_INFO_TRACTOR) AH_INFO_TRACTOR = new google.maps.InfoWindow();
+      AH_INFO_TRACTOR.setContent('<div style="color:#1c1c1c;font-size:13px;line-height:1.45;"><strong>' + escapeHtml(ahEtiquetaGrupoHistorico_(g)) + '</strong><br>' + escapeHtml(estado.texto) + '</div>');
+      AH_INFO_TRACTOR.open({ anchor: marcador, map: AH_GOOGLE_MAP_AVANCE });
+    });
+    marcador.__estadoTractor = estado.estado;
     return marcador;
   });
   ahRenderLeyendaHistorico_(grupos);
@@ -7322,7 +7371,7 @@ function ahRenderLeyendaHistorico_(grupos){
   }
   cont.style.display = '';
   cont.innerHTML = lista.map(function(g){
-    var enCurso = !g.fechaFinUltima ? ' · en curso' : '';
+    var enCurso = ' · ' + ahEstadoGrupoTractor_(g).texto.replace(/ \(aquí se quedó\)$/, '');
     // Equipo con código: se le puede cambiar el color (se guarda para todos).
     var codigo = (g.clave || '').indexOf('equipo:') === 0 ? g.clave.slice(7) : '';
     var muestra = codigo
@@ -7372,6 +7421,11 @@ document.getElementById('ah-leyenda-equipos').addEventListener('click', function
 
 document.getElementById('ah-f-historico-operador').addEventListener('change', function(){
   AH_HISTORICO_FILTRO_OPERADOR = this.value;
+  ahDibujarHistoricoGoogleAvance_();
+  ahCargarRangoHoy_();
+});
+document.getElementById('ah-f-historico-equipo').addEventListener('change', function(){
+  AH_HISTORICO_FILTRO_EQUIPO = this.value;
   ahDibujarHistoricoGoogleAvance_();
   ahCargarRangoHoy_();
 });
@@ -8835,6 +8889,7 @@ function cargarAvanceHuertaPanel_(huerta){
   AH_HISTORICO_CACHE = [];
   AH_HISTORICO_FILTRO_OPERADOR = ''; // no arrastrar a la huerta nueva los filtros del mapa de la anterior
   AH_HISTORICO_FILTRO_TRABAJO = '';
+  AH_HISTORICO_FILTRO_EQUIPO = '';
   AH_RANGO_HOY = null;
   AH_RANGO_HOY_TOKEN++;
   (function(){ var c = document.getElementById('ah-resumen-rango-hoy'); if(c) c.innerHTML = ''; })();

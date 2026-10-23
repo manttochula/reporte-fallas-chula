@@ -395,6 +395,10 @@
     margin-bottom: 10px;
   }
   .avance-chip.activo{ background: var(--ok); color:#1C1E1F; }
+  .avance-gps-chip{ margin-left:6px; }
+  .avance-gps-chip.bueno{ color: var(--ok); border:1px solid rgba(95,163,106,0.4); }
+  .avance-gps-chip.regular{ color: var(--amber); border:1px solid rgba(232,135,30,0.4); }
+  .avance-gps-chip.malo{ color: var(--danger); border:1px solid rgba(194,75,63,0.4); }
   .status.ok{ background: rgba(95,163,106,0.12); color: var(--ok); border:1px solid rgba(95,163,106,0.3); }
   .status.err{ background: rgba(194,75,63,0.12); color: var(--danger); border:1px solid rgba(194,75,63,0.3); }
   .status.warn{ background: rgba(232,135,30,0.12); color: var(--amber); border:1px solid rgba(232,135,30,0.3); }
@@ -885,6 +889,7 @@
             <input type="number" id="avance-f-porcentaje" min="0" max="100" placeholder="0-100">
           </div>
           <div class="avance-chip" id="avance-chip-estado">Sin registrar avance ahora</div>
+          <div class="avance-chip avance-gps-chip" id="avance-gps-precision" style="display:none;"></div>
           <div class="avance-aviso" id="avance-sync-estado" style="display:none; padding-top:6px;"></div>
           <button type="button" class="submit-btn" id="avance-btn-iniciar">Iniciar avance</button>
           <button type="button" class="avance-btn-secundario" id="avance-btn-terminar" style="display:none;">Terminar avance</button>
@@ -1762,6 +1767,7 @@ function activarPestana(tabActivo, viewActivo){
   [viewForm, viewDiesel, viewMovimientos, viewMisReportes, viewAvance].forEach(function(v){ v.style.display = 'none'; });
   tabActivo.classList.add('active');
   viewActivo.style.display = 'block';
+  if(typeof avanceDetenerIndicadorGps_ === 'function' && viewActivo !== viewAvance) avanceDetenerIndicadorGps_();
 }
 
 // --- Pestañas del celular que el admin le oculta a este compañero en
@@ -1813,6 +1819,7 @@ tabMisReportes.addEventListener('click', function(){
 });
 tabAvance.addEventListener('click', function(){
   activarPestana(tabAvance, viewAvance);
+  avanceIniciarIndicadorGps_(); // el GPS se va "calentando" mientras el operador elige equipo y actividad
   poblarSelectHuertaAvance();
   // Si quedó elegida una huerta (la única, o la del recorrido abierto) y
   // todavía no se ha cargado, se carga de una vez.
@@ -2900,7 +2907,7 @@ function avanceDistanciaMetros_(p1, p2){
   return Math.sqrt(e*e + n*n);
 }
 
-var AVANCE_DISTANCIA_MINIMA_METROS = 3; // no se guarda un punto nuevo si no se alejó al menos esto del último guardado
+var AVANCE_DISTANCIA_MINIMA_METROS = 2; // oct-2026: antes 3 m (trazos más parecidos a JDLink); no se guarda un punto nuevo si no se alejó al menos esto del último guardado
 
 var AVANCE_HUERTA_ACTUAL = '';
 var AVANCE_HISTORICO = []; // de getAvanceHuerta: [{avanceId, nombre, trabajo, porcentaje, puntos:[{lat,lng}]}]
@@ -3194,7 +3201,7 @@ function avanceRegistrarPunto_(lat, lng, s, t){
   if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
   // Si antes se había perdido el GPS, ya regresó: se quita ese aviso.
   var statusGps = document.getElementById('avance-rastreo-status');
-  if(statusGps && /Se perdió la señal de GPS/.test(statusGps.textContent)){
+  if(statusGps && /Se perdió la señal de GPS|El GPS todavía (está|esta)/.test(statusGps.textContent)){
     statusGps.textContent = avanceMensajeRastreoActivo_();
     statusGps.className = 'status show ok';
   }
@@ -3850,7 +3857,7 @@ function avanceArrancarGps_(sesion){
     sesion.nativa = false;
     avanceGuardarSesionLocal_(sesion).catch(function(){});
     if(AVANCE_WATCH_ID === null){
-      AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+      AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
     }
     avanceSolicitarWakeLock_();
   }
@@ -4229,8 +4236,68 @@ function avancePrecisionAceptable_(precision){
   return !isFinite(n) || n <= 0 || n <= AVANCE_PRECISION_MAX_METROS;
 }
 function avanceNuevaPosicion_(pos){
+  avancePintarPrecisionGps_(pos.coords.accuracy);
   if(!avancePrecisionAceptable_(pos.coords.accuracy)) return;
   avanceRegistrarPunto_(pos.coords.latitude, pos.coords.longitude);
+}
+
+// ---------------------------------------------------------------
+// Indicador de precisión del GPS (oct-2026, Carlos: acercarse a la
+// precisión de JDLink "con la condición de que no sea tardado dejar
+// iniciar al operador"). El GPS se "calienta" en cuanto se abre esta
+// pestaña (antes de presionar Iniciar), y el chip dice qué tan preciso
+// está. "Iniciar" NUNCA espera: si el GPS todavía está débil, el recorrido
+// arranca de todos modos y los puntos se empiezan a guardar solos en
+// cuanto la precisión llega a AVANCE_PRECISION_MAX_METROS (ver
+// avancePrecisionAceptable_ y, en la app de Android, FiltroUbicacion).
+// ---------------------------------------------------------------
+var AVANCE_PRECISION_LISTA_METROS = 15; // de aquí para abajo: "GPS preciso"
+var AVANCE_PRECISION_ACTUAL = null;
+var AVANCE_GPS_INDICADOR_WATCH = null;
+function avanceClasePrecisionGps_(metros){
+  var n = Number(metros);
+  if(metros === null || metros === undefined || !isFinite(n) || n <= 0) return 'sin';
+  if(n <= AVANCE_PRECISION_LISTA_METROS) return 'bueno';
+  if(n <= AVANCE_PRECISION_MAX_METROS) return 'regular';
+  return 'malo';
+}
+function avanceTextoPrecisionGps_(metros){
+  var clase = avanceClasePrecisionGps_(metros);
+  var m = Math.round(Number(metros));
+  if(clase === 'sin') return 'GPS: buscando señal...';
+  if(clase === 'bueno') return 'GPS preciso (±' + m + ' m)';
+  if(clase === 'regular') return 'GPS regular (±' + m + ' m)';
+  return 'GPS débil (±' + m + ' m)';
+}
+function avancePintarPrecisionGps_(metros){
+  AVANCE_PRECISION_ACTUAL = (metros === null || metros === undefined) ? null : Number(metros);
+  var chip = document.getElementById('avance-gps-precision');
+  if(!chip) return;
+  chip.textContent = avanceTextoPrecisionGps_(AVANCE_PRECISION_ACTUAL);
+  chip.className = 'avance-chip avance-gps-chip ' + avanceClasePrecisionGps_(AVANCE_PRECISION_ACTUAL);
+  chip.style.display = '';
+}
+function avanceIniciarIndicadorGps_(){
+  if(!navigator.geolocation || AVANCE_GPS_INDICADOR_WATCH !== null) return;
+  avancePintarPrecisionGps_(AVANCE_PRECISION_ACTUAL);
+  try {
+    AVANCE_GPS_INDICADOR_WATCH = navigator.geolocation.watchPosition(function(pos){
+      avancePintarPrecisionGps_(pos.coords.accuracy);
+    }, function(){ /* sin permiso / sin GPS: el chip se queda en "buscando" */ }, { enableHighAccuracy: true, maximumAge: 0, timeout: 60000 });
+  } catch(e){ AVANCE_GPS_INDICADOR_WATCH = null; }
+}
+function avanceDetenerIndicadorGps_(){
+  if(AVANCE_GPS_INDICADOR_WATCH === null) return;
+  try { navigator.geolocation.clearWatch(AVANCE_GPS_INDICADOR_WATCH); } catch(e){}
+  AVANCE_GPS_INDICADOR_WATCH = null;
+}
+// Mensaje al iniciar: nunca detiene el inicio, solo avisa si el GPS va débil.
+function avanceMensajeInicioSegunGps_(){
+  var clase = avanceClasePrecisionGps_(AVANCE_PRECISION_ACTUAL);
+  if(clase === 'bueno' || clase === 'regular') return null;
+  return clase === 'sin'
+    ? 'Ya empezó el recorrido. El GPS todavía está buscando señal: los puntos se guardan solos en cuanto la encuentre (no tienes que esperar). Mejor si el celular va en un lugar alto, viendo al cielo.'
+    : 'Ya empezó el recorrido. El GPS todavía está débil (±' + Math.round(AVANCE_PRECISION_ACTUAL) + ' m): los puntos se guardan solos en cuanto mejore (no tienes que esperar). Mejor si el celular va en un lugar alto, viendo al cielo.';
 }
 
 function avanceErrorPosicion_(err){
@@ -4298,8 +4365,9 @@ document.getElementById('avance-btn-iniciar').addEventListener('click', function
   btn.disabled = true;
   avanceIniciarSesion_({ huerta: huerta, nombre: nombre, trabajo: trabajo, porcentaje: porcentaje, codigoUnidad: codigoEquipo }).then(function(){
     btn.disabled = false;
-    statusEl.textContent = avanceMensajeRastreoActivo_() + (navigator.onLine === false ? ' Sin señal: el recorrido se guarda en el celular y se envía solo cuando haya señal.' : '');
-    statusEl.className = 'status show ok';
+    var avisoGps = avanceMensajeInicioSegunGps_();
+    statusEl.textContent = (avisoGps || avanceMensajeRastreoActivo_()) + (navigator.onLine === false ? ' Sin señal: el recorrido se guarda en el celular y se envía solo cuando haya señal.' : '');
+    statusEl.className = 'status show ' + (avisoGps ? 'warn' : 'ok');
   }, function(err){
     btn.disabled = false;
     statusEl.textContent = 'No se pudo iniciar: este celular no deja guardar datos (' + ((err && err.message) || 'error') + '). Revisa que tenga espacio libre.';

@@ -1216,6 +1216,19 @@
   .ind-btn-mini.ind-btn-borrar{ color:#a5281c; border-color:#e0b4ae; }
   .ord-semana-chip{ display:inline-block; margin-top:4px; font-size:11.5px; border:1px solid #4c8dae; color:#4c8dae; background:transparent; border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
 
+  /* --- Indicador de Preparación de tierras --- */
+  .prep-subtitulo{ display:block; margin:14px 0 6px; }
+  .prep-dos-columnas{ display:grid; grid-template-columns: minmax(0,1fr); gap:4px; }
+  .prep-dos-columnas > div{ min-width:0; }
+  #prep-tabla-semanas th{ white-space:normal; line-height:1.25; }
+  #prep-tabla-semanas td{ white-space:nowrap; }
+  #prep-tabla-semanas td:nth-child(2){ white-space:normal; min-width:92px; }
+  .prep-claro-btn{ background:transparent; border:1px solid var(--line); color:var(--text-dim); border-radius:4px; padding:3px 9px; font-size:12px; cursor:pointer; margin-right:4px; }
+  .prep-claro-btn.si.activo{ background:#1e7b3a; border-color:#1e7b3a; color:#fff; }
+  .prep-claro-btn.no.activo{ background:#a5281c; border-color:#a5281c; color:#fff; }
+  .prep-aviso{ color:var(--amber); font-size:12px; }
+  .prep-sin-salario{ margin:8px 0; font-size:12.5px; color:var(--amber); }
+  .prep-sin-salario button{ background:transparent; border:1px solid var(--amber); color:var(--amber); border-radius:12px; padding:2px 9px; margin:3px 4px 0 0; font-size:12px; cursor:pointer; }
   /* --- Avisos de recorridos --- */
   .avisos-intro{ color:#555; font-size:13px; margin:0 0 12px; line-height:1.45; }
   .avisos-seccion{ border:1px solid #e3e3e3; border-radius:6px; padding:12px 14px; margin-bottom:12px; }
@@ -3890,6 +3903,67 @@
         <div class="maq-table-wrap ind-tabla-wrap" style="margin-top:12px;">
           <table class="maq-table ind-tabla" id="ind-tabla-ordenes">
             <thead><tr><th>Orden</th><th>Unidad</th><th>Huerta</th><th>Descripción</th><th>Programada</th><th>Fecha de salida</th><th>Resultado</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ind-tarjeta" id="prep-tarjeta">
+        <div class="ind-tarjeta-titulo">Preparación de tierras <span class="ind-sub">(maquinaria del departamento Preparación · mismas semanas de arriba · toca una semana para ver el detalle)</span></div>
+        <p class="ind-ayuda">Fallas: órdenes correctivas de los equipos de Preparación (sin preventivos). Reportes claros: los marcas tú en el detalle de cada semana. Mano de obra: salario diario de cada operador × días que trabajó con un equipo de Preparación (según sus recorridos de Avance de huerta). Diesel: litros cargados a esos equipos × precio por litro de las entregas a granel de la semana (o la más reciente con precio).</p>
+        <div class="ind-status" id="prep-status"></div>
+        <div class="maq-table-wrap ind-tabla-wrap">
+          <table class="maq-table ind-tabla" id="prep-tabla-semanas">
+            <thead><tr>
+              <th>Semana</th><th>Fechas</th><th class="ind-num">Fallas</th><th class="ind-num">Reportes claros</th><th class="ind-num">No claros</th><th class="ind-num">Sin revisar</th><th>% Claros</th>
+              <th class="ind-num">Días-operador</th><th class="ind-num">Mano de obra</th><th class="ind-num">Diesel (L)</th><th class="ind-num">Precio / L</th><th class="ind-num">Costo diesel</th><th class="ind-num">Costo total</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="ind-tarjeta" id="prep-detalle" style="display:none;">
+        <div class="ind-tarjeta-titulo">Preparación de tierras — semana <span id="prep-detalle-semana"></span></div>
+        <div class="ind-sub prep-subtitulo">Fallas de la semana — marca si el reporte fue claro para que el área mecánica supiera qué llevar</div>
+        <div class="maq-table-wrap ind-tabla-wrap">
+          <table class="maq-table ind-tabla" id="prep-tabla-fallas">
+            <thead><tr><th>Orden</th><th>Fecha</th><th>Unidad</th><th>Huerta</th><th>Descripción</th><th>Reportó</th><th>¿Reporte claro?</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="prep-dos-columnas">
+          <div>
+            <div class="ind-sub prep-subtitulo">Por equipo</div>
+            <div class="maq-table-wrap ind-tabla-wrap">
+              <table class="maq-table ind-tabla" id="prep-tabla-equipos">
+                <thead><tr><th>Equipo</th><th class="ind-num">Fallas</th><th class="ind-num">Días-operador</th><th class="ind-num">Diesel (L)</th><th class="ind-num">Costo diesel</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="ind-sub prep-subtitulo">Por operador</div>
+            <div class="maq-table-wrap ind-tabla-wrap">
+              <table class="maq-table ind-tabla" id="prep-tabla-operadores">
+                <thead><tr><th>Operador</th><th class="ind-num">Días</th><th class="ind-num">Salario diario</th><th class="ind-num">Mano de obra</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ind-tarjeta" id="prep-salarios-tarjeta">
+        <div class="ind-tarjeta-titulo">Salarios de operadores <span class="ind-sub">(para el costo de mano de obra de Preparación de tierras)</span></div>
+        <div class="ind-semana-form">
+          <div class="maq-field"><label for="prep-sal-nombre">Operador</label><input type="text" id="prep-sal-nombre" list="prep-sal-sugerencias" placeholder="Igual que en sus recorridos" maxlength="255"><datalist id="prep-sal-sugerencias"></datalist></div>
+          <div class="maq-field"><label for="prep-sal-monto">Salario diario ($)</label><input type="number" id="prep-sal-monto" min="0" step="0.01" placeholder="0.00"></div>
+          <button type="button" class="maq-save-btn" id="prep-sal-guardar">Agregar</button>
+          <button type="button" class="ah-btn-marcar" id="prep-sal-cancelar" style="display:none;">Cancelar</button>
+        </div>
+        <div class="ind-status" id="prep-sal-status"></div>
+        <div class="prep-sin-salario" id="prep-sin-salario" style="display:none;"></div>
+        <div class="maq-table-wrap ind-tabla-wrap ind-catalogo-wrap">
+          <table class="maq-table ind-tabla" id="prep-tabla-salarios">
+            <thead><tr><th>Operador</th><th class="ind-num">Salario diario</th><th>Actualizó</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -20276,6 +20350,7 @@ function indMostrarStatus_(id, texto, esError){
 function indCargarIndicador_(){
   const desde = document.getElementById('ind-f-desde').value;
   const hasta = document.getElementById('ind-f-hasta').value;
+  prepCargar_(desde, hasta);
   indMostrarStatus_('ind-status', 'Calculando...', false);
   google.script.run
     .withSuccessHandler(function(r){
@@ -20662,6 +20737,203 @@ document.getElementById('ord-semana-guardar').addEventListener('click', function
     .marcarOrdenEnProceso(ACCESS_CODE, PANEL_USUARIO, orden, semana);
 });
 
+
+// ---------------------------------------------------------------
+// Indicador de PREPARACIÓN DE TIERRAS (oct-2026, petición de Carlos): fallas
+// por semana de la maquinaria de Preparación, reportes claros (los marca
+// Carlos aquí mismo), mano de obra (salario × días) y diesel. Ver
+// getIndicadorPreparacion en server/handlers.js.
+// ---------------------------------------------------------------
+var PREP_DATOS = null;
+var PREP_SEMANA_DETALLE = null;
+var PREP_SALARIO_EDITANDO = null;
+function prepMoneda_(n){
+  if(n === null || n === undefined || !isFinite(Number(n))) return '—';
+  return '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function prepBarra_(pct){
+  return (pct === null || pct === undefined) ? '<span class="ind-sub">—</span>' : indBarraPorcentaje_(pct);
+}
+function prepNumero_(n){
+  if(n === null || n === undefined || !isFinite(Number(n))) return '—';
+  return Number(n).toLocaleString('es-MX', { maximumFractionDigits: 2 });
+}
+function prepCargar_(desde, hasta){
+  const tarjeta = document.getElementById('prep-tarjeta');
+  if(!tarjeta) return;
+  indMostrarStatus_('prep-status', 'Calculando...', false);
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('prep-status', (r && r.error) || 'No se pudo calcular.', true); return; }
+      PREP_DATOS = r;
+      indMostrarStatus_('prep-status', '', false);
+      prepRenderSemanas_();
+      const sigue = PREP_SEMANA_DETALLE && r.semanas.some(function(s){ return s.codigo === PREP_SEMANA_DETALLE; });
+      if(sigue) prepRenderDetalle_(PREP_SEMANA_DETALLE);
+      else document.getElementById('prep-detalle').style.display = 'none';
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('prep-status', (err && err.message) || 'No se pudo calcular.', true); })
+    .getIndicadorPreparacion(ACCESS_CODE, PANEL_USUARIO, desde, hasta);
+  prepCargarSalarios_();
+}
+function prepRenderSemanas_(){
+  const tbody = document.querySelector('#prep-tabla-semanas tbody');
+  if(!PREP_DATOS){ tbody.innerHTML = ''; return; }
+  const filas = PREP_DATOS.semanas.slice().reverse();
+  if(!filas.length){ tbody.innerHTML = '<tr><td colspan="13" class="maq-empty">No hay semanas en ese rango.</td></tr>'; return; }
+  const suma = { fallas: 0, claros: 0, noClaros: 0, sinRevisar: 0, diasOperador: 0, manoObra: 0, litros: 0, costoDiesel: 0, costoTotal: 0 };
+  const hoy = PREP_DATOS.hoy;
+  tbody.innerHTML = filas.map(function(s){
+    Object.keys(suma).forEach(function(k){ suma[k] += Number(s[k]) || 0; });
+    const esActual = hoy && s.inicio <= hoy && s.fin >= hoy;
+    const precioNota = s.precioOrigen === 'anterior' ? ' <span class="prep-aviso" title="Esa semana no hubo entregas con precio; se usa la última del ' + escapeHtml(indFecha_(s.precioFecha)) + '">*</span>' : '';
+    const salNota = s.sinSalario && s.sinSalario.length ? ' <span class="prep-aviso" title="Sin salario capturado: ' + escapeHtml(s.sinSalario.join(', ')) + '">⚠ ' + s.sinSalario.length + '</span>' : '';
+    return '<tr data-prep-semana="' + escapeHtml(s.codigo) + '" class="' + (s.codigo === PREP_SEMANA_DETALLE ? 'ind-fila-activa' : '') + '">'
+      + '<td><strong>' + escapeHtml(s.codigo) + '</strong>' + (esActual ? ' <span class="ind-chip-actual">en curso</span>' : '') + '</td>'
+      + '<td>' + indFecha_(s.inicio) + ' al ' + indFecha_(s.fin) + '</td>'
+      + '<td class="ind-num">' + s.fallas + '</td>'
+      + '<td class="ind-num">' + s.claros + '</td>'
+      + '<td class="ind-num">' + s.noClaros + '</td>'
+      + '<td class="ind-num">' + s.sinRevisar + '</td>'
+      + '<td>' + prepBarra_(s.porcentajeClaros) + '</td>'
+      + '<td class="ind-num">' + s.diasOperador + '</td>'
+      + '<td class="ind-num">' + prepMoneda_(s.manoObra) + salNota + '</td>'
+      + '<td class="ind-num">' + prepNumero_(s.litros) + '</td>'
+      + '<td class="ind-num">' + prepMoneda_(s.precioLitro) + precioNota + '</td>'
+      + '<td class="ind-num">' + prepMoneda_(s.costoDiesel) + '</td>'
+      + '<td class="ind-num"><strong>' + prepMoneda_(s.costoTotal) + '</strong></td>'
+      + '</tr>';
+  }).join('');
+  const revisados = suma.claros + suma.noClaros;
+  const pct = revisados ? Math.round(suma.claros / revisados * 10000) / 100 : null;
+  tbody.insertAdjacentHTML('beforeend', '<tr class="ind-fila-total">'
+    + '<td colspan="2"><strong>Total del rango</strong></td>'
+    + '<td class="ind-num">' + suma.fallas + '</td><td class="ind-num">' + suma.claros + '</td><td class="ind-num">' + suma.noClaros + '</td><td class="ind-num">' + suma.sinRevisar + '</td>'
+    + '<td>' + prepBarra_(pct) + '</td>'
+    + '<td class="ind-num">' + suma.diasOperador + '</td><td class="ind-num">' + prepMoneda_(suma.manoObra) + '</td>'
+    + '<td class="ind-num">' + prepNumero_(suma.litros) + '</td><td></td><td class="ind-num">' + prepMoneda_(suma.costoDiesel) + '</td>'
+    + '<td class="ind-num"><strong>' + prepMoneda_(suma.costoTotal) + '</strong></td></tr>');
+}
+function prepRenderDetalle_(codigo){
+  const sem = PREP_DATOS && PREP_DATOS.semanas.find(function(s){ return s.codigo === codigo; });
+  const caja = document.getElementById('prep-detalle');
+  if(!sem){ caja.style.display = 'none'; return; }
+  PREP_SEMANA_DETALLE = codigo;
+  caja.style.display = '';
+  document.getElementById('prep-detalle-semana').textContent = sem.codigo + ' (' + indFecha_(sem.inicio) + ' al ' + indFecha_(sem.fin) + ')';
+  const d = sem.detalle || { fallas: [], equipos: [], operadores: [] };
+  document.querySelector('#prep-tabla-fallas tbody').innerHTML = d.fallas.length ? d.fallas.map(function(f){
+    const btn = function(valor, clase, texto, activo){
+      return '<button type="button" class="prep-claro-btn ' + clase + (activo ? ' activo' : '') + '" data-prep-claro="' + escapeHtml(f.orden) + '" data-valor="' + valor + '">' + texto + '</button>';
+    };
+    return '<tr><td><strong>' + escapeHtml(f.orden) + '</strong></td><td>' + indFecha_(f.fecha) + '</td><td>' + escapeHtml(f.unidad) + '</td>'
+      + '<td>' + escapeHtml(f.huerta) + '</td><td>' + escapeHtml(f.descripcion) + '</td><td>' + escapeHtml(f.nombre) + '</td>'
+      + '<td style="white-space:nowrap;">' + btn('claro', 'si', '✓ Claro', f.claro === 1) + btn('no_claro', 'no', '✗ No claro', f.claro === 0) + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="maq-empty">No hubo fallas de equipos de Preparación esta semana.</td></tr>';
+  document.querySelector('#prep-tabla-equipos tbody').innerHTML = d.equipos.length ? d.equipos.map(function(e){
+    return '<tr><td>' + escapeHtml(e.unidad) + '</td><td class="ind-num">' + e.fallas + '</td><td class="ind-num">' + e.diasOperador + '</td>'
+      + '<td class="ind-num">' + prepNumero_(e.litros) + '</td><td class="ind-num">' + prepMoneda_(e.costoDiesel) + '</td></tr>';
+  }).join('') : '<tr><td colspan="5" class="maq-empty">Sin movimiento de equipos de Preparación.</td></tr>';
+  document.querySelector('#prep-tabla-operadores tbody').innerHTML = d.operadores.length ? d.operadores.map(function(o){
+    return '<tr><td>' + escapeHtml(o.operador) + '</td><td class="ind-num">' + o.dias + '</td>'
+      + '<td class="ind-num">' + (o.salarioDiario === null ? '<span class="prep-aviso">Sin salario</span>' : prepMoneda_(o.salarioDiario)) + '</td>'
+      + '<td class="ind-num">' + prepMoneda_(o.costo) + '</td></tr>';
+  }).join('') : '<tr><td colspan="4" class="maq-empty">Ningún operador hizo recorridos con equipos de Preparación.</td></tr>';
+  document.querySelectorAll('#prep-tabla-semanas tbody tr').forEach(function(tr){ tr.classList.toggle('ind-fila-activa', tr.getAttribute('data-prep-semana') === codigo); });
+}
+function prepMarcarClaro_(orden, valor){
+  const f = (PREP_DATOS && PREP_DATOS.semanas || []).reduce(function(x, s){ return x || (s.detalle && s.detalle.fallas.find(function(y){ return y.orden === orden; })); }, null);
+  // Tocar el mismo botón que ya está activo lo regresa a "sin revisar".
+  const actual = f ? (f.claro === 1 ? 'claro' : f.claro === 0 ? 'no_claro' : null) : null;
+  const nuevo = actual === valor ? null : valor;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('prep-status', (r && r.error) || 'No se pudo guardar.', true); return; }
+      prepCargar_(document.getElementById('ind-f-desde').value, document.getElementById('ind-f-hasta').value);
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('prep-status', (err && err.message) || 'No se pudo guardar.', true); })
+    .marcarReporteClaro(ACCESS_CODE, PANEL_USUARIO, orden, nuevo);
+}
+// --- Salarios de operadores ---
+var PREP_SALARIOS = [];
+function prepCargarSalarios_(){
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('prep-sal-status', (r && r.error) || 'No se pudo leer el catálogo.', true); return; }
+      PREP_SALARIOS = r.salarios || [];
+      const tbody = document.querySelector('#prep-tabla-salarios tbody');
+      tbody.innerHTML = PREP_SALARIOS.length ? PREP_SALARIOS.map(function(x){
+        return '<tr><td>' + escapeHtml(x.nombre) + '</td><td class="ind-num">' + prepMoneda_(x.salarioDiario) + '</td><td>' + escapeHtml(x.actualizadoPor || '') + '</td>'
+          + '<td style="white-space:nowrap;"><button type="button" class="ah-btn-marcar" data-prep-sal-editar="' + x.id + '">Editar</button> '
+          + '<button type="button" class="ah-btn-marcar" data-prep-sal-eliminar="' + x.id + '">Quitar</button></td></tr>';
+      }).join('') : '<tr><td colspan="4" class="maq-empty">Todavía no hay salarios capturados.</td></tr>';
+      const sin = r.sinSalario || [];
+      document.getElementById('prep-sal-sugerencias').innerHTML = sin.map(function(n){ return '<option value="' + escapeHtml(n) + '">'; }).join('');
+      const caja = document.getElementById('prep-sin-salario');
+      if(sin.length){
+        caja.innerHTML = '⚠ Operadores de Preparación sin salario (no suman a la mano de obra): ' + sin.map(function(n){ return '<button type="button" data-prep-sal-usar="' + escapeHtml(n) + '">' + escapeHtml(n) + '</button>'; }).join('');
+        caja.style.display = '';
+      } else { caja.style.display = 'none'; caja.innerHTML = ''; }
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('prep-sal-status', (err && err.message) || 'No se pudo leer el catálogo.', true); })
+    .getSalariosOperadores(ACCESS_CODE, PANEL_USUARIO);
+}
+function prepLimpiarFormSalario_(){
+  PREP_SALARIO_EDITANDO = null;
+  document.getElementById('prep-sal-nombre').value = '';
+  document.getElementById('prep-sal-monto').value = '';
+  document.getElementById('prep-sal-guardar').textContent = 'Agregar';
+  document.getElementById('prep-sal-cancelar').style.display = 'none';
+}
+function prepGuardarSalario_(){
+  const nombre = document.getElementById('prep-sal-nombre').value.trim();
+  const monto = document.getElementById('prep-sal-monto').value;
+  indMostrarStatus_('prep-sal-status', 'Guardando...', false);
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('prep-sal-status', (r && r.error) || 'No se pudo guardar.', true); return; }
+      indMostrarStatus_('prep-sal-status', 'Guardado.', false);
+      prepLimpiarFormSalario_();
+      prepCargar_(document.getElementById('ind-f-desde').value, document.getElementById('ind-f-hasta').value);
+    })
+    .withFailureHandler(function(err){ indMostrarStatus_('prep-sal-status', (err && err.message) || 'No se pudo guardar.', true); })
+    .guardarSalarioOperador(ACCESS_CODE, PANEL_USUARIO, PREP_SALARIO_EDITANDO, nombre, monto);
+}
+document.addEventListener('click', function(ev){
+  const t = ev.target;
+  if(!t || !t.closest) return;
+  const fila = t.closest('#prep-tabla-semanas tbody tr[data-prep-semana]');
+  if(fila){ prepRenderDetalle_(fila.getAttribute('data-prep-semana')); return; }
+  const btnClaro = t.closest('[data-prep-claro]');
+  if(btnClaro){ prepMarcarClaro_(btnClaro.getAttribute('data-prep-claro'), btnClaro.getAttribute('data-valor')); return; }
+  if(t.id === 'prep-sal-guardar'){ prepGuardarSalario_(); return; }
+  if(t.id === 'prep-sal-cancelar'){ prepLimpiarFormSalario_(); return; }
+  const usar = t.closest('[data-prep-sal-usar]');
+  if(usar){ document.getElementById('prep-sal-nombre').value = usar.getAttribute('data-prep-sal-usar'); document.getElementById('prep-sal-monto').focus(); return; }
+  const ed = t.closest('[data-prep-sal-editar]');
+  if(ed){
+    const x = PREP_SALARIOS.find(function(y){ return String(y.id) === ed.getAttribute('data-prep-sal-editar'); });
+    if(!x) return;
+    PREP_SALARIO_EDITANDO = x.id;
+    document.getElementById('prep-sal-nombre').value = x.nombre;
+    document.getElementById('prep-sal-monto').value = x.salarioDiario;
+    document.getElementById('prep-sal-guardar').textContent = 'Guardar cambios';
+    document.getElementById('prep-sal-cancelar').style.display = '';
+    return;
+  }
+  const el = t.closest('[data-prep-sal-eliminar]');
+  if(el){
+    const x = PREP_SALARIOS.find(function(y){ return String(y.id) === el.getAttribute('data-prep-sal-eliminar'); });
+    if(!x || !confirm('¿Quitar el salario de ' + x.nombre + '? Ya no se sumará su mano de obra.')) return;
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r || !r.success){ indMostrarStatus_('prep-sal-status', (r && r.error) || 'No se pudo quitar.', true); return; }
+        prepCargar_(document.getElementById('ind-f-desde').value, document.getElementById('ind-f-hasta').value);
+      })
+      .withFailureHandler(function(err){ indMostrarStatus_('prep-sal-status', (err && err.message) || 'No se pudo quitar.', true); })
+      .eliminarSalarioOperador(ACCESS_CODE, PANEL_USUARIO, x.id);
+  }
+});
 
 // ---------------------------------------------------------------
 // Avisos de recorridos (oct-2026, Carlos: "mándame un aviso cuando inicien

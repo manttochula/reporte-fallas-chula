@@ -14,9 +14,18 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -59,9 +68,11 @@ public class BackgroundLocationService extends Service implements LocationListen
     private static final String PREFS = "avance_activo";
 
     /** Distancia mínima entre puntos -- mismo criterio que
-     *  AVANCE_DISTANCIA_MINIMA_METROS en Index.html. */
-    private static final float DISTANCIA_MINIMA_METROS = 3f;
-    private static final long INTERVALO_MINIMO_MS = 4000L;
+     *  AVANCE_DISTANCIA_MINIMA_METROS en Index.html. Oct-2026 (Carlos quiere
+     *  trazos como los de JDLink): de 3 m / 4 s a 2 m / 2 s, para que las
+     *  vueltas y los surcos salgan más parecidos a la realidad. */
+    private static final float DISTANCIA_MINIMA_METROS = 2f;
+    private static final long INTERVALO_MINIMO_MS = 2000L;
     private static final int PUNTOS_POR_ENVIO = 300;
     private static final long ESPERA_ENTRE_INTENTOS_MS = 15000L;
 
@@ -80,6 +91,12 @@ public class BackgroundLocationService extends Service implements LocationListen
     private String apiBase;
     private String sesionJson;
     private LocationManager locationManager;
+    /** Servicio de ubicación de Google (Fused, gratis, viene con los
+     *  servicios de Google Play): combina el GPS con los sensores del
+     *  celular y da posiciones más estables. Si el celular no tiene
+     *  servicios de Google Play, se usa el GPS normal (locationManager). */
+    private FusedLocationProviderClient fusedCliente;
+    private LocationCallback fusedCallback;
     private PowerManager.WakeLock wakeLock;
     private ScheduledExecutorService envioEjecutor;
     private volatile boolean enviando = false;
@@ -129,17 +146,43 @@ public class BackgroundLocationService extends Service implements LocationListen
         return START_STICKY;
     }
 
-    private void iniciarCapturaGps_() {
-        if (locationManager != null) return; // ya estaba capturando
-        locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        if (locationManager == null) return;
+    private boolean hayGooglePlay_() {
         try {
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVALO_MINIMO_MS, DISTANCIA_MINIMA_METROS, this);
-            }
-            // De respaldo, por si el GPS puro tarda en obtener señal.
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, INTERVALO_MINIMO_MS, DISTANCIA_MINIMA_METROS, this);
+            return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(this) == ConnectionResult.SUCCESS;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void iniciarCapturaGps_() {
+        if (locationManager != null || fusedCliente != null) return; // ya estaba capturando
+        try {
+            if (hayGooglePlay_()) {
+                fusedCliente = LocationServices.getFusedLocationProviderClient(this);
+                LocationRequest pedido = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, INTERVALO_MINIMO_MS)
+                    .setMinUpdateIntervalMillis(1000L)
+                    .setMinUpdateDistanceMeters(DISTANCIA_MINIMA_METROS)
+                    .setWaitForAccurateLocation(true)
+                    .build();
+                fusedCallback = new LocationCallback() {
+                    @Override
+                    public void onLocationResult(LocationResult resultado) {
+                        if (resultado == null) return;
+                        for (Location loc : resultado.getLocations()) procesarUbicacion_(loc);
+                    }
+                };
+                fusedCliente.requestLocationUpdates(pedido, fusedCallback, Looper.getMainLooper());
+            } else {
+                locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+                if (locationManager == null) return;
+                if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, INTERVALO_MINIMO_MS, DISTANCIA_MINIMA_METROS, this);
+                }
+                // De respaldo, por si el GPS puro tarda en obtener señal (FiltroUbicacion
+                // descarta estas lecturas si son imprecisas o si hay GPS reciente).
+                if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, INTERVALO_MINIMO_MS, DISTANCIA_MINIMA_METROS, this);
+                }
             }
         } catch (SecurityException se) {
             Log.w(TAG, "Sin permiso de ubicación al iniciar el servicio.", se);
@@ -156,6 +199,11 @@ public class BackgroundLocationService extends Service implements LocationListen
 
     @Override
     public void onLocationChanged(Location location) {
+        procesarUbicacion_(location);
+    }
+
+    private void procesarUbicacion_(Location location) {
+        if (location == null || idLocal == null) return;
         final long ahora = System.currentTimeMillis();
         if (!FiltroUbicacion.aceptar(location.getProvider(), location.hasAccuracy(), location.getAccuracy(), ahora, ultimoGpsMs)) {
             return; // poca precisión, o lectura de red teniendo GPS: brincaría el recorrido
@@ -291,6 +339,11 @@ public class BackgroundLocationService extends Service implements LocationListen
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) {}
             locationManager = null;
         }
+        if (fusedCliente != null && fusedCallback != null) {
+            try { fusedCliente.removeLocationUpdates(fusedCallback); } catch (Exception ignored) {}
+        }
+        fusedCliente = null;
+        fusedCallback = null;
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }

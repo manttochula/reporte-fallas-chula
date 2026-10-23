@@ -1102,6 +1102,254 @@ async function getIndicadorCumplimientoSemanal(code, nombreUsuario, desdeCodigo,
   };
 }
 
+// ------------------------------------------------------------
+// Indicador de PREPARACIÓN DE TIERRAS (oct-2026, petición de Carlos):
+// por semana del catálogo,
+//  - número de FALLAS de la maquinaria del departamento PREPARACION
+//    (órdenes correctivas: sin las preventivas automáticas);
+//  - cuántos de esos reportes fueron CLAROS (los marca Carlos en el Panel:
+//    reportes.reporte_claro 1 = claro, 0 = no claro, NULL = sin revisar)
+//    -- "al momento que envían los reportes les falta claridad para que el
+//    área mecánica lo pueda interpretar";
+//  - COSTO DE MANO DE OBRA: salario diario del operador (catálogo
+//    operadores_salario) × días que hizo al menos un recorrido de Avance de
+//    huerta con un equipo de preparación;
+//  - COSTO DE DIESEL: litros cargados a esos equipos × precio por litro
+//    promedio de las entregas a granel de la semana (o la más reciente con
+//    precio, si esa semana no hubo);
+//  - costo total = mano de obra + diesel.
+// Las fechas se toman en la hora de México (el servidor y la base van en UTC).
+// ------------------------------------------------------------
+const ZONA_INDICADOR_PREP = 'America/Mexico_City';
+function fechaMx_(valor) {
+  if (valor === null || valor === undefined || valor === '') return null;
+  const d = valor instanceof Date ? valor : new Date(valor);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-CA', { timeZone: ZONA_INDICADOR_PREP }); // YYYY-MM-DD
+}
+function nombreClave_(t) { return (t || '').toString().trim().replace(/\s+/g, ' ').toUpperCase(); }
+function redondear2_(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+// Cálculo puro (sin base de datos), para poder probarlo aparte.
+//  semanas: [{codigo, inicio, fin}] (YYYY-MM-DD)
+//  fallas: [{orden, fecha (YYYY-MM-DD), unidad, codigoUnidad, huerta, descripcion, nombre, claro (1|0|null)}]
+//  dias: [{operador, fecha, codigoUnidad, unidad}] -- un registro por recorrido
+//  cargas: [{fecha, litros, codigoUnidad, unidad}]
+//  entregas: [{fecha, litros, precioLitro}] (solo las que tienen precio)
+//  salarios: {NOMBRE_EN_MAYUSCULAS: salarioDiario}
+function calcularIndicadorPreparacion_(semanas, fallas, dias, cargas, entregas, salarios) {
+  const entregasOrd = (entregas || []).filter((e) => Number(e.precioLitro) > 0 && Number(e.litros) > 0)
+    .slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  const precioSemana = (s) => {
+    const dentro = entregasOrd.filter((e) => e.fecha >= s.inicio && e.fecha <= s.fin);
+    if (dentro.length) {
+      const litros = dentro.reduce((t, e) => t + Number(e.litros), 0);
+      const total = dentro.reduce((t, e) => t + Number(e.litros) * Number(e.precioLitro), 0);
+      return { precio: redondear2_(total / litros), origen: 'semana' };
+    }
+    const antes = entregasOrd.filter((e) => e.fecha <= s.fin);
+    if (antes.length) {
+      const ult = antes[antes.length - 1];
+      return { precio: redondear2_(ult.precioLitro), origen: 'anterior', fecha: ult.fecha };
+    }
+    return { precio: null, origen: null };
+  };
+  const salarioDe = (nombre) => {
+    const v = (salarios || {})[nombreClave_(nombre)];
+    return Number.isFinite(Number(v)) && v !== null && v !== undefined ? Number(v) : null;
+  };
+  const resultado = (semanas || []).map((s) => {
+    const enSemana = (f) => f && f >= s.inicio && f <= s.fin;
+    const fs = (fallas || []).filter((f) => enSemana(f.fecha));
+    const claros = fs.filter((f) => f.claro === 1).length;
+    const noClaros = fs.filter((f) => f.claro === 0).length;
+    const revisados = claros + noClaros;
+    // Días-operador: un día por operador por fecha (aunque haya hecho varios recorridos).
+    const porOperador = {};
+    const porEquipo = {};
+    const equipoDe = (cod, unidad) => {
+      const k = cod || unidad || '(sin equipo)';
+      if (!porEquipo[k]) porEquipo[k] = { codigoUnidad: cod || null, unidad: unidad || cod || '(sin equipo)', fallas: 0, litros: 0, diasOperador: 0, _dias: {} };
+      return porEquipo[k];
+    };
+    (dias || []).filter((d) => enSemana(d.fecha)).forEach((d) => {
+      const k = nombreClave_(d.operador);
+      if (!k) return;
+      if (!porOperador[k]) porOperador[k] = { operador: (d.operador || '').toString().trim(), fechas: {} };
+      porOperador[k].fechas[d.fecha] = true;
+      const eq = equipoDe(d.codigoUnidad, d.unidad);
+      eq._dias[k + '|' + d.fecha] = true;
+    });
+    const operadores = Object.keys(porOperador).sort().map((k) => {
+      const o = porOperador[k];
+      const nDias = Object.keys(o.fechas).length;
+      const salario = salarioDe(o.operador);
+      return { operador: o.operador, dias: nDias, salarioDiario: salario, costo: salario === null ? null : redondear2_(salario * nDias) };
+    });
+    const diasOperador = operadores.reduce((t, o) => t + o.dias, 0);
+    const manoObra = redondear2_(operadores.reduce((t, o) => t + (o.costo || 0), 0));
+    const sinSalario = operadores.filter((o) => o.salarioDiario === null).map((o) => o.operador);
+    fs.forEach((f) => { equipoDe(f.codigoUnidad, f.unidad).fallas += 1; });
+    const cs = (cargas || []).filter((c) => enSemana(c.fecha));
+    cs.forEach((c) => { equipoDe(c.codigoUnidad, c.unidad).litros += Number(c.litros) || 0; });
+    const litros = redondear2_(cs.reduce((t, c) => t + (Number(c.litros) || 0), 0));
+    const p = precioSemana(s);
+    const costoDiesel = p.precio === null ? null : redondear2_(litros * p.precio);
+    const equipos = Object.keys(porEquipo).map((k) => {
+      const e = porEquipo[k];
+      return {
+        codigoUnidad: e.codigoUnidad, unidad: e.unidad, fallas: e.fallas, litros: redondear2_(e.litros),
+        costoDiesel: p.precio === null ? null : redondear2_(e.litros * p.precio),
+        diasOperador: Object.keys(e._dias).length,
+      };
+    }).sort((a, b) => (b.fallas - a.fallas) || (b.litros - a.litros) || String(a.unidad).localeCompare(String(b.unidad), 'es', { numeric: true }));
+    return {
+      codigo: s.codigo, inicio: s.inicio, fin: s.fin,
+      fallas: fs.length, claros, noClaros, sinRevisar: fs.length - revisados,
+      porcentajeClaros: revisados ? redondear2_((claros / revisados) * 100) : null,
+      diasOperador, manoObra, sinSalario,
+      litros, precioLitro: p.precio, precioOrigen: p.origen, precioFecha: p.fecha || null, costoDiesel,
+      costoTotal: redondear2_(manoObra + (costoDiesel || 0)),
+      detalle: {
+        fallas: fs.slice().sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0)),
+        operadores, equipos,
+      },
+    };
+  });
+  return resultado;
+}
+
+async function getIndicadorPreparacion(code, nombreUsuario, desdeCodigo, hastaCodigo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'visualizar');
+  const [todas] = await pool.query('SELECT id, codigo, fecha_inicio, fecha_fin FROM semanas ORDER BY fecha_inicio');
+  const lista = todas.map(semanaDeFila_);
+  if (!lista.length) return { success: false, error: 'El catálogo de semanas está vacío.' };
+  let i = lista.findIndex((s) => s.codigo === desdeCodigo);
+  let j = lista.findIndex((s) => s.codigo === hastaCodigo);
+  if (i === -1 || j === -1) {
+    const hoy = fechaMx_(new Date());
+    let actual = lista.findIndex((s) => s.inicio <= hoy && s.fin >= hoy);
+    if (actual === -1) actual = lista.length - 1;
+    if (j === -1) j = actual;
+    if (i === -1) i = Math.max(0, j - 7);
+  }
+  if (i > j) { const t = i; i = j; j = t; }
+  if (j - i > 104) return { success: false, error: 'Elige un rango de máximo 2 años.' };
+  const rango = lista.slice(i, j + 1);
+  // Margen de un día a cada lado: las fechas se pasan a hora de México en JS.
+  const desde = new Date(rango[0].inicio + 'T00:00:00Z');
+  desde.setUTCDate(desde.getUTCDate() - 1);
+  const hasta = new Date(rango[rango.length - 1].fin + 'T23:59:59Z');
+  hasta.setUTCDate(hasta.getUTCDate() + 1);
+  const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+
+  const [rFallas] = await pool.query(
+    `SELECT r.orden, r.fecha, r.unidad, r.codigo_unidad, r.huerta, r.descripcion, r.nombre, r.reporte_claro, r.reporte_claro_por
+       FROM reportes r
+       JOIN maquinaria m ON m.codigo_unidad = r.codigo_unidad
+       LEFT JOIN mantenimiento_ordenes mo ON mo.orden = r.orden
+      WHERE UPPER(m.departamento) = 'PREPARACION' AND mo.orden IS NULL AND r.fecha BETWEEN ? AND ?`,
+    [desde, hasta]
+  );
+  const fallas = rFallas.filter((r) => huertaPermitida_(huertasRestringidas, r.huerta)).map((r) => ({
+    orden: r.orden, fecha: fechaMx_(r.fecha), unidad: r.unidad || r.codigo_unidad || '', codigoUnidad: r.codigo_unidad,
+    huerta: r.huerta || '', descripcion: r.descripcion || '', nombre: r.nombre || '',
+    claro: r.reporte_claro === null || r.reporte_claro === undefined ? null : Number(r.reporte_claro),
+    claroPor: r.reporte_claro_por || null,
+  }));
+  const [rDias] = await pool.query(
+    `SELECT a.nombre, a.fecha_inicio, a.codigo_unidad, m.unidad, a.huerta
+       FROM avance_huerta a JOIN maquinaria m ON m.codigo_unidad = a.codigo_unidad
+      WHERE UPPER(m.departamento) = 'PREPARACION' AND a.fecha_inicio BETWEEN ? AND ?`,
+    [desde, hasta]
+  );
+  const dias = rDias.filter((r) => huertaPermitida_(huertasRestringidas, r.huerta))
+    .map((r) => ({ operador: r.nombre, fecha: fechaMx_(r.fecha_inicio), codigoUnidad: r.codigo_unidad, unidad: r.unidad }));
+  const [rCargas] = await pool.query(
+    `SELECT d.fecha, d.litros, d.codigo_unidad, d.unidad, d.huerta
+       FROM diesel d JOIN maquinaria m ON m.codigo_unidad = d.codigo_unidad
+      WHERE UPPER(m.departamento) = 'PREPARACION' AND d.fecha BETWEEN ? AND ?`,
+    [desde, hasta]
+  );
+  const cargas = rCargas.filter((r) => huertaPermitida_(huertasRestringidas, r.huerta))
+    .map((r) => ({ fecha: fechaMx_(r.fecha), litros: Number(r.litros), codigoUnidad: r.codigo_unidad, unidad: r.unidad }));
+  // Precio: entregas a granel con precio del rango, más la última con precio de antes del rango.
+  const [rEnt] = await pool.query(
+    `(SELECT fecha, litros, precio_litro FROM diesel_entregas WHERE precio_litro > 0 AND fecha BETWEEN ? AND ?)
+     UNION ALL
+     (SELECT fecha, litros, precio_litro FROM diesel_entregas WHERE precio_litro > 0 AND fecha < ? ORDER BY fecha DESC LIMIT 1)`,
+    [desde, hasta, desde]
+  );
+  const entregas = rEnt.map((r) => ({ fecha: fechaMx_(r.fecha), litros: Number(r.litros), precioLitro: Number(r.precio_litro) }));
+  const [rSal] = await pool.query('SELECT nombre, salario_diario FROM operadores_salario');
+  const salarios = {};
+  rSal.forEach((r) => { salarios[nombreClave_(r.nombre)] = Number(r.salario_diario); });
+  const semanas = calcularIndicadorPreparacion_(rango, fallas, dias, cargas, entregas, salarios);
+  return { success: true, semanas, hoy: fechaMx_(new Date()) };
+}
+
+// "Reporte claro" -- lo marca Carlos (o quien tenga permiso de capturar en
+// Indicadores u Órdenes) desde el Panel. valor: 'claro' | 'no_claro' | null (sin revisar).
+async function marcarReporteClaro(code, nombreUsuario, orden, valor) {
+  await requierePermisoPanel_(code, nombreUsuario, ['indicadores', 'ordenes'], 'capturar');
+  const folio = (orden || '').toString().trim();
+  if (!folio) return { success: false, error: 'Falta la orden.' };
+  const v = valor === 'claro' ? 1 : valor === 'no_claro' ? 0 : null;
+  if (valor !== null && valor !== undefined && valor !== '' && v === null) return { success: false, error: 'Valor inválido.' };
+  const [r] = await pool.query(
+    'UPDATE reportes SET reporte_claro = ?, reporte_claro_por = ?, reporte_claro_en = ? WHERE orden = ?',
+    [v, v === null ? null : nombreUsuario, v === null ? null : new Date(), folio]
+  );
+  if (!r.affectedRows) return { success: false, error: 'No se encontró la orden ' + folio + '.' };
+  await registrarAuditoria_('reportes', folio, 'editar', nombreUsuario, 'Reporte claro: ' + (v === 1 ? 'Sí' : v === 0 ? 'No' : 'sin revisar'));
+  return { success: true, orden: folio, claro: v };
+}
+
+// Catálogo de salarios de operadores (para el costo de mano de obra).
+async function getSalariosOperadores(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'visualizar');
+  const [rows] = await pool.query('SELECT id, nombre, salario_diario, actualizado_por, actualizado_en FROM operadores_salario ORDER BY nombre');
+  // Sugerencias: operadores que han usado equipos de preparación (últimos 120 días) y todavía no tienen salario.
+  const [ops] = await pool.query(
+    `SELECT DISTINCT a.nombre FROM avance_huerta a JOIN maquinaria m ON m.codigo_unidad = a.codigo_unidad
+      WHERE UPPER(m.departamento) = 'PREPARACION' AND a.fecha_inicio >= NOW() - INTERVAL 120 DAY`
+  );
+  const conSalario = new Set(rows.map((r) => nombreClave_(r.nombre)));
+  const sinSalario = Array.from(new Set(ops.map((o) => (o.nombre || '').toString().trim()).filter(Boolean)))
+    .filter((n) => !conSalario.has(nombreClave_(n))).sort((a, b) => a.localeCompare(b, 'es'));
+  return {
+    success: true,
+    salarios: rows.map((r) => ({ id: r.id, nombre: r.nombre, salarioDiario: Number(r.salario_diario), actualizadoPor: r.actualizado_por, actualizadoEn: r.actualizado_en })),
+    sinSalario,
+  };
+}
+async function guardarSalarioOperador(code, nombreUsuario, id, nombre, salarioDiario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'capturar');
+  const n = (nombre || '').toString().trim().replace(/\s+/g, ' ');
+  const s = Number(salarioDiario);
+  if (!n) return { success: false, error: 'Escribe el nombre del operador (igual que en sus recorridos).' };
+  if (!Number.isFinite(s) || s <= 0 || s > 100000) return { success: false, error: 'El salario diario debe ser un número mayor a 0.' };
+  const [dup] = await pool.query('SELECT id FROM operadores_salario WHERE UPPER(TRIM(nombre)) = ? AND id <> ?', [nombreClave_(n), Number(id) || 0]);
+  if (dup.length) return { success: false, error: 'Ese operador ya tiene salario capturado; edítalo en la lista.' };
+  if (Number(id)) {
+    const [r] = await pool.query('UPDATE operadores_salario SET nombre = ?, salario_diario = ?, actualizado_por = ? WHERE id = ?', [n, redondear2_(s), nombreUsuario, Number(id)]);
+    if (!r.affectedRows) return { success: false, error: 'No se encontró ese registro.' };
+  } else {
+    await pool.query('INSERT INTO operadores_salario (nombre, salario_diario, actualizado_por) VALUES (?, ?, ?)', [n, redondear2_(s), nombreUsuario]);
+  }
+  await registrarAuditoria_('operadores_salario', n, Number(id) ? 'editar' : 'capturar', nombreUsuario, 'Salario diario: $' + redondear2_(s));
+  return { success: true };
+}
+async function eliminarSalarioOperador(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'capturar');
+  const [rows] = await pool.query('SELECT nombre FROM operadores_salario WHERE id = ?', [Number(id) || 0]);
+  if (!rows.length) return { success: false, error: 'No se encontró ese registro.' };
+  await pool.query('DELETE FROM operadores_salario WHERE id = ?', [Number(id)]);
+  await registrarAuditoria_('operadores_salario', rows[0].nombre, 'eliminar', nombreUsuario, 'Se quitó el salario');
+  return { success: true };
+}
+
+
 async function getMisOrdenes(nombre) {
   if (!nombre) return [];
   const [rows] = await pool.query(REPORTE_SELECT + ' WHERE LOWER(TRIM(reportes.nombre)) = LOWER(TRIM(?)) ORDER BY reportes.id DESC', [nombre]);
@@ -8355,6 +8603,12 @@ async function quitarTelegram(code, nombreUsuario) {
 avisos.configurarUtilRecorrido_({ filtrarSaltosGps_, tramosDeRecorrido_, distanciaMetros_ });
 
 module.exports = {
+  getIndicadorPreparacion,
+  calcularIndicadorPreparacion_,
+  marcarReporteClaro,
+  getSalariosOperadores,
+  guardarSalarioOperador,
+  eliminarSalarioOperador,
   getConfigAvisos,
   guardarSuscripcionAvisos,
   quitarSuscripcionAvisos,

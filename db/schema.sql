@@ -2819,3 +2819,30 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Indicador de PREPARACIÓN DE TIERRAS (oct-2026). Ver
+-- getIndicadorPreparacion en server/handlers.js.
+-- reportes.reporte_claro: si el reporte de falla se entendía bien para que
+--   el área mecánica fuera preparada (1 = claro, 0 = no claro, NULL = sin
+--   revisar). Lo marca Carlos en el Panel (Indicadores).
+-- operadores_salario: salario diario de cada operador (por su nombre, igual
+--   que en sus recorridos de Avance de huerta) para el costo de mano de obra.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'reporte_claro'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE reportes ADD COLUMN reporte_claro TINYINT(1) DEFAULT NULL, ADD COLUMN reporte_claro_por VARCHAR(255) DEFAULT NULL, ADD COLUMN reporte_claro_en DATETIME DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+CREATE TABLE IF NOT EXISTS operadores_salario (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  nombre          VARCHAR(255) NOT NULL UNIQUE,
+  salario_diario  DECIMAL(10,2) NOT NULL,
+  actualizado_por VARCHAR(255) DEFAULT NULL,
+  actualizado_en  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

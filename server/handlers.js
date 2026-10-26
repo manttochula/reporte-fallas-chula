@@ -253,6 +253,8 @@ const REPORTE_SELECT = `
     reportes.costo_reparacion                             AS CostoReparacion,
     reportes.en_proceso_sin_fecha                       AS EnProcesoSinFecha,
     reportes.semana_en_proceso                          AS SemanaEnProceso,
+    reportes.reporte_claro                              AS ReporteClaro,
+    reportes.reporte_claro_por                          AS ReporteClaroPor,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden) AS RefaccionesNecesariasCount,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden AND rrn.entregado = 1) AS RefaccionesEntregadasCount,
     mo.regla_id                          AS ReglaMantenimientoId,

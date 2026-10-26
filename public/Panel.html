@@ -1227,6 +1227,7 @@
   .prep-claro-btn.si.activo{ background:#1e7b3a; border-color:#1e7b3a; color:#fff; }
   .prep-claro-btn.no.activo{ background:#a5281c; border-color:#a5281c; color:#fff; }
   .prep-aviso{ color:var(--amber); font-size:12px; }
+  .ord-claro{ white-space:nowrap; }
   .prep-sin-salario{ margin:8px 0; font-size:12.5px; color:var(--amber); }
   .prep-sin-salario button{ background:transparent; border:1px solid var(--amber); color:var(--amber); border-radius:12px; padding:2px 9px; margin:3px 4px 0 0; font-size:12px; cursor:pointer; }
   /* --- Avisos de recorridos --- */
@@ -1489,6 +1490,7 @@
                 <th data-col="refaccionamiento">Refaccionamiento</th>
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
+                <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
               </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -1584,6 +1586,7 @@
                 <th data-col="refaccionamiento">Refaccionamiento</th>
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
+                <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
               </tr>
             </thead>
             <tbody id="table-body-soldadura"></tbody>
@@ -1678,6 +1681,7 @@
                 <th data-col="refaccionamiento">Refaccionamiento</th>
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
+                <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
               </tr>
             </thead>
             <tbody id="table-body-automotriz"></tbody>
@@ -1772,6 +1776,7 @@
                 <th data-col="refaccionamiento">Refaccionamiento</th>
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
+                <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
               </tr>
             </thead>
             <tbody id="table-body-llantas"></tbody>
@@ -1866,6 +1871,7 @@
                 <th data-col="refaccionamiento">Refaccionamiento</th>
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
+                <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
               </tr>
             </thead>
             <tbody id="table-body-terceros"></tbody>
@@ -4083,6 +4089,7 @@
     <div class="row" id="modal-trabajo-row" style="display:none;"><span class="k">Descripción de lo realizado</span></div>
     <div class="desc-full" id="modal-trabajo" style="display:none;"></div>
     <div class="row"><span class="k">Visto bueno del reportante</span><span id="modal-vb">—</span></div>
+    <div class="row"><span class="k">¿Reporte claro?</span><span id="modal-claro" data-ord-claro-celda="">—</span></div>
     <div class="row"><span class="k">Comentario del reportante</span><span id="modal-comentario">—</span></div>
     <div class="row"><span class="k">Evidencia de cierre</span><span id="modal-evidencia-link">—</span></div>
     <div class="media-actions" id="modal-media-actions">
@@ -5407,6 +5414,7 @@ function filaOrdenHtml_(r){
     </td>
     <td data-col="evidencia">${renderEvidenciaCelda(r)}</td>
     <td data-col="visto_bueno">${r.VistoBueno === 'Si' ? '<span class="vb-yes">Si</span>' : '<span class="vb-no">-</span>'}</td>
+    <td data-col="reporte_claro" data-ord-claro-celda="${escapeHtml(orden)}">${ordClaroHtml_(r)}</td>
   </tr>
   `;
 }
@@ -5690,6 +5698,7 @@ const ORD_COLUMNAS = [
   { id: 'refaccionamiento', label: 'Refaccionamiento' },
   { id: 'evidencia', label: 'Evidencia' },
   { id: 'visto_bueno', label: 'Visto bueno' },
+  { id: 'reporte_claro', label: 'Reporte claro' },
 ];
 const ORD_COL_LS_KEY = 'panel_columnas_ordenes_v1';
 const ORD_COL_DEFAULT = { ocultas: [], fijadas: ['orden'] };
@@ -6083,6 +6092,9 @@ function abrirModal(orden){
   document.getElementById('modal-desc').textContent = r.Descripcion;
   document.getElementById('modal-atendio').textContent = r.AtendioPor || '—';
   document.getElementById('modal-vb').textContent = r.VistoBueno === 'Si' ? 'Sí' : (r.FechaSalida ? 'Aún no' : '—');
+  const modalClaro = document.getElementById('modal-claro');
+  modalClaro.setAttribute('data-ord-claro-celda', orden);
+  modalClaro.innerHTML = ordClaroHtml_(r);
   document.getElementById('modal-comentario').textContent = r.ComentarioReportante || '—';
 
   const hasTrabajo = !!r.TrabajoRealizado;
@@ -6336,6 +6348,7 @@ function exportarOrdenesExcel_(sufijo){
     {header:'Atendió', key:'atendioPor', width:18},
     {header:'Trabajo realizado', key:'trabajoRealizado', width:34, wrap:true},
     {header:'Visto bueno', key:'vistoBueno', width:14},
+    {header:'Reporte claro', key:'reporteClaro', width:14},
     {header:'Comentario', key:'comentario', width:34, wrap:true},
   ];
   const filas = records.map(function(r){
@@ -6346,6 +6359,7 @@ function exportarOrdenesExcel_(sufijo){
       fechaAtencion: r.FechaAtencion || '', fechaSalida: r.FechaSalida || '',
       refaccionamiento: r.Refaccionamiento || '', atendioPor: r.AtendioPor || '',
       trabajoRealizado: r.TrabajoRealizado || '', vistoBueno: r.VistoBueno || '', comentario: r.ComentarioReportante || '',
+      reporteClaro: (r.ReporteClaro === 1 || r.ReporteClaro === '1') ? 'Sí' : ((r.ReporteClaro === 0 || r.ReporteClaro === '0') ? 'No' : ''),
     };
   });
   const filtrosTexto = filtrosTextoOrdenesActivos_(sufijo);
@@ -20739,6 +20753,57 @@ document.getElementById('ord-semana-guardar').addEventListener('click', function
 
 
 // ---------------------------------------------------------------
+// "Reporte claro" en la orden (oct-2026, Carlos: "el apartado del reporte
+// claro y no claro que venga en la orden"). Columna en las listas de
+// Órdenes y en la ventana "Ver": ✓ Claro / ✗ No claro (tocar el activo lo
+// regresa a sin revisar). Es lo mismo que se marca en Indicadores →
+// Preparación de tierras (reportes.reporte_claro; ver marcarReporteClaro).
+// ---------------------------------------------------------------
+function ordClaroHtml_(r){
+  const v = (r.ReporteClaro === null || r.ReporteClaro === undefined || r.ReporteClaro === '') ? null : Number(r.ReporteClaro);
+  const orden = escapeHtml(r.Orden);
+  const quien = r.ReporteClaroPor ? ' title="Lo marcó ' + escapeHtml(r.ReporteClaroPor) + '"' : '';
+  return '<span class="ord-claro"' + quien + '>'
+    + '<button type="button" class="prep-claro-btn si' + (v === 1 ? ' activo' : '') + '" data-ord-claro="' + orden + '" data-valor="claro">✓ Claro</button>'
+    + '<button type="button" class="prep-claro-btn no' + (v === 0 ? ' activo' : '') + '" data-ord-claro="' + orden + '" data-valor="no_claro">✗ No claro</button>'
+    + '</span>';
+}
+function ordPintarClaro_(orden){
+  const r = (ALL_RECORDS || []).find(function(x){ return x.Orden === orden; });
+  if(!r) return;
+  document.querySelectorAll('[data-ord-claro-celda]').forEach(function(el){
+    if(el.getAttribute('data-ord-claro-celda') === orden) el.innerHTML = ordClaroHtml_(r);
+  });
+}
+document.addEventListener('click', function(ev){
+  const btn = ev.target && ev.target.closest ? ev.target.closest('[data-ord-claro]') : null;
+  if(!btn) return;
+  ev.stopPropagation();
+  const orden = btn.getAttribute('data-ord-claro');
+  const r = (ALL_RECORDS || []).find(function(x){ return x.Orden === orden; });
+  if(!r) return;
+  const actual = r.ReporteClaro === 1 || r.ReporteClaro === '1' ? 'claro' : (r.ReporteClaro === 0 || r.ReporteClaro === '0' ? 'no_claro' : null);
+  const valor = btn.getAttribute('data-valor');
+  const nuevo = actual === valor ? null : valor;
+  const antes = { v: r.ReporteClaro, por: r.ReporteClaroPor };
+  r.ReporteClaro = nuevo === 'claro' ? 1 : nuevo === 'no_claro' ? 0 : null; // se ve al instante
+  r.ReporteClaroPor = nuevo ? PANEL_USUARIO : null;
+  ordPintarClaro_(orden);
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res && res.success === false){
+        r.ReporteClaro = antes.v; r.ReporteClaroPor = antes.por; ordPintarClaro_(orden);
+        alert(res.error || 'No se pudo guardar.');
+      }
+    })
+    .withFailureHandler(function(err){
+      r.ReporteClaro = antes.v; r.ReporteClaroPor = antes.por; ordPintarClaro_(orden);
+      alert((err && err.message) || 'No se pudo guardar.');
+    })
+    .marcarReporteClaro(ACCESS_CODE, PANEL_USUARIO, orden, nuevo);
+}, true);
+
+// ---------------------------------------------------------------
 // Indicador de PREPARACIÓN DE TIERRAS (oct-2026, petición de Carlos): fallas
 // por semana de la maquinaria de Preparación, reportes claros (los marca
 // Carlos aquí mismo), mano de obra (salario × días) y diesel. Ver
@@ -20849,6 +20914,8 @@ function prepMarcarClaro_(orden, valor){
   google.script.run
     .withSuccessHandler(function(r){
       if(!r || !r.success){ indMostrarStatus_('prep-status', (r && r.error) || 'No se pudo guardar.', true); return; }
+      const rec = (typeof ALL_RECORDS !== 'undefined' ? ALL_RECORDS : []).find(function(x){ return x.Orden === orden; });
+      if(rec){ rec.ReporteClaro = r.claro; rec.ReporteClaroPor = r.claro === null ? null : PANEL_USUARIO; ordPintarClaro_(orden); }
       prepCargar_(document.getElementById('ind-f-desde').value, document.getElementById('ind-f-hasta').value);
     })
     .withFailureHandler(function(err){ indMostrarStatus_('prep-status', (err && err.message) || 'No se pudo guardar.', true); })

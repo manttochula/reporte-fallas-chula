@@ -2846,3 +2846,28 @@ CREATE TABLE IF NOT EXISTS operadores_salario (
   actualizado_por VARCHAR(255) DEFAULT NULL,
   actualizado_en  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- refacciones.folio_comercial (oct-2026): el "Código Producto" de CONTPAQi
+-- (sistema comercial), para ligar cada refacción con el inventario. Único
+-- cuando se captura. Se llenó con importar_refacciones_contpaq.bat.
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'refacciones' AND column_name = 'folio_comercial'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE refacciones ADD COLUMN folio_comercial VARCHAR(30) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+SET @idx_exists = (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE table_schema = DATABASE() AND table_name = 'refacciones' AND index_name = 'idx_refacciones_folio_comercial'
+);
+SET @sql_idx = IF(@idx_exists = 0,
+  'CREATE UNIQUE INDEX idx_refacciones_folio_comercial ON refacciones (folio_comercial)',
+  'SELECT 1');
+PREPARE stmt_idx FROM @sql_idx;
+EXECUTE stmt_idx;
+DEALLOCATE PREPARE stmt_idx;

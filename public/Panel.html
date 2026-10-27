@@ -3032,6 +3032,7 @@
           <thead>
             <tr>
               <th>Código</th>
+              <th>Folio comercial</th>
               <th>No. de parte (marca)</th>
               <th>Descripción</th>
               <th>Categoría</th>
@@ -3166,6 +3167,7 @@
         <h3 id="ref-modal-title">Agregar refacción</h3>
         <input type="hidden" id="ref-f-id">
         <div class="maq-field" id="ref-f-codigo-wrap" style="display:none;"><label>Código</label><div id="ref-f-codigo-valor" class="mnt-subtext" style="font-size:13px;"></div></div>
+        <div class="maq-field"><label>Folio comercial (Código Producto de CONTPAQi, opcional)</label><input type="text" id="ref-f-folio-comercial" maxlength="30" placeholder="Ej. FR0102011"></div>
         <div class="maq-field"><label>No. de parte (de la marca, opcional)</label><input type="text" id="ref-f-noparte"></div>
         <div class="maq-field"><label>Descripción *</label><input type="text" id="ref-f-descripcion"></div>
         <div class="maq-field"><label>Precio (opcional)</label><input type="number" id="ref-f-precio" min="0" step="0.01"></div>
@@ -17833,7 +17835,7 @@ function getRefaccionesFiltradas(){
   const q = (document.getElementById('ref-search').value || '').trim().toUpperCase();
   if(!q) return ALL_REFACCIONES;
   return ALL_REFACCIONES.filter(function(r){
-    const haystack = [r.Codigo, r.NoParte, r.Descripcion, r.Proveedor, r.Categoria, r.Marca, r.Modelos].join(' ').toUpperCase();
+    const haystack = [r.Codigo, r.FolioComercial, r.NoParte, r.Descripcion, r.Proveedor, r.Categoria, r.Marca, r.Modelos].join(' ').toUpperCase();
     return haystack.indexOf(q) !== -1;
   });
 }
@@ -17843,13 +17845,14 @@ function renderRefacciones(){
   const records = getRefaccionesFiltradas();
   document.getElementById('ref-summary').textContent = records.length + ' de ' + ALL_REFACCIONES.length + ' refacciones';
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No hay refacciones que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No hay refacciones que coincidan.</div></td></tr>';
     return;
   }
   tbody.innerHTML = records.map(function(r){
     return `
     <tr>
       <td>${escapeHtml(r.Codigo || '—')}</td>
+      <td>${escapeHtml(r.FolioComercial || '—')}</td>
       <td>${escapeHtml(r.NoParte || '—')}</td>
       <td>${escapeHtml(r.Descripcion)}</td>
       <td>${escapeHtml(r.Categoria || '—')}</td>
@@ -17877,6 +17880,7 @@ document.getElementById('ref-export').addEventListener('click', function(){
   if(registros.length === 0) return;
   const columnas = [
     {header:'Código', key:'codigo', width:14},
+    {header:'Folio comercial', key:'folioComercial', width:16},
     {header:'No. de parte', key:'noParte', width:16},
     {header:'Descripción', key:'descripcion', width:34, wrap:true},
     {header:'Categoría', key:'categoria', width:16},
@@ -17887,7 +17891,7 @@ document.getElementById('ref-export').addEventListener('click', function(){
   ];
   const filas = registros.map(function(r){
     return {
-      codigo: r.Codigo || '', noParte: r.NoParte || '', descripcion: r.Descripcion, categoria: r.Categoria || '',
+      codigo: r.Codigo || '', folioComercial: r.FolioComercial || '', noParte: r.NoParte || '', descripcion: r.Descripcion, categoria: r.Categoria || '',
       marca: r.Marca || '', modelos: r.Modelos || '',
       precio: (r.Precio === null || r.Precio === undefined || r.Precio === '') ? null : Number(r.Precio),
       proveedor: r.Proveedor || '',
@@ -17970,6 +17974,7 @@ document.getElementById('ref-f-marca-id').addEventListener('change', function(){
 function limpiarModalRefaccion(){
   document.getElementById('ref-f-id').value = '';
   document.getElementById('ref-f-noparte').value = '';
+  document.getElementById('ref-f-folio-comercial').value = '';
   document.getElementById('ref-f-descripcion').value = '';
   document.getElementById('ref-f-precio').value = '';
   document.getElementById('ref-f-categoria-id').value = '';
@@ -17999,6 +18004,7 @@ function abrirModalRefaccion(ref){
       document.getElementById('ref-f-codigo-wrap').style.display = '';
     }
     document.getElementById('ref-f-noparte').value = ref.NoParte || '';
+    document.getElementById('ref-f-folio-comercial').value = ref.FolioComercial || '';
     document.getElementById('ref-f-descripcion').value = ref.Descripcion || '';
     document.getElementById('ref-f-precio').value = ref.Precio !== null && ref.Precio !== undefined ? ref.Precio : '';
     document.getElementById('ref-f-categoria-id').value = ref.CategoriaId || '';
@@ -18044,6 +18050,7 @@ document.getElementById('ref-btn-save').addEventListener('click', function(){
 
   const datos = {
     noParte: document.getElementById('ref-f-noparte').value.trim(),
+    folioComercial: document.getElementById('ref-f-folio-comercial').value.trim(),
     descripcion: descripcion,
     precio: document.getElementById('ref-f-precio').value,
     categoriaId: document.getElementById('ref-f-categoria-id').value,

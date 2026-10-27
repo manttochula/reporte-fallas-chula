@@ -4676,7 +4676,7 @@ async function importarServiciosAutomotrices(code, nombreUsuario, filas) {
 async function getRefacciones(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
   const [rows] = await pool.query(`
-    SELECT r.id AS Id, r.codigo AS Codigo, r.no_parte AS NoParte, r.descripcion AS Descripcion,
+    SELECT r.id AS Id, r.codigo AS Codigo, r.folio_comercial AS FolioComercial, r.no_parte AS NoParte, r.descripcion AS Descripcion,
            r.precio AS Precio, r.proveedor AS ProveedorTexto, r.proveedor_id AS ProveedorId,
            p.nombre AS ProveedorNombre, r.categoria_id AS CategoriaId, c.nombre AS CategoriaNombre,
            r.marca_id AS MarcaId, mr.nombre AS MarcaNombre
@@ -4702,6 +4702,7 @@ async function getRefacciones(code, nombreUsuario) {
     return {
       Id: r.Id,
       Codigo: r.Codigo || '',
+      FolioComercial: r.FolioComercial || '',
       NoParte: r.NoParte || '',
       Descripcion: r.Descripcion,
       Precio: r.Precio !== null && r.Precio !== undefined ? Number(r.Precio) : null,
@@ -4726,6 +4727,13 @@ async function guardarRefaccion(code, nombreUsuario, id, data) {
     const descripcion = (data.descripcion || '').toString().trim();
     if (!descripcion) return { success: false, error: 'Escribe la descripción de la refacción.' };
     const noParte = (data.noParte || '').toString().trim() || null;
+    // Folio comercial (oct-2026): "Código Producto" de CONTPAQi. Opcional, pero no se repite.
+    const folioComercial = (data.folioComercial || '').toString().trim().toUpperCase() || null;
+    if (folioComercial) {
+      if (folioComercial.length > 30) return { success: false, error: 'El folio comercial es muy largo (máximo 30 caracteres).' };
+      const [dupFolio] = await pool.query('SELECT descripcion FROM refacciones WHERE folio_comercial = ? AND id <> ?', [folioComercial, Number(id) || 0]);
+      if (dupFolio.length) return { success: false, error: 'El folio comercial ' + folioComercial + ' ya lo tiene "' + dupFolio[0].descripcion + '".' };
+    }
     const precio = (data.precio === '' || data.precio === undefined || data.precio === null)
       ? null : Number(data.precio);
     const proveedorId = (data.proveedorId === '' || data.proveedorId === undefined || data.proveedorId === null)
@@ -4754,8 +4762,8 @@ async function guardarRefaccion(code, nombreUsuario, id, data) {
       // El código (REF-00001...) nunca se reasigna: se ignora aquí aunque
       // venga en data, se conserva el que ya tenía.
       await pool.query(
-        'UPDATE refacciones SET no_parte=?, descripcion=?, precio=?, proveedor_id=?, categoria_id=?, marca_id=? WHERE id=?',
-        [noParte, descripcion, precio, proveedorId, categoriaId, marcaId, id]
+        'UPDATE refacciones SET no_parte=?, descripcion=?, precio=?, proveedor_id=?, categoria_id=?, marca_id=?, folio_comercial=? WHERE id=?',
+        [noParte, descripcion, precio, proveedorId, categoriaId, marcaId, folioComercial, id]
       );
       refaccionId = Number(id);
     } else {
@@ -4764,8 +4772,8 @@ async function guardarRefaccion(code, nombreUsuario, id, data) {
       // "No. de parte" (que es texto libre de la marca y puede repetirse).
       const codigo = await siguienteFolio_(pool, 'refaccion', 'REF', 5);
       const [result] = await pool.query(
-        'INSERT INTO refacciones (codigo, no_parte, descripcion, precio, proveedor_id, categoria_id, marca_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [codigo, noParte, descripcion, precio, proveedorId, categoriaId, marcaId]
+        'INSERT INTO refacciones (codigo, no_parte, descripcion, precio, proveedor_id, categoria_id, marca_id, folio_comercial) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [codigo, noParte, descripcion, precio, proveedorId, categoriaId, marcaId, folioComercial]
       );
       refaccionId = result.insertId;
     }

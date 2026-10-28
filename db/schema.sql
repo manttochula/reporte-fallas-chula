@@ -2871,3 +2871,53 @@ SET @sql_idx = IF(@idx_exists = 0,
 PREPARE stmt_idx FROM @sql_idx;
 EXECUTE stmt_idx;
 DEALLOCATE PREPARE stmt_idx;
+
+-- ------------------------------------------------------------
+-- Catálogos de partes por modelo (oct-2026): el PDF del fabricante (p.ej.
+-- Kubota L3800) se sube desde el Panel (Refacciones -> "Catálogos de partes")
+-- y se guarda ya leído: secciones (con su dibujo) y la tabla de piezas de
+-- cada una. Desde una orden (Panel y Taller) se abre el catálogo del modelo
+-- del equipo para escoger piezas, con propuesta de la IA según la falla.
+-- completo = 0 mientras se está subiendo (no se muestra hasta terminar).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS manuales_partes (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  modelo_id       INT NOT NULL,
+  nombre_archivo  VARCHAR(255) DEFAULT NULL,
+  paginas         INT DEFAULT NULL,
+  secciones       INT NOT NULL DEFAULT 0,
+  piezas          INT NOT NULL DEFAULT 0,
+  completo        TINYINT(1) NOT NULL DEFAULT 0,
+  subido_por      VARCHAR(255) DEFAULT NULL,
+  creado_en       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_manuales_partes_modelo (modelo_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS manuales_partes_secciones (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  manual_id   INT NOT NULL,
+  orden       INT NOT NULL DEFAULT 0,
+  codigo      VARCHAR(20)  DEFAULT NULL,
+  titulo      VARCHAR(255) NOT NULL,
+  aplica      VARCHAR(100) DEFAULT NULL,
+  serie       VARCHAR(100) DEFAULT NULL,
+  grupo       VARCHAR(255) DEFAULT NULL,
+  imagen_url  VARCHAR(500) DEFAULT NULL,
+  INDEX idx_mps_manual (manual_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS manuales_partes_piezas (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  manual_id      INT NOT NULL,
+  seccion_id     INT NOT NULL,
+  ref            VARCHAR(10)  DEFAULT NULL,
+  codigo         VARCHAR(40)  DEFAULT NULL,
+  codigo_norm    VARCHAR(40)  DEFAULT NULL,
+  descripcion    VARCHAR(255) DEFAULT NULL,
+  cantidad       DECIMAL(10,2) DEFAULT NULL,
+  serie          VARCHAR(100) DEFAULT NULL,
+  observaciones  VARCHAR(255) DEFAULT NULL,
+  INDEX idx_mpp_manual (manual_id),
+  INDEX idx_mpp_seccion (seccion_id),
+  INDEX idx_mpp_codigo (codigo_norm)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

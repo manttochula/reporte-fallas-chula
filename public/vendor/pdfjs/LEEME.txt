@@ -1,0 +1,1 @@
+pdf.js 4.10.38 (Mozilla, Apache-2.0) - build 'legacy'. Lo usa public/catalogoPartes.js para leer los catalogos de partes en PDF desde el Panel.

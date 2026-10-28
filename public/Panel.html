@@ -1074,7 +1074,8 @@
   }
   .refnec-item.refnec-vinculada{ border-color: rgba(95,163,106,0.5); background: rgba(95,163,106,0.08); }
   .refnec-item.refnec-pendiente{ border-color: rgba(232,135,30,0.5); background: rgba(232,135,30,0.08); }
-  .refnec-item-texto{ flex:1; }
+  .refnec-item-texto{ flex:1 1 160px; min-width:0; overflow-wrap:anywhere; }
+  .refnec-item{ flex-wrap:wrap; }
   .refnec-item-cantidad{ display:flex; align-items:center; gap:2px; color:#888; font-size:11.5px; white-space:nowrap; }
   .refnec-item-cantidad-input{
     width:46px; font-size:11.5px; padding:2px 4px; border:1px solid #ccc; border-radius:4px;
@@ -2592,6 +2593,7 @@
           <input type="file" id="refnec-foto-input" accept="image/*" capture="environment" style="display:none;">
           <button type="button" class="refnec-accion-btn" id="refnec-btn-interpretar">✨ Interpretar con IA</button>
           <button type="button" class="refnec-accion-btn" id="refnec-btn-agregar-manual">+ Agregar tal cual</button>
+          <button type="button" class="refnec-accion-btn" id="refnec-btn-catalogo" title="Ver el catálogo de partes del modelo de este equipo y escoger piezas">📖 Catálogo del equipo</button>
         </div>
         <div class="maq-modal-status" id="refnec-interpretar-status"></div>
         <div class="refnec-lista" id="refnec-lista"></div>
@@ -3083,6 +3085,33 @@
             </tr>
           </thead>
           <tbody id="marca-table-body"></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Catálogos de partes (PDF del fabricante)</h3>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Sube el catálogo de partes de cada modelo (por ejemplo el PDF de Kubota L3800). Se lee solo: secciones, dibujos y la tabla de piezas. Después, en cada orden de un equipo de ese modelo, el botón "📖 Catálogo del equipo" (en Refaccionamiento, aquí y en Taller) lo muestra para escoger las piezas, con propuesta de la IA según la falla. El modelo del equipo se toma de Maquinaria. Si subes otro PDF para el mismo modelo, reemplaza al anterior.</div>
+      <div class="toolbar" id="manpar-subir">
+        <select id="manpar-modelo"><option value="">Modelo del catálogo...</option></select>
+        <input type="file" id="manpar-archivo" accept="application/pdf,.pdf">
+        <button class="export-btn" id="manpar-btn-subir">Subir catálogo de partes (PDF)</button>
+      </div>
+      <div class="maq-modal-status" id="manpar-status"></div>
+      <div class="summary" id="manpar-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Marca</th>
+              <th>Modelo</th>
+              <th>Equipos de ese modelo</th>
+              <th>Secciones</th>
+              <th>Piezas</th>
+              <th>Archivo</th>
+              <th>Subido por</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="manpar-table-body"></tbody>
         </table>
       </div>
 
@@ -4111,6 +4140,10 @@
 <!-- SheetJS (lectura de .xlsx/.xls en el navegador) — solo se usa en el
      botón "Importar lista" de Servicios Automotrices (ver sa-imp-*). -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Catálogos de partes por modelo (PDF del fabricante): lector y visor,
+     compartidos con Taller (ver public/catalogoPartes.js). -->
+<script src="/manualPartesParser.js"></script>
+<script src="/catalogoPartes.js"></script>
 
 <script>
 // ============================================================
@@ -4136,6 +4169,7 @@ var PANEL_SOLO_EN_LINEA = {
   importarServiciosAutomotrices: true, guardarImagenMapaHuerta: true, validarUsuario: true,
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
+  crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -4700,6 +4734,7 @@ function ocultarControlesSoloLectura(){
       '#ref-add', '.ref-btn-editar', '#ref-btn-save', '#ref-btn-delete',
       '#refcat-add', '.refcat-btn-editar', '#refcat-btn-save', '#refcat-btn-delete',
       '#marca-add', '.marca-btn-editar', '#marca-btn-save', '#marca-btn-delete', '#modelo-agregar', '.modelo-quitar',
+      '#manpar-subir', '.manpar-btn-eliminar',
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn',
@@ -6760,6 +6795,7 @@ ptabRefacciones.addEventListener('click', function(){
   if(!MARCAS_CARGADAS){ cargarMarcas(); }
   if(!MODELOS_CARGADOS){ cargarModelos(); }
   if(!REFACCIONES_CARGADAS){ cargarRefacciones(); }
+  if(!MANUALES_PARTES_CARGADOS){ cargarManualesPartes(); }
   if(!PROVEEDORES_CARGADOS){ cargarProveedores(); }
   if(!SOLICITUDES_CARGADAS){ cargarSolicitudesCotizacion(); }
   if(!MANTENIMIENTO_CARGADO){ cargarMantenimiento(); } else { renderRefaccionesChecklist(); }
@@ -12289,9 +12325,9 @@ function renderRefnecLista(){
   }
   cont.innerHTML = REFNEC_LISTA_TRABAJO.map(function(it, idx){
     const vinculada = !!it.refaccionId;
-    const badge = vinculada ? 'En catálogo' : 'Pendiente de catalogar';
+    const badge = vinculada ? 'En catálogo' : (it.piezaManualId ? 'Nueva: se da de alta al guardar' : 'Pendiente de catalogar');
     const cantidadValor = it.cantidad !== null && it.cantidad !== undefined && it.cantidad !== '' ? it.cantidad : 1;
-    const btnAgregar = vinculada ? '' : `<button type="button" class="refnec-item-btn" onclick="abrirAgregarRefaccionDesdeNecesaria(${idx})">Agregar a Refacciones</button>`;
+    const btnAgregar = (vinculada || it.piezaManualId) ? '' : `<button type="button" class="refnec-item-btn" onclick="abrirAgregarRefaccionDesdeNecesaria(${idx})">Agregar a Refacciones</button>`;
     // "Entregado" (si ya se recogió esta pieza): solo se puede marcar una vez
     // que la pieza ya quedó guardada (tiene id) — mientras se está armando la
     // lista (piezas recién agregadas/sugeridas de un preventivo) todavía no
@@ -12392,6 +12428,26 @@ document.getElementById('refnec-btn-agregar-manual').addEventListener('click', f
   campo.value = '';
   REFNEC_HAY_CAMBIOS_SIN_GUARDAR = true;
   renderRefnecLista();
+});
+
+// Catálogo de partes del modelo del equipo (ver public/catalogoPartes.js):
+// cada pieza que se escoja ahí se agrega a la lista de trabajo; si no existe
+// en Refacciones, el servidor la da de alta al "Guardar lista".
+document.getElementById('refnec-btn-catalogo').addEventListener('click', function(){
+  if(!REFNEC_ORDEN_ACTUAL) return;
+  if(!window.CatalogoPartes){ alert('No se pudo cargar el catálogo de partes. Revisa tu conexión a internet y recarga la página.'); return; }
+  window.CatalogoPartes.abrir({
+    code: ACCESS_CODE, usuario: PANEL_USUARIO, orden: REFNEC_ORDEN_ACTUAL,
+    onAgregar: function(item){
+      const ya = REFNEC_LISTA_TRABAJO.find(function(it){
+        return (item.refaccionId && it.refaccionId === item.refaccionId) || (item.piezaManualId && it.piezaManualId === item.piezaManualId);
+      });
+      if(ya) return; // ya estaba en la lista: no se duplica
+      REFNEC_LISTA_TRABAJO.push({ texto: item.texto, cantidad: item.cantidad || 1, refaccionId: item.refaccionId || null, piezaManualId: item.piezaManualId || null, origen: 'catalogo' });
+      REFNEC_HAY_CAMBIOS_SIN_GUARDAR = true;
+      renderRefnecLista();
+    }
+  });
 });
 
 document.getElementById('refnec-btn-interpretar').addEventListener('click', function(){
@@ -12614,7 +12670,7 @@ document.getElementById('refnec-btn-guardar').addEventListener('click', async fu
   const btn = this;
   const statusEl = document.getElementById('refnec-modal-status');
   const items = REFNEC_LISTA_TRABAJO.map(function(it){
-    return { refaccionId: it.refaccionId || null, texto: it.texto, cantidad: it.cantidad || 1, origen: it.origen || 'manual',
+    return { refaccionId: it.refaccionId || null, piezaManualId: it.piezaManualId || null, texto: it.texto, cantidad: it.cantidad || 1, origen: it.origen || 'manual',
       entregado: !!it.entregado, entregadoPor: it.entregadoPor || '', entregadoEn: it.entregadoEn || null };
   });
   // Costo de la reparación (opcional, aparte de la lista de piezas -- ver
@@ -18703,6 +18759,7 @@ function cargarMarcas(){
       MARCAS_CARGADAS = true;
       ALL_MARCAS = records || [];
       renderMarcas();
+      poblarSelectModeloManualPartes();
       poblarSelectMarcasRef();
       poblarSelectMarcasMaquinaria();
       renderCatalogoSimple('marcas');
@@ -18720,6 +18777,7 @@ function cargarModelos(){
       MODELOS_CARGADOS = true;
       ALL_MODELOS = records || [];
       renderMarcas();
+      poblarSelectModeloManualPartes();
       // Si el modal de equipo está abierto esperando el catálogo de
       // modelos (se entró directo a Maquinaria/Catálogo antes de que
       // terminara de cargar), se refresca con la marca que tenga elegida.
@@ -18730,6 +18788,118 @@ function cargarModelos(){
     .withFailureHandler(function(){})
     .getModelos(ACCESS_CODE, PANEL_USUARIO);
 }
+
+
+// ---------------------------------------------------------------
+// Catálogos de partes por modelo (PDF del fabricante) — pestaña Refacciones.
+// El PDF se lee en el navegador y se sube por secciones (ver
+// public/catalogoPartes.js -> CatalogoPartes.subirPdf).
+// ---------------------------------------------------------------
+let ALL_MANUALES_PARTES = [];
+let MANUALES_PARTES_CARGADOS = false;
+let MANUAL_PARTES_SUBIENDO = false;
+
+function cargarManualesPartes(){
+  const tbody = document.getElementById('manpar-table-body');
+  tbody.innerHTML = '<tr><td colspan="8"><div class="empty">Cargando...</div></td></tr>';
+  google.script.run
+    .withSuccessHandler(function(records){
+      MANUALES_PARTES_CARGADOS = true;
+      ALL_MANUALES_PARTES = records || [];
+      renderManualesPartes();
+    })
+    .withFailureHandler(function(){
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty">No se pudieron cargar los catálogos de partes.</div></td></tr>';
+    })
+    .getManualesPartes(ACCESS_CODE, PANEL_USUARIO);
+}
+
+function poblarSelectModeloManualPartes(){
+  const sel = document.getElementById('manpar-modelo');
+  if(!sel) return;
+  const actual = sel.value;
+  const marcaDe = function(id){ const m = ALL_MARCAS.find(function(x){ return x.Id === id; }); return m ? m.Nombre : ''; };
+  const opciones = ALL_MODELOS.slice().sort(function(a, b){
+    return (marcaDe(a.MarcaId) + ' ' + a.Nombre).localeCompare(marcaDe(b.MarcaId) + ' ' + b.Nombre, 'es');
+  });
+  sel.innerHTML = '<option value="">Modelo del catálogo...</option>' + opciones.map(function(m){
+    return `<option value="${m.Id}">${escapeHtml((marcaDe(m.MarcaId) + ' ' + m.Nombre).trim())}</option>`;
+  }).join('');
+  sel.value = actual;
+}
+
+function renderManualesPartes(){
+  const tbody = document.getElementById('manpar-table-body');
+  document.getElementById('manpar-summary').textContent = ALL_MANUALES_PARTES.length + ' catálogo(s) de partes';
+  if(ALL_MANUALES_PARTES.length === 0){
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty">Todavía no hay catálogos de partes. Elige el modelo, el PDF y presiona "Subir".</div></td></tr>';
+    ocultarControlesSoloLectura();
+    return;
+  }
+  tbody.innerHTML = ALL_MANUALES_PARTES.map(function(m){
+    return `<tr>
+      <td>${escapeHtml(m.Marca || '—')}</td>
+      <td>${escapeHtml(m.Modelo || '—')}</td>
+      <td>${m.Equipos || 0}${m.Equipos ? '' : ' <span class="mnt-subtext">(asígnalo en Maquinaria)</span>'}</td>
+      <td>${m.Secciones || 0}</td>
+      <td>${m.Piezas || 0}</td>
+      <td>${escapeHtml(m.Archivo || '')}</td>
+      <td>${escapeHtml(m.SubidoPor || '')}${m.CreadoEn ? '<br><span class="mnt-subtext">' + escapeHtml(formatFechaAudit(m.CreadoEn)) + '</span>' : ''}</td>
+      <td style="white-space:nowrap;">
+        <button type="button" class="export-btn" onclick="verManualPartes(${m.Id})">Ver</button>
+        <button type="button" class="export-btn manpar-btn-eliminar" onclick="eliminarManualPartesPanel(${m.Id})">Eliminar</button>
+      </td>
+    </tr>`;
+  }).join('');
+  ocultarControlesSoloLectura();
+}
+
+function verManualPartes(id){
+  if(!window.CatalogoPartes){ alert('No se pudo cargar el visor del catálogo. Revisa tu conexión y recarga la página.'); return; }
+  window.CatalogoPartes.abrir({ code: ACCESS_CODE, usuario: PANEL_USUARIO, manualId: id });
+}
+
+function eliminarManualPartesPanel(id){
+  const m = ALL_MANUALES_PARTES.find(function(x){ return x.Id === id; });
+  if(!confirm('¿Eliminar el catálogo de partes de ' + (m ? ((m.Marca || '') + ' ' + (m.Modelo || '')).trim() : 'este modelo') + '? Las refacciones que ya se dieron de alta desde él se quedan.')) return;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ alert((r && r.error) || 'No se pudo eliminar.'); return; }
+      cargarManualesPartes();
+    })
+    .withFailureHandler(function(){ alert('No se pudo eliminar. Intenta de nuevo.'); })
+    .eliminarManualPartes(ACCESS_CODE, PANEL_USUARIO, id);
+}
+
+document.getElementById('manpar-btn-subir').addEventListener('click', async function(){
+  const statusEl = document.getElementById('manpar-status');
+  const modeloId = Number(document.getElementById('manpar-modelo').value);
+  const archivo = document.getElementById('manpar-archivo').files[0];
+  const aviso = function(texto, tipo){ statusEl.textContent = texto; statusEl.className = 'maq-modal-status show' + (tipo ? ' ' + tipo : ''); };
+  if(MANUAL_PARTES_SUBIENDO) return;
+  if(!modeloId){ aviso('Elige el modelo al que pertenece el catálogo (si no está, dalo de alta arriba en Marcas y modelos).', 'err'); return; }
+  if(!archivo){ aviso('Elige el archivo PDF del catálogo.', 'err'); return; }
+  if(!window.CatalogoPartes){ aviso('No se pudo cargar el lector de PDF. Revisa tu conexión y recarga la página.', 'err'); return; }
+  const existente = ALL_MANUALES_PARTES.find(function(x){ return x.ModeloId === modeloId; });
+  if(existente && !confirm('Ese modelo ya tiene catálogo de partes. ¿Reemplazarlo con este PDF?')) return;
+  const btn = this;
+  MANUAL_PARTES_SUBIENDO = true;
+  btn.disabled = true;
+  try {
+    const r = await window.CatalogoPartes.subirPdf({
+      file: archivo, modeloId: modeloId, code: ACCESS_CODE, usuario: PANEL_USUARIO,
+      onProgreso: function(t){ aviso(t + ' (no cierres esta página)'); }
+    });
+    aviso('Listo: se guardaron ' + r.secciones + ' secciones y ' + r.piezas + ' piezas.', 'ok');
+    document.getElementById('manpar-archivo').value = '';
+    cargarManualesPartes();
+  } catch(e){
+    aviso((e && e.message) || 'No se pudo subir el catálogo.', 'err');
+  } finally {
+    MANUAL_PARTES_SUBIENDO = false;
+    btn.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------
 // Sección "Catálogos" (pestaña Catálogo): 6 listas simples con el mismo

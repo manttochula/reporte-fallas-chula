@@ -5263,6 +5263,15 @@ async function guardarRefaccionesNecesarias(code, nombreUsuario, orden, items) {
   items = Array.isArray(items) ? items : [];
 
   const capturadoPor = (nombreUsuario || '').toString().trim() || null;
+  // Piezas escogidas del catálogo de partes del equipo que todavía no están
+  // en Refacciones: se dan de alta solas (con su número de parte, marca y
+  // modelo) para que la lista quede ligada al inventario.
+  for (const it of items) {
+    if (it && it.piezaManualId && !it.refaccionId) {
+      const nuevoId = await altaRefaccionDesdeManual_(Number(it.piezaManualId));
+      if (nuevoId) it.refaccionId = nuevoId;
+    }
+  }
   const limpios = items
     .map((it) => {
       it = it || {};
@@ -5362,6 +5371,345 @@ async function marcarRefaccionNecesariaPendiente(code, nombreUsuario, id) {
   );
   await agregarObservacionOrden_(rows[0].orden, (nombreUsuario || 'Alguien') + ' quitó la marca de entregado de una pieza de refaccionamiento.');
   return { success: true };
+}
+
+// ---------------------------------------------------------------
+// Catálogos de partes por modelo (oct-2026, petición de Carlos: "cuando
+// vaya a ver una orden de un equipo, por ejemplo L3800, que me muestre el
+// catálogo y proponga la pieza, o la muestre para que el técnico la pueda
+// escoger").
+//
+// - El PDF del fabricante se sube desde el Panel (Refacciones -> "Catálogos
+//   de partes"). El NAVEGADOR lo lee (pdf.js + public/manualPartesParser.js)
+//   y manda sección por sección: crearManualPartes -> guardarSeccionManualPartes
+//   (con el dibujo recortado) x N -> terminarManualPartes. Mientras se sube
+//   queda completo = 0 y no se muestra; al terminar reemplaza al catálogo
+//   anterior de ese modelo.
+// - Desde una orden (Panel y Taller), getManualPartesOrden busca el modelo
+//   del equipo (maquinaria.modelo_id) y regresa su catálogo, con cada pieza
+//   ya ligada a la refacción del inventario si su número coincide.
+// - proponerPiezasManual le pide a la IA (2 pasos: primero secciones, luego
+//   piezas) qué piezas probablemente se necesitan según la falla.
+// - Al guardar las refacciones necesarias, una pieza del catálogo que no
+//   existe en Refacciones se da de alta sola (ver altaRefaccionDesdeManual_).
+// ---------------------------------------------------------------
+
+function normalizarCodigoParte_(s) {
+  return (s || '').toString().toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function textoPiezaManual_(p) {
+  return ((p.codigo ? p.codigo + ' - ' : '') + (p.descripcion || '')).trim();
+}
+
+async function getManualesPartes(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_MARCAS_, 'visualizar');
+  const [rows] = await pool.query(`
+    SELECT mp.id AS Id, mp.modelo_id AS ModeloId, mo.nombre AS Modelo, ma.nombre AS Marca,
+           mp.nombre_archivo AS Archivo, mp.paginas AS Paginas, mp.secciones AS Secciones, mp.piezas AS Piezas,
+           mp.subido_por AS SubidoPor, mp.creado_en AS CreadoEn,
+           (SELECT COUNT(*) FROM maquinaria mq WHERE mq.modelo_id = mp.modelo_id) AS Equipos
+    FROM manuales_partes mp
+    LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
+    LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
+    WHERE mp.completo = 1
+    ORDER BY ma.nombre, mo.nombre
+  `);
+  return rows.map((r) => ({ ...r, Equipos: Number(r.Equipos) || 0 }));
+}
+
+async function crearManualPartes(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  data = data || {};
+  const modeloId = Number(data.modeloId);
+  if (!modeloId) return { success: false, error: 'Elige el modelo al que pertenece el catálogo.' };
+  const [mod] = await pool.query('SELECT id FROM modelos_refacciones WHERE id = ?', [modeloId]);
+  if (!mod.length) return { success: false, error: 'Ese modelo ya no existe.' };
+  // Restos de una subida anterior que no terminó (se cerró el Panel a medias).
+  const [viejos] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND completo = 0', [modeloId]);
+  for (const v of viejos) await borrarManualPartes_(v.id);
+  const [r] = await pool.query(
+    'INSERT INTO manuales_partes (modelo_id, nombre_archivo, paginas, subido_por) VALUES (?, ?, ?, ?)',
+    [modeloId, (data.nombreArchivo || '').toString().slice(0, 255) || null, Number(data.paginas) || null, (nombreUsuario || '').toString().trim() || null]
+  );
+  return { success: true, id: r.insertId };
+}
+
+async function guardarSeccionManualPartes(code, nombreUsuario, manualId, seccion, imagenDataUrl) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(manualId);
+  const [m] = await pool.query('SELECT id, completo FROM manuales_partes WHERE id = ?', [id]);
+  if (!m.length) return { success: false, error: 'No se encontró el catálogo que se está subiendo.' };
+  if (m[0].completo) return { success: false, error: 'Ese catálogo ya se terminó de subir.' };
+  seccion = seccion || {};
+  const titulo = (seccion.titulo || '').toString().trim();
+  if (!titulo) return { success: false, error: 'Falta el nombre de la sección.' };
+  let imagenUrl = null;
+  if (imagenDataUrl) imagenUrl = await guardarArchivo_(imagenDataUrl);
+  const corta = (v, n) => ((v === null || v === undefined ? '' : v).toString().trim().slice(0, n) || null);
+  const [r] = await pool.query(
+    'INSERT INTO manuales_partes_secciones (manual_id, orden, codigo, titulo, aplica, serie, grupo, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, Number(seccion.orden) || 0, corta(seccion.codigo, 20), titulo.slice(0, 255), corta(seccion.aplica, 100), corta(seccion.serie, 100), corta(seccion.grupo, 255), imagenUrl]
+  );
+  const piezas = (Array.isArray(seccion.piezas) ? seccion.piezas : []).slice(0, 1000)
+    .map((p) => {
+      p = p || {};
+      const codigo = corta(p.codigo, 40);
+      const descripcion = corta(p.descripcion, 255);
+      if (!codigo && !descripcion) return null;
+      const cant = Number(p.cantidad);
+      return [id, r.insertId, corta(p.ref, 10), codigo, normalizarCodigoParte_(codigo) || null, descripcion,
+        p.cantidad !== null && p.cantidad !== '' && !isNaN(cant) ? cant : null, corta(p.serie, 100), corta(p.observaciones, 255)];
+    })
+    .filter(Boolean);
+  if (piezas.length) {
+    await pool.query(
+      'INSERT INTO manuales_partes_piezas (manual_id, seccion_id, ref, codigo, codigo_norm, descripcion, cantidad, serie, observaciones) VALUES ?',
+      [piezas]
+    );
+  }
+  return { success: true, seccionId: r.insertId, piezas: piezas.length };
+}
+
+async function terminarManualPartes(code, nombreUsuario, manualId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(manualId);
+  const [m] = await pool.query('SELECT id, modelo_id FROM manuales_partes WHERE id = ?', [id]);
+  if (!m.length) return { success: false, error: 'No se encontró el catálogo que se está subiendo.' };
+  const [[c]] = await pool.query(
+    'SELECT (SELECT COUNT(*) FROM manuales_partes_secciones WHERE manual_id = ?) AS s, (SELECT COUNT(*) FROM manuales_partes_piezas WHERE manual_id = ?) AS p',
+    [id, id]
+  );
+  if (!Number(c.s)) return { success: false, error: 'No se guardó ninguna sección del catálogo.' };
+  // El nuevo reemplaza al anterior del mismo modelo.
+  const [anteriores] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND id <> ?', [m[0].modelo_id, id]);
+  for (const a of anteriores) await borrarManualPartes_(a.id);
+  await pool.query('UPDATE manuales_partes SET completo = 1, secciones = ?, piezas = ? WHERE id = ?', [Number(c.s), Number(c.p), id]);
+  await registrarAuditoria_('manuales_partes', id, 'subir', nombreUsuario, 'Catálogo de partes: ' + c.s + ' secciones, ' + c.p + ' piezas');
+  return { success: true, secciones: Number(c.s), piezas: Number(c.p) };
+}
+
+async function borrarManualPartes_(id) {
+  await pool.query('DELETE FROM manuales_partes_piezas WHERE manual_id = ?', [id]);
+  await pool.query('DELETE FROM manuales_partes_secciones WHERE manual_id = ?', [id]);
+  await pool.query('DELETE FROM manuales_partes WHERE id = ?', [id]);
+}
+
+async function eliminarManualPartes(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const idNum = Number(id);
+  if (!idNum) return { success: false, error: 'Falta el catálogo a eliminar.' };
+  await borrarManualPartes_(idNum);
+  await registrarAuditoria_('manuales_partes', idNum, 'eliminar', nombreUsuario, 'Catálogo de partes');
+  return { success: true };
+}
+
+// Mapa "número de parte normalizado" -> refacciones del inventario que lo
+// tienen (en su No. de parte, o escrito dentro de la descripción, como
+// viene en los nombres de CONTPAQi). Solo se liga si es UNA sola.
+async function mapaRefaccionesPorParte_() {
+  const { partesEnNombre_ } = require('./importarRefaccionesContpaq');
+  const [rows] = await pool.query('SELECT id, codigo, no_parte, descripcion, folio_comercial FROM refacciones');
+  const mapa = new Map();
+  const agregar = (clave, r) => {
+    if (!clave || clave.length < 5) return;
+    if (!mapa.has(clave)) mapa.set(clave, new Map());
+    mapa.get(clave).set(r.id, r);
+  };
+  rows.forEach((r) => {
+    agregar(normalizarCodigoParte_(r.no_parte), r);
+    partesEnNombre_(r.descripcion).forEach((p) => agregar(p, r));
+  });
+  return (codigoNorm) => {
+    const m = codigoNorm ? mapa.get(codigoNorm) : null;
+    if (!m || m.size !== 1) return null;
+    return m.values().next().value;
+  };
+}
+
+async function datosManualPartes_(manualId) {
+  const [man] = await pool.query(`
+    SELECT mp.id, mp.modelo_id, mo.nombre AS modelo, ma.nombre AS marca, mp.secciones, mp.piezas
+    FROM manuales_partes mp
+    LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
+    LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
+    WHERE mp.id = ? AND mp.completo = 1`, [manualId]);
+  if (!man.length) return null;
+  const [secs] = await pool.query(
+    'SELECT id, codigo, titulo, aplica, serie, grupo, imagen_url FROM manuales_partes_secciones WHERE manual_id = ? ORDER BY orden, id',
+    [manualId]
+  );
+  const [pzs] = await pool.query(
+    'SELECT id, seccion_id, ref, codigo, codigo_norm, descripcion, cantidad, serie, observaciones FROM manuales_partes_piezas WHERE manual_id = ? ORDER BY id',
+    [manualId]
+  );
+  const buscar = await mapaRefaccionesPorParte_();
+  const porSeccion = new Map(secs.map((s) => [s.id, []]));
+  pzs.forEach((p) => {
+    const ref = buscar(p.codigo_norm);
+    const lista = porSeccion.get(p.seccion_id);
+    if (!lista) return;
+    lista.push({
+      id: p.id,
+      ref: p.ref || '',
+      codigo: p.codigo || '',
+      descripcion: p.descripcion || '',
+      cantidad: p.cantidad !== null ? Number(p.cantidad) : null,
+      serie: p.serie || '',
+      observaciones: p.observaciones || '',
+      refaccionId: ref ? ref.id : null,
+      refaccionCodigo: ref ? ref.codigo || '' : '',
+      refaccionTexto: ref ? ((ref.no_parte ? ref.no_parte + ' - ' : '') + ref.descripcion) : '',
+      folioComercial: ref ? ref.folio_comercial || '' : '',
+    });
+  });
+  return {
+    id: man[0].id,
+    modeloId: man[0].modelo_id,
+    modelo: man[0].modelo || '',
+    marca: man[0].marca || '',
+    secciones: secs.map((s) => ({
+      id: s.id, codigo: s.codigo || '', titulo: s.titulo, aplica: s.aplica || '', serie: s.serie || '',
+      grupo: s.grupo || '', imagenUrl: s.imagen_url || '', piezas: porSeccion.get(s.id) || [],
+    })),
+  };
+}
+
+async function manualesDisponibles_() {
+  const [rows] = await pool.query(`
+    SELECT mp.id, mo.nombre AS modelo, ma.nombre AS marca
+    FROM manuales_partes mp
+    LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
+    LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
+    WHERE mp.completo = 1 ORDER BY ma.nombre, mo.nombre`);
+  return rows.map((r) => ({ id: r.id, modelo: r.modelo || '', marca: r.marca || '' }));
+}
+
+// Catálogo para ver desde el Panel (Refacciones), sin orden.
+async function getManualPartes(code, nombreUsuario, manualId) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_MARCAS_, 'visualizar');
+  const manual = await datosManualPartes_(Number(manualId));
+  if (!manual) return { success: false, error: 'No se encontró ese catálogo de partes.' };
+  return { success: true, manual, equipo: null, disponibles: await manualesDisponibles_() };
+}
+
+// Catálogo del modelo del equipo de una orden (o el que se elija a mano con
+// manualIdElegido, p.ej. si el equipo no tiene modelo asignado).
+async function getManualPartesOrden(code, nombreUsuario, orden, manualIdElegido) {
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'visualizar');
+  const [rep] = await pool.query(
+    `SELECT r.codigo_unidad, r.unidad, m.modelo_id, m.serie, mo.nombre AS modelo, ma.nombre AS marca
+     FROM reportes r
+     LEFT JOIN maquinaria m ON m.codigo_unidad = r.codigo_unidad
+     LEFT JOIN modelos_refacciones mo ON mo.id = m.modelo_id
+     LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
+     WHERE r.orden = ?`,
+    [orden]
+  );
+  const e = rep[0] || {};
+  const equipo = { codigo: e.codigo_unidad || '', unidad: e.unidad || '', serie: e.serie || '', modelo: e.modelo || '', marca: e.marca || '' };
+  let manualId = Number(manualIdElegido) || null;
+  if (!manualId && e.modelo_id) {
+    const [mp] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND completo = 1 ORDER BY id DESC LIMIT 1', [e.modelo_id]);
+    if (mp.length) manualId = mp[0].id;
+  }
+  const manual = manualId ? await datosManualPartes_(manualId) : null;
+  let aviso = '';
+  if (!manual) {
+    aviso = !e.modelo_id
+      ? 'El equipo ' + (equipo.codigo || '') + ' no tiene modelo asignado en Maquinaria. Puedes elegir un catálogo de la lista.'
+      : 'Todavía no hay catálogo de partes para el modelo ' + equipo.modelo + '. Súbelo en el Panel (Refacciones → Catálogos de partes) o elige otro de la lista.';
+  }
+  return { success: true, equipo, manual, aviso, disponibles: await manualesDisponibles_() };
+}
+
+// Propuesta de la IA: 1) qué secciones del catálogo tienen que ver con la
+// falla; 2) dentro de esas, qué piezas. Solo propone: el técnico decide.
+async function proponerPiezasManual(code, nombreUsuario, orden, manualId, textoExtra) {
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'visualizar');
+  const manual = await datosManualPartes_(Number(manualId));
+  if (!manual) return { success: false, error: 'No se encontró el catálogo de partes.' };
+  const [rep] = await pool.query('SELECT descripcion, trabajo_realizado FROM reportes WHERE orden = ?', [orden]);
+  const falla = [
+    rep[0] && rep[0].descripcion ? 'Falla reportada: ' + rep[0].descripcion : '',
+    rep[0] && rep[0].trabajo_realizado ? 'Lo que lleva hecho el mecánico: ' + rep[0].trabajo_realizado : '',
+    textoExtra ? 'Nota del técnico: ' + textoExtra.toString().slice(0, 1000) : '',
+  ].filter(Boolean).join('\n');
+  if (!falla) return { success: false, error: 'La orden no tiene descripción de la falla. Escribe qué le pasa al equipo.' };
+
+  const equipoTexto = (manual.marca + ' ' + manual.modelo).trim();
+  const listaSecciones = manual.secciones
+    .map((s) => s.id + ': ' + s.titulo + (s.grupo ? ' (' + s.grupo + ')' : '') + (s.serie ? ' [' + s.serie + ']' : ''))
+    .join('\n');
+  const prompt1 =
+    'Eres jefe de taller de maquinaria agrícola. Un ' + equipoTexto + ' tiene esta falla:\n' + falla + '\n\n' +
+    'Estas son las secciones de su catálogo de partes (formato "id: sección (grupo)"):\n' + listaSecciones + '\n\n' +
+    'Elige de 1 a 4 secciones donde lo más probable es que estén las piezas que hay que cambiar, de la más a la menos probable. ' +
+    'Responde ÚNICAMENTE un objeto JSON, sin texto antes ni después: {"secciones":[ids], "resumen":"una frase corta en español explicando qué revisar"}';
+  const r1 = extraerJson_(await preguntarleAClaudeTexto_(prompt1)) || {};
+  const idsValidos = new Set(manual.secciones.map((s) => s.id));
+  const secIds = (Array.isArray(r1.secciones) ? r1.secciones : []).map(Number).filter((n) => idsValidos.has(n)).slice(0, 4);
+  if (!secIds.length) return { success: false, error: 'La IA no encontró una sección del catálogo para esta falla. Búscala a mano.' };
+
+  const piezasCandidatas = [];
+  secIds.forEach((sid) => {
+    const s = manual.secciones.find((x) => x.id === sid);
+    s.piezas.forEach((p) => piezasCandidatas.push({ p, s }));
+  });
+  const listaPiezas = piezasCandidatas
+    .map(({ p, s }) => p.id + ': ' + s.titulo + ' / No.' + p.ref + ' ' + p.descripcion + (p.codigo ? ' (' + p.codigo + ')' : ' (no se vende sola)') +
+      (p.observaciones ? ' — ' + p.observaciones : '') + (p.serie ? ' — serie ' + p.serie : ''))
+    .join('\n');
+  const prompt2 =
+    'Eres jefe de taller de maquinaria agrícola. Un ' + equipoTexto + ' tiene esta falla:\n' + falla + '\n\n' +
+    'Piezas candidatas del catálogo (formato "id: sección / No. descripción (número de parte)"):\n' + listaPiezas + '\n\n' +
+    'Elige las piezas (máximo 8) que lo más probable es que haya que pedir para reparar esa falla — las de desgaste o que fallan normalmente ' +
+    '(sellos, juntas, retenes, baleros, etc.), no la carcasa completa salvo que la falla lo indique. ' +
+    'Responde ÚNICAMENTE un objeto JSON: {"piezas":[{"id":numero,"motivo":"por qué, en pocas palabras"}]}';
+  const r2 = extraerJson_(await preguntarleAClaudeTexto_(prompt2)) || {};
+  const idsPieza = new Set(piezasCandidatas.map(({ p }) => p.id));
+  const piezas = (Array.isArray(r2.piezas) ? r2.piezas : [])
+    .map((x) => ({ id: Number(x && x.id), motivo: ((x && x.motivo) || '').toString().slice(0, 200) }))
+    .filter((x) => idsPieza.has(x.id))
+    .slice(0, 8);
+  return { success: true, secciones: secIds, piezas, resumen: (r1.resumen || '').toString().slice(0, 300) };
+}
+
+// Da de alta en Refacciones una pieza escogida del catálogo (si no existe
+// ya una con ese número de parte), con la marca y el modelo del catálogo.
+async function altaRefaccionDesdeManual_(piezaManualId) {
+  const [rows] = await pool.query(
+    `SELECT p.codigo, p.codigo_norm, p.descripcion, mp.modelo_id, mo.marca_id
+     FROM manuales_partes_piezas p
+     JOIN manuales_partes mp ON mp.id = p.manual_id
+     LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
+     WHERE p.id = ?`,
+    [piezaManualId]
+  );
+  if (!rows.length || !rows[0].codigo) return null;
+  const p = rows[0];
+  const buscar = await mapaRefaccionesPorParte_();
+  const existente = buscar(p.codigo_norm);
+  let refaccionId = existente ? existente.id : null;
+  if (!refaccionId) {
+    const { categoriaPorNombre_ } = require('./importarRefaccionesContpaq');
+    const categoria = categoriaPorNombre_((p.descripcion || '').replace(/,/g, ' '));
+    let categoriaId = null;
+    if (categoria) {
+      const [cat] = await pool.query('SELECT id FROM categorias_refacciones WHERE nombre = ?', [categoria]);
+      categoriaId = cat.length ? cat[0].id : null;
+    }
+    const codigo = await siguienteFolio_(pool, 'refaccion', 'REF', 5);
+    const [ins] = await pool.query(
+      'INSERT INTO refacciones (codigo, no_parte, descripcion, categoria_id, marca_id) VALUES (?, ?, ?, ?, ?)',
+      [codigo, p.codigo, (p.descripcion || p.codigo).slice(0, 255), categoriaId, p.marca_id || null]
+    );
+    refaccionId = ins.insertId;
+  }
+  if (p.modelo_id) {
+    await pool.query('INSERT IGNORE INTO refacciones_modelos (refaccion_id, modelo_id) VALUES (?, ?)', [refaccionId, p.modelo_id]);
+  }
+  return refaccionId;
 }
 
 // ---------------------------------------------------------------
@@ -8724,6 +9072,14 @@ module.exports = {
   interpretarRefaccionesFoto,
   getRefaccionesNecesarias,
   guardarRefaccionesNecesarias,
+  getManualesPartes,
+  crearManualPartes,
+  guardarSeccionManualPartes,
+  terminarManualPartes,
+  eliminarManualPartes,
+  getManualPartes,
+  getManualPartesOrden,
+  proponerPiezasManual,
   guardarCostoReparacion,
   marcarRefaccionNecesariaEntregada,
   marcarRefaccionNecesariaPendiente,

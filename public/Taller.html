@@ -232,6 +232,10 @@
   .rn-item.rn-vinculada{ border-color: rgba(95,163,106,0.5); }
   .rn-item.rn-pendiente{ border-color: rgba(232,135,30,0.5); }
   .rn-item-texto{ flex:1; color: var(--text); }
+  /* En celular, si no cabe todo en un renglón (texto largo, p.ej. piezas
+     del catálogo del equipo), los botones bajan al siguiente. */
+  .rn-item{ flex-wrap:wrap; }
+  .rn-item-texto{ flex:1 1 150px; min-width:0; overflow-wrap:anywhere; }
   .rn-item-cantidad{ display:flex; align-items:center; gap:2px; color: var(--text-dim); font-size:11.5px; white-space:nowrap; }
   .rn-item-cantidad-input{
     width:46px; font-size:11.5px; padding:2px 4px; border:1px solid var(--line); border-radius:4px;
@@ -311,6 +315,8 @@
 
 </div>
 
+<!-- Catalogo de partes del modelo del equipo (compartido con el Panel). -->
+<script src="/catalogoPartes.js"></script>
 
 <script>
 // ============================================================
@@ -793,10 +799,20 @@ function buildRefaccionesNecesariasNode(r){
   btnManual.textContent = 'Agregar tal cual';
   btnManual.addEventListener('click', function(){ rnAgregarManual(orden); });
 
+  // Catalogo de partes del modelo del equipo (PDF del fabricante subido en
+  // el Panel): se escogen las piezas ahi y se agregan a esta lista.
+  var btnCatalogo = document.createElement('button');
+  btnCatalogo.type = 'button';
+  btnCatalogo.className = 'rn-accion-btn';
+  btnCatalogo.id = 'rn-catalogo-' + orden;
+  btnCatalogo.textContent = 'Catálogo del equipo';
+  btnCatalogo.addEventListener('click', function(){ rnAbrirCatalogo(orden); });
+
   acciones.appendChild(btnDictar);
   acciones.appendChild(btnFoto);
   acciones.appendChild(btnInterpretar);
   acciones.appendChild(btnManual);
+  acciones.appendChild(btnCatalogo);
   wrap.appendChild(acciones);
   wrap.appendChild(fotoInput);
 
@@ -896,7 +912,7 @@ function rnRenderLista(orden, listaEl){
 
     var badge = document.createElement('span');
     badge.className = 'rn-item-badge';
-    badge.textContent = vinculada ? 'En catalogo' : 'Pendiente de catalogar';
+    badge.textContent = vinculada ? 'En catalogo' : (it.piezaManualId ? 'Nueva: se da de alta al guardar' : 'Pendiente de catalogar');
     row.appendChild(badge);
 
     var quitar = document.createElement('button');
@@ -910,6 +926,29 @@ function rnRenderLista(orden, listaEl){
     row.appendChild(quitar);
 
     lista.appendChild(row);
+  });
+}
+
+function rnAbrirCatalogo(orden){
+  if(!window.CatalogoPartes){
+    alert('No se pudo cargar el catálogo de partes. Revisa tu conexión a internet y recarga la página.');
+    return;
+  }
+  window.CatalogoPartes.abrir({
+    code: ACCESS_CODE,
+    usuario: localStorage.getItem('taller_nombre') || '',
+    orden: orden,
+    onAgregar: function(item){
+      if(!REFNEC_TALLER[orden]) REFNEC_TALLER[orden] = { cargado: true, items: [] };
+      var lista = REFNEC_TALLER[orden].items;
+      var ya = lista.some(function(it){
+        return (item.refaccionId && it.refaccionId === item.refaccionId) || (item.piezaManualId && it.piezaManualId === item.piezaManualId);
+      });
+      if(!ya) lista.push({ texto: item.texto, cantidad: item.cantidad || 1, refaccionId: item.refaccionId || null, piezaManualId: item.piezaManualId || null, origen: 'catalogo' });
+      rnRenderLista(orden);
+      var statusEl = document.getElementById('rn-guardar-status-' + orden);
+      if(statusEl){ statusEl.textContent = 'Agregaste piezas del catálogo: presiona "Guardar refacciones".'; statusEl.className = 'rn-status show'; }
+    }
   });
 }
 
@@ -1063,7 +1102,7 @@ function rnGuardar(orden){
   var btn = document.getElementById('rn-guardar-' + orden);
   var statusEl = document.getElementById('rn-guardar-status-' + orden);
   var items = ((REFNEC_TALLER[orden] && REFNEC_TALLER[orden].items) || []).map(function(it){
-    return { refaccionId: it.refaccionId || null, texto: it.texto, cantidad: it.cantidad || 1, origen: it.origen || 'manual' };
+    return { refaccionId: it.refaccionId || null, piezaManualId: it.piezaManualId || null, texto: it.texto, cantidad: it.cantidad || 1, origen: it.origen || 'manual' };
   });
 
   btn.disabled = true;

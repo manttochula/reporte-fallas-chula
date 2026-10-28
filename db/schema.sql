@@ -2949,3 +2949,18 @@ CREATE TABLE IF NOT EXISTS marcas_proveedores (
   proveedor_id INT NOT NULL,
   UNIQUE KEY uq_marca_proveedor (marca_id, proveedor_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Varias fotos por orden (oct-2026): la foto/video principal sigue en
+-- reportes.foto_url; las adicionales (solo imágenes, máx. 8) aquí. Se
+-- agregan al reportar o después desde el Panel/Taller.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reportes_fotos (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  orden       VARCHAR(20)  NOT NULL,
+  url         VARCHAR(500) NOT NULL,
+  origen      VARCHAR(20)  DEFAULT NULL,   -- 'reporte' | 'panel'
+  subido_por  VARCHAR(255) DEFAULT NULL,
+  creado_en   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_reportes_fotos_orden (orden)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

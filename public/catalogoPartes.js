@@ -1,6 +1,6 @@
 // Catálogo de partes por modelo (oct-2026) — compartido por el Panel y Taller.
 //
-//   CatalogoPartes.abrir({ code, usuario, orden, manualId, onAgregar })
+//   CatalogoPartes.abrir({ code, usuario, orden, manualId, onAgregar, proponerAlAbrir })
 //     Abre el visor: secciones del catálogo (con su dibujo) y la tabla de
 //     piezas de cada una, buscador, y "Proponer con IA" (según la falla de la
 //     orden). Si se pasa onAgregar(item), cada pieza tiene botón "Agregar"
@@ -31,6 +31,18 @@
     '.cp-btn-ia{background:#f3ecff;border-color:#c9b2f5;color:#4b2a91;}',
     '.cp-aviso{display:none;margin:10px 14px 0;padding:10px 12px;border-radius:6px;background:#fff6e5;color:#7a4a17;font-size:13px;}',
     '.cp-aviso.cp-mostrar{display:block;}',
+    '.cp-falla{display:none;margin:10px 14px 0;gap:12px;align-items:flex-start;}',
+    '.cp-falla.cp-mostrar{display:flex;}',
+    '.cp-falla-texto{flex:1;min-width:0;font-size:13px;color:#333;}',
+    '.cp-falla-texto b{display:block;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px;}',
+    '.cp-fotos{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:60%;}',
+    '.cp-foto{width:88px;height:66px;object-fit:cover;border-radius:6px;border:1px solid #ddd;cursor:zoom-in;background:#f3f3f3;}',
+    '.cp-video{font-size:12px;color:#0b5cad;}',
+    '.cp-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:3100;display:flex;align-items:center;justify-content:center;}',
+    '.cp-lightbox img{max-width:94vw;max-height:86vh;object-fit:contain;border-radius:4px;background:#fff;}',
+    '.cp-lb-btn{position:absolute;background:rgba(255,255,255,.15);color:#fff;border:none;font-size:30px;line-height:1;padding:10px 14px;border-radius:6px;cursor:pointer;}',
+    '.cp-lb-cerrar{top:12px;right:12px;}.cp-lb-ant{left:12px;top:50%;transform:translateY(-50%);}.cp-lb-sig{right:12px;top:50%;transform:translateY(-50%);}',
+    '.cp-lb-cont{position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#ddd;font-size:13px;}',
     '.cp-ia-panel{display:none;margin:10px 14px 0;padding:10px 12px;border-radius:6px;background:#f7f3ff;border:1px solid #ddd0f7;font-size:13px;}',
     '.cp-ia-panel.cp-mostrar{display:block;}',
     '.cp-ia-resumen{margin-bottom:6px;color:#3d2a6b;}',
@@ -148,6 +160,7 @@
       (opts.orden ? '<button type="button" class="cp-btn cp-btn-ia" id="cp-ia">✨ Proponer con IA</button>' : '') +
       '</div>' +
       '<div class="cp-aviso" id="cp-aviso"></div>' +
+      '<div class="cp-falla" id="cp-falla"><div class="cp-falla-texto" id="cp-falla-texto"></div><div class="cp-fotos" id="cp-fotos"></div></div>' +
       '<div class="cp-ia-panel" id="cp-ia-panel"><div class="cp-ia-resumen" id="cp-ia-resumen"></div>' +
       '<div id="cp-ia-lista"></div>' +
       '<div class="cp-ia-nota-fila"><input type="text" class="cp-ia-nota" id="cp-ia-nota" placeholder="¿No es eso? Describe la falla con tus palabras y vuelve a proponer">' +
@@ -172,9 +185,64 @@
     cargar_(opts.manualId || null);
   }
 
-  function teclaEsc_(e) { if (e.key === 'Escape') cerrar(); }
+  function teclaEsc_(e) {
+    if (e.key === 'Escape') { if (document.getElementById('cp-lightbox')) cerrarFoto_(); else cerrar(); }
+    else if (document.getElementById('cp-lightbox') && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) moverFoto_(e.key === 'ArrowRight' ? 1 : -1);
+  }
+
+  // --- Falla y fotos de la orden (para que el técnico las vea mientras escoge)
+  function pintarFalla_() {
+    var r = V.datos || {};
+    var caja = document.getElementById('cp-falla');
+    if (!caja) return;
+    var fotos = r.fotos || [];
+    if (!V.opts.orden || (!r.falla && !fotos.length && !r.video)) { caja.className = 'cp-falla'; return; }
+    document.getElementById('cp-falla-texto').innerHTML = '<b>Falla reportada</b>' + esc_(r.falla || '');
+    document.getElementById('cp-fotos').innerHTML =
+      fotos.map(function (f, i) { return '<img class="cp-foto" data-foto="' + i + '" src="' + esc_(f.url) + '" alt="Foto ' + (i + 1) + ' de la orden" title="Ver foto ' + (i + 1) + ' de ' + fotos.length + '">'; }).join('') +
+      (r.video ? '<a class="cp-video" href="' + esc_(r.video) + '" target="_blank" rel="noopener">▶ Ver video</a>' : '');
+    caja.className = 'cp-falla cp-mostrar';
+    Array.prototype.forEach.call(caja.querySelectorAll('[data-foto]'), function (im) {
+      im.addEventListener('click', function () { abrirFoto_(Number(im.getAttribute('data-foto'))); });
+    });
+  }
+
+  function abrirFoto_(i) {
+    var fotos = (V && V.datos && V.datos.fotos) || [];
+    if (!fotos.length) return;
+    cerrarFoto_();
+    V.fotoActual = (i + fotos.length) % fotos.length;
+    var lb = document.createElement('div');
+    lb.className = 'cp-lightbox';
+    lb.id = 'cp-lightbox';
+    lb.innerHTML = '<img id="cp-lb-img" alt="Foto de la orden" src="' + esc_(fotos[V.fotoActual].url) + '">' +
+      '<button type="button" class="cp-lb-btn cp-lb-cerrar" id="cp-lb-cerrar" title="Cerrar">&times;</button>' +
+      (fotos.length > 1 ? '<button type="button" class="cp-lb-btn cp-lb-ant" id="cp-lb-ant">&#8249;</button><button type="button" class="cp-lb-btn cp-lb-sig" id="cp-lb-sig">&#8250;</button>' : '') +
+      '<div class="cp-lb-cont" id="cp-lb-cont">' + (V.fotoActual + 1) + ' de ' + fotos.length + '</div>';
+    document.body.appendChild(lb);
+    lb.addEventListener('click', function (e) { if (e.target === lb) cerrarFoto_(); });
+    document.getElementById('cp-lb-cerrar').addEventListener('click', cerrarFoto_);
+    if (fotos.length > 1) {
+      document.getElementById('cp-lb-ant').addEventListener('click', function () { moverFoto_(-1); });
+      document.getElementById('cp-lb-sig').addEventListener('click', function () { moverFoto_(1); });
+    }
+  }
+
+  function moverFoto_(d) {
+    var fotos = (V && V.datos && V.datos.fotos) || [];
+    if (!fotos.length || !document.getElementById('cp-lightbox')) return;
+    V.fotoActual = (V.fotoActual + d + fotos.length) % fotos.length;
+    document.getElementById('cp-lb-img').src = fotos[V.fotoActual].url;
+    document.getElementById('cp-lb-cont').textContent = (V.fotoActual + 1) + ' de ' + fotos.length;
+  }
+
+  function cerrarFoto_() {
+    var lb = document.getElementById('cp-lightbox');
+    if (lb) lb.parentNode.removeChild(lb);
+  }
 
   function cerrar() {
+    cerrarFoto_();
     var ov = document.getElementById('cp-overlay');
     if (ov) ov.parentNode.removeChild(ov);
     document.removeEventListener('keydown', teclaEsc_);
@@ -202,11 +270,19 @@
       V.propuesta = { secciones: [], piezas: {} };
       document.getElementById('cp-ia-panel').className = 'cp-ia-panel';
       pintarCabeza_();
+      pintarFalla_();
       aviso_(r.aviso || '');
-      if (!V.manual) { pintarVacio_('Sin catálogo para mostrar.'); return; }
+      if (!V.manual) {
+        if (V.opts.proponerAlAbrir) aviso_((r.aviso ? r.aviso + ' ' : '') + 'La IA propone piezas a partir del catálogo de partes del modelo, por eso primero hay que tenerlo.');
+        pintarVacio_('Sin catálogo para mostrar.');
+        return;
+      }
       V.seccionId = V.manual.secciones.length ? V.manual.secciones[0].id : null;
       pintarSecciones_();
       pintarDetalle_();
+      // Botón "✨ Proponer piezas con IA" de la orden: se pide la propuesta
+      // en cuanto carga el catálogo (una sola vez).
+      if (V.opts.proponerAlAbrir && V.opts.orden) { V.opts.proponerAlAbrir = false; proponer_(''); }
     }).catch(function (e) {
       if (V !== esteV) return;
       aviso_((e && e.message) || 'No se pudo cargar el catálogo. Revisa tu conexión.');
@@ -563,5 +639,25 @@
     });
   }
 
-  window.CatalogoPartes = { abrir: abrir, cerrar: cerrar, subirPdf: subirPdf, leerPdf: leerPdf };
+  window.CatalogoPartes = { abrir: abrir, cerrar: cerrar, subirPdf: subirPdf, leerPdf: leerPdf, verFotos: verFotos };
+
+  // Visor de fotos suelto (lo usan el Panel y Taller para las fotos de la
+  // orden): CatalogoPartes.verFotos([url, ...], indice)
+  function verFotos(urls, indice) {
+    inyectarCss_();
+    var previo = V;
+    V = { datos: { fotos: (urls || []).map(function (u) { return { url: u }; }) }, opts: {} };
+    abrirFoto_(indice || 0);
+    var lb = document.getElementById('cp-lightbox');
+    var restaurar = function () { V = previo; document.removeEventListener('keydown', teclaSuelto); };
+    var teclaSuelto = function (e) {
+      if (e.key === 'Escape') { cerrarFoto_(); restaurar(); }
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') moverFoto_(e.key === 'ArrowRight' ? 1 : -1);
+    };
+    if (!previo) document.addEventListener('keydown', teclaSuelto);
+    if (lb) {
+      var obs = new MutationObserver(function () { if (!document.getElementById('cp-lightbox')) { obs.disconnect(); restaurar(); } });
+      obs.observe(document.body, { childList: true });
+    }
+  }
 })();

@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const pool = require('./db');
 const { siguienteFolio_, tieneAccesoModulo_, requiereClave_, tienePermisoPanel_ } = require('./helpers');
-const { guardarArchivo_ } = require('./storage');
+const { guardarArchivo_, leerArchivoComoBuffer_ } = require('./storage');
 const avisos = require('./avisos');
 const {
   preguntarleAClaudeSobreImagen_,
@@ -256,6 +256,7 @@ const REPORTE_SELECT = `
     reportes.reporte_claro                              AS ReporteClaro,
     reportes.reporte_claro_por                          AS ReporteClaroPor,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden) AS RefaccionesNecesariasCount,
+    (SELECT GROUP_CONCAT(CONCAT(rf.id, '|', rf.url) ORDER BY rf.id SEPARATOR ',') FROM reportes_fotos rf WHERE rf.orden = reportes.orden) AS FotosExtraTexto,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden AND rrn.entregado = 1) AS RefaccionesEntregadasCount,
     mo.regla_id                          AS ReglaMantenimientoId,
     mo.lectura_generacion                AS LecturaGeneracion,
@@ -533,6 +534,78 @@ async function clasificarReporteAutomatico_(codigoUnidad, descripcion) {
   return { esSoldadura: 0, esAutomotriz: 0, esLlantas: 0, esTerceros: 0 };
 }
 
+// ---------------------------------------------------------------
+// Varias fotos por orden (oct-2026, Carlos: "que se puedan adjuntar varias
+// imágenes en la orden y poder visualizarlas"). La foto/video principal
+// sigue en reportes.foto_url; las demás (solo imágenes) en reportes_fotos.
+// Se pueden mandar al reportar (Index.html) y agregar después desde el
+// Panel (Ver orden) o Taller. El catálogo de partes las muestra junto a la
+// propuesta de la IA, y la IA también las ve.
+// ---------------------------------------------------------------
+const MAX_FOTOS_EXTRA_ORDEN_ = 8;
+
+async function guardarFotosExtraOrden_(orden, fotos, origen, subidoPor) {
+  const lista = (Array.isArray(fotos) ? fotos : []).filter((f) => typeof f === 'string' && /^data:image\//.test(f));
+  if (!lista.length) return [];
+  const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM reportes_fotos WHERE orden = ?', [orden]);
+  const caben = Math.max(0, MAX_FOTOS_EXTRA_ORDEN_ - Number(c.n));
+  const guardadas = [];
+  for (const f of lista.slice(0, caben)) {
+    const url = await guardarArchivo_(f);
+    const [r] = await pool.query(
+      'INSERT INTO reportes_fotos (orden, url, origen, subido_por) VALUES (?, ?, ?, ?)',
+      [orden, url, (origen || '').slice(0, 20) || null, (subidoPor || '').toString().trim().slice(0, 255) || null]
+    );
+    guardadas.push({ id: r.insertId, url });
+  }
+  return guardadas;
+}
+
+async function fotosDeOrden_(orden) {
+  const [rows] = await pool.query('SELECT id, url FROM reportes_fotos WHERE orden = ? ORDER BY id', [orden]);
+  return rows.map((r) => ({ id: r.id, url: r.url }));
+}
+
+async function agregarFotosOrden(code, nombreUsuario, orden, fotos) {
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'capturar');
+  const lista = (Array.isArray(fotos) ? fotos : []).filter((f) => typeof f === 'string' && /^data:image\//.test(f));
+  if (!lista.length) return { success: false, error: 'No se recibió ninguna foto.' };
+  const [[c]] = await pool.query('SELECT COUNT(*) AS n FROM reportes_fotos WHERE orden = ?', [orden]);
+  if (Number(c.n) >= MAX_FOTOS_EXTRA_ORDEN_) return { success: false, error: 'Esta orden ya tiene el máximo de ' + MAX_FOTOS_EXTRA_ORDEN_ + ' fotos adicionales. Quita alguna para agregar otra.' };
+  const guardadas = await guardarFotosExtraOrden_(orden, lista, 'panel', nombreUsuario);
+  await agregarObservacionOrden_(orden, (nombreUsuario || 'Alguien') + ' agregó ' + guardadas.length + (guardadas.length === 1 ? ' foto.' : ' fotos.'));
+  const omitidas = lista.length - guardadas.length;
+  return { success: true, agregadas: guardadas.length, omitidas, fotos: await fotosDeOrden_(orden) };
+}
+
+async function eliminarFotoOrden(code, nombreUsuario, id) {
+  const [rows] = await pool.query('SELECT id, orden FROM reportes_fotos WHERE id = ?', [Number(id) || 0]);
+  if (!rows.length) return { success: false, error: 'No se encontró esa foto.' };
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, rows[0].orden, 'capturar');
+  await pool.query('DELETE FROM reportes_fotos WHERE id = ?', [rows[0].id]);
+  await agregarObservacionOrden_(rows[0].orden, (nombreUsuario || 'Alguien') + ' quitó una foto.');
+  return { success: true, fotos: await fotosDeOrden_(rows[0].orden) };
+}
+
+// Fotos de una orden como data URL (para mandárselas a la IA). Solo imágenes.
+async function fotosOrdenComoDataUrl_(orden, maximo) {
+  const [rep] = await pool.query('SELECT foto_url FROM reportes WHERE orden = ?', [orden]);
+  const urls = [];
+  if (rep.length && rep[0].foto_url && !/^(VID|AUD):/.test(rep[0].foto_url)) urls.push(rep[0].foto_url);
+  (await fotosDeOrden_(orden)).forEach((f) => urls.push(f.url));
+  const salida = [];
+  for (const u of urls.slice(0, maximo || 4)) {
+    try {
+      const buf = await leerArchivoComoBuffer_(u);
+      if (!buf || buf.length > 4 * 1024 * 1024) continue;
+      const ext = (u.split('.').pop() || '').toLowerCase();
+      const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
+      salida.push('data:' + mime + ';base64,' + buf.toString('base64'));
+    } catch (e) { /* una foto que no se pudo leer no detiene la propuesta */ }
+  }
+  return salida;
+}
+
 async function submitReporte(data) {
   data = data || {};
   try {
@@ -549,8 +622,10 @@ async function submitReporte(data) {
        VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?)`,
       [orden, data.unidad || '', data.unidadLabel || '', data.huerta || '', data.descripcion || '', data.nombre || '', fotoUrl || null, descripcionAudioUrl || null, clasificacion.esSoldadura, clasificacion.esAutomotriz, clasificacion.esLlantas, clasificacion.esTerceros]
     );
+    // Más fotos de la falla (oct-2026): además de la foto/video principal.
+    const fotosExtra = await guardarFotosExtraOrden_(orden, data.fotosExtra, 'reporte', data.nombre);
 
-    return { success: true, orden, fotoUrl, descripcionAudioUrl };
+    return { success: true, orden, fotoUrl, descripcionAudioUrl, fotosExtra };
   } catch (err) {
     return { success: false, error: err.toString() };
   }
@@ -1607,6 +1682,7 @@ async function eliminarOrden(code, nombreUsuario, orden) {
       return { success: false, error: 'Tu usuario no tiene acceso a esta orden (huerta ' + (rows[0].huerta || 'sin huerta') + ').' };
     }
     await pool.query('DELETE FROM mantenimiento_ordenes WHERE orden = ?', [orden]);
+    await pool.query('DELETE FROM reportes_fotos WHERE orden = ?', [orden]);
     await pool.query('DELETE FROM reportes WHERE orden = ?', [orden]);
     await registrarAuditoria_('reportes', orden, 'eliminar', nombreUsuario, (rows[0].unidad || '') + ' — ' + (rows[0].descripcion || ''));
     return { success: true };
@@ -5630,7 +5706,7 @@ async function getManualPartes(code, nombreUsuario, manualId) {
 async function getManualPartesOrden(code, nombreUsuario, orden, manualIdElegido) {
   await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'visualizar');
   const [rep] = await pool.query(
-    `SELECT r.codigo_unidad, r.unidad, m.modelo_id, m.serie, mo.nombre AS modelo, ma.nombre AS marca
+    `SELECT r.codigo_unidad, r.unidad, r.descripcion, r.foto_url, m.modelo_id, m.serie, mo.nombre AS modelo, ma.nombre AS marca
      FROM reportes r
      LEFT JOIN maquinaria m ON m.codigo_unidad = r.codigo_unidad
      LEFT JOIN modelos_refacciones mo ON mo.id = m.modelo_id
@@ -5652,7 +5728,12 @@ async function getManualPartesOrden(code, nombreUsuario, orden, manualIdElegido)
       ? 'El equipo ' + (equipo.codigo || '') + ' no tiene modelo asignado en Maquinaria. Puedes elegir un catálogo de la lista.'
       : 'Todavía no hay catálogo de partes para el modelo ' + equipo.modelo + '. Súbelo en el Panel (Refacciones → Catálogos de partes) o elige otro de la lista.';
   }
-  return { success: true, equipo, manual, aviso, disponibles: await manualesDisponibles_() };
+  // Falla y fotos de la orden, para que el técnico las vea junto al catálogo.
+  const fotos = [];
+  if (e.foto_url && !/^(VID|AUD):/.test(e.foto_url)) fotos.push({ id: null, url: e.foto_url });
+  (await fotosDeOrden_(orden)).forEach((f) => fotos.push(f));
+  const video = e.foto_url && /^VID:/.test(e.foto_url) ? e.foto_url.slice(4) : '';
+  return { success: true, equipo, manual, aviso, disponibles: await manualesDisponibles_(), falla: e.descripcion || '', fotos, video };
 }
 
 // Propuesta de la IA: 1) qué secciones del catálogo tienen que ver con la
@@ -5678,7 +5759,11 @@ async function proponerPiezasManual(code, nombreUsuario, orden, manualId, textoE
     'Estas son las secciones de su catálogo de partes (formato "id: sección (grupo)"):\n' + listaSecciones + '\n\n' +
     'Elige de 1 a 4 secciones donde lo más probable es que estén las piezas que hay que cambiar, de la más a la menos probable. ' +
     'Responde ÚNICAMENTE un objeto JSON, sin texto antes ni después: {"secciones":[ids], "resumen":"una frase corta en español explicando qué revisar"}';
-  const r1 = extraerJson_(await preguntarleAClaudeTexto_(prompt1)) || {};
+  // Las fotos que adjuntaron en la orden (si hay) ayudan a ubicar la falla.
+  const fotos = await fotosOrdenComoDataUrl_(orden, 4);
+  const r1 = extraerJson_(fotos.length
+    ? await preguntarleAClaudeSobreImagenes_(fotos, 'Estas son fotos de la falla que adjuntaron en la orden.\n\n' + prompt1)
+    : await preguntarleAClaudeTexto_(prompt1)) || {};
   const idsValidos = new Set(manual.secciones.map((s) => s.id));
   const secIds = (Array.isArray(r1.secciones) ? r1.secciones : []).map(Number).filter((n) => idsValidos.has(n)).slice(0, 4);
   if (!secIds.length) return { success: false, error: 'La IA no encontró una sección del catálogo para esta falla. Búscala a mano.' };
@@ -8986,6 +9071,7 @@ async function cancelarOrdenesDeServicios_(serviciosYaNoVencidos, nombreUsuario)
       );
       for (const o of abiertas) {
         await pool.query('DELETE FROM mantenimiento_ordenes WHERE orden = ?', [o.orden]);
+        await pool.query('DELETE FROM reportes_fotos WHERE orden = ?', [o.orden]);
         await pool.query('DELETE FROM reportes WHERE orden = ?', [o.orden]);
         await registrarAuditoria_(
           'reportes', o.orden, 'auto-cancelar',
@@ -9197,6 +9283,8 @@ module.exports = {
   getProveedoresPorMarca,
   asignarProveedorAMarca,
   quitarProveedorDeMarca,
+  agregarFotosOrden,
+  eliminarFotoOrden,
   getManualesPartes,
   crearManualPartes,
   guardarSeccionManualPartes,

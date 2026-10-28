@@ -1080,6 +1080,13 @@
   .refnec-item.refnec-pendiente{ border-color: rgba(232,135,30,0.5); background: rgba(232,135,30,0.08); }
   .refnec-item-texto{ flex:1 1 160px; min-width:0; overflow-wrap:anywhere; }
   .refnec-item{ flex-wrap:wrap; }
+  /* Varias fotos por orden (modal "Ver"): miniaturas + "Agregar más fotos" */
+  .modal-fotos-extra{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
+  .modal-fotos-extra:empty{ display:none; }
+  .modal-foto-mini{ position:relative; }
+  .modal-foto-mini img{ width:92px; height:70px; object-fit:cover; border-radius:6px; border:1px solid var(--line); cursor:zoom-in; display:block; }
+  .modal-foto-quitar{ position:absolute; top:2px; right:2px; background:rgba(0,0,0,.65); color:#fff; border:none; border-radius:4px; font-size:13px; line-height:1; padding:2px 6px; cursor:pointer; }
+  .modal-fotos-extra-acciones{ display:flex; align-items:center; gap:8px; margin:4px 0 10px; flex-wrap:wrap; }
   .refnec-item-cantidad{ display:flex; align-items:center; gap:2px; color:#888; font-size:11.5px; white-space:nowrap; }
   .refnec-item-cantidad-input{
     width:46px; font-size:11.5px; padding:2px 4px; border:1px solid #ccc; border-radius:4px;
@@ -2597,6 +2604,7 @@
           <input type="file" id="refnec-foto-input" accept="image/*" capture="environment" style="display:none;">
           <button type="button" class="refnec-accion-btn" id="refnec-btn-interpretar">✨ Interpretar con IA</button>
           <button type="button" class="refnec-accion-btn" id="refnec-btn-agregar-manual">+ Agregar tal cual</button>
+          <button type="button" class="refnec-accion-btn" id="refnec-btn-proponer-ia" title="La IA lee la falla de esta orden y propone las piezas del catálogo de partes del equipo">✨ Proponer piezas con IA</button>
           <button type="button" class="refnec-accion-btn" id="refnec-btn-catalogo" title="Ver el catálogo de partes del modelo de este equipo y escoger piezas">📖 Catálogo del equipo</button>
         </div>
         <div class="maq-modal-status" id="refnec-interpretar-status"></div>
@@ -4120,6 +4128,12 @@
     <h2 id="modal-title"></h2>
     <div class="sub" id="modal-sub"></div>
     <div id="modal-media"></div>
+    <div class="modal-fotos-extra" id="modal-fotos-extra"></div>
+    <div class="modal-fotos-extra-acciones" id="modal-fotos-extra-acciones">
+      <button type="button" class="row-view" id="modal-btn-mas-fotos">📷 + Agregar más fotos</button>
+      <input type="file" id="modal-mas-fotos-input" accept="image/*" multiple style="display:none;">
+      <span class="row-status-msg" id="modal-mas-fotos-status"></span>
+    </div>
     <div class="media-actions" id="modal-media-rep-actions">
       <div class="media-btn" id="modal-btn-foto-rep"><span>📷</span><span>Foto</span></div>
       <div class="media-btn" id="modal-btn-video-rep"><span>🎥</span><span>Video</span></div>
@@ -4186,6 +4200,7 @@ var PANEL_SOLO_EN_LINEA = {
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
+  agregarFotosOrden: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -6131,6 +6146,99 @@ Object.keys(ORD_FILTRO_SUFIJO_A_SECCION).forEach(function(sufijo){
   configurarRestoFiltrosOrdenes_(sufijo);
 });
 
+
+// --- Varias fotos por orden (oct-2026) -------------------------------------
+// reportes.foto_url = foto/video principal; FotosExtraTexto ("id|url,id|url")
+// = las demás (reportes_fotos). Aquí se ven en miniatura (clic = grande, con
+// flechas) y se pueden agregar/quitar.
+function fotosExtraDe_(r){
+  return ((r && r.FotosExtraTexto) || '').split(',').filter(Boolean).map(function(t){
+    const i = t.indexOf('|');
+    return { id: Number(t.slice(0, i)), url: t.slice(i + 1) };
+  });
+}
+function fotosExtraATexto_(fotos){
+  return (fotos || []).map(function(f){ return f.id + '|' + f.url; }).join(',');
+}
+function verFotosOrden_(urls, i){
+  if(window.CatalogoPartes && window.CatalogoPartes.verFotos) window.CatalogoPartes.verFotos(urls, i);
+  else window.open(urls[i], '_blank');
+}
+function renderFotosExtraModal_(r, puedeCapturar){
+  const cont = document.getElementById('modal-fotos-extra');
+  const extras = fotosExtraDe_(r);
+  const principal = r.FotoURL && !/^(VID|AUD):/.test(r.FotoURL) ? r.FotoURL : null;
+  const todas = (principal ? [principal] : []).concat(extras.map(function(f){ return f.url; }));
+  cont.innerHTML = extras.map(function(f, i){
+    return '<div class="modal-foto-mini"><img src="' + escapeHtml(f.url) + '" alt="Foto ' + (i + 2) + '" data-foto-idx="' + (i + (principal ? 1 : 0)) + '">' +
+      (puedeCapturar ? '<button type="button" class="modal-foto-quitar" data-foto-id="' + f.id + '" title="Quitar esta foto">&times;</button>' : '') + '</div>';
+  }).join('');
+  cont.querySelectorAll('img[data-foto-idx]').forEach(function(img){
+    img.addEventListener('click', function(){ verFotosOrden_(todas, Number(img.dataset.fotoIdx)); });
+  });
+  const principalImg = document.querySelector('#modal-media img');
+  if(principalImg){ principalImg.style.cursor = 'zoom-in'; principalImg.onclick = function(){ verFotosOrden_(todas, 0); }; }
+  cont.querySelectorAll('.modal-foto-quitar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if(!confirm('¿Quitar esta foto de la orden?')) return;
+      google.script.run
+        .withSuccessHandler(function(res){
+          if(!res || !res.success){ alert((res && res.error) || 'No se pudo quitar.'); return; }
+          r.FotosExtraTexto = fotosExtraATexto_(res.fotos);
+          renderFotosExtraModal_(r, puedeCapturar);
+        })
+        .withFailureHandler(function(){ alert('No se pudo quitar. Intenta de nuevo.'); })
+        .eliminarFotoOrden(ACCESS_CODE, PANEL_USUARIO, Number(btn.dataset.fotoId));
+    });
+  });
+  document.getElementById('modal-fotos-extra-acciones').style.display = puedeCapturar ? 'flex' : 'none';
+  const st = document.getElementById('modal-mas-fotos-status');
+  st.textContent = extras.length ? (extras.length + (principal ? 1 : 0)) + ' foto(s) en esta orden' : '';
+}
+function comprimirFotoOrden_(file){
+  return new Promise(function(ok, mal){
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      const img = new Image();
+      img.onload = function(){
+        const escala = Math.min(1, 1200 / img.width);
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * escala);
+        c.height = Math.round(img.height * escala);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        ok(c.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = function(){ mal(new Error('No se pudo leer la imagen ' + file.name)); };
+      img.src = ev.target.result;
+    };
+    reader.onerror = function(){ mal(new Error('No se pudo leer la imagen.')); };
+    reader.readAsDataURL(file);
+  });
+}
+document.getElementById('modal-btn-mas-fotos').addEventListener('click', function(){ document.getElementById('modal-mas-fotos-input').click(); });
+document.getElementById('modal-mas-fotos-input').addEventListener('change', async function(){
+  const archivos = Array.from(this.files || []).filter(function(f){ return /^image\//.test(f.type); });
+  this.value = '';
+  if(!archivos.length || !modalOrden) return;
+  const r = ALL_RECORDS.find(function(x){ return x.Orden === modalOrden; });
+  const st = document.getElementById('modal-mas-fotos-status');
+  const btn = document.getElementById('modal-btn-mas-fotos');
+  btn.disabled = true;
+  st.textContent = 'Subiendo ' + archivos.length + ' foto(s)...';
+  try {
+    const fotos = [];
+    for(const f of archivos) fotos.push(await comprimirFotoOrden_(f));
+    const res = await llamarApi_('agregarFotosOrden', ACCESS_CODE, PANEL_USUARIO, modalOrden, fotos);
+    btn.disabled = false;
+    if(!res || !res.success){ st.textContent = (res && res.error) || 'No se pudieron subir.'; return; }
+    if(r){ r.FotosExtraTexto = fotosExtraATexto_(res.fotos); renderFotosExtraModal_(r, true); }
+    st.textContent = 'Listo: se agregaron ' + res.agregadas + ' foto(s)' + (res.omitidas ? ' (' + res.omitidas + ' no cupieron, máximo 8 adicionales)' : '') + '.';
+  } catch(e){
+    btn.disabled = false;
+    st.textContent = (e && e.message) || 'No se pudieron subir las fotos.';
+  }
+});
+
 // --- Modal de detalle / evidencia ---
 function abrirModal(orden){
   const r = ALL_RECORDS.find(x => x.Orden === orden);
@@ -6193,6 +6301,7 @@ function abrirModal(orden){
 
   document.getElementById('modal-foto-rep-preview').innerHTML = '';
   document.getElementById('modal-media-rep-actions').style.display = puedeCapturarEstaOrden_ ? 'flex' : 'none';
+  renderFotosExtraModal_(r, puedeCapturarEstaOrden_);
   document.getElementById('modal-foto-rep-status').textContent = '';
 
   document.getElementById('modal-overlay').classList.add('open');
@@ -12450,11 +12559,11 @@ document.getElementById('refnec-btn-agregar-manual').addEventListener('click', f
 // Catálogo de partes del modelo del equipo (ver public/catalogoPartes.js):
 // cada pieza que se escoja ahí se agrega a la lista de trabajo; si no existe
 // en Refacciones, el servidor la da de alta al "Guardar lista".
-document.getElementById('refnec-btn-catalogo').addEventListener('click', function(){
+function abrirCatalogoRefnec_(proponer){
   if(!REFNEC_ORDEN_ACTUAL) return;
   if(!window.CatalogoPartes){ alert('No se pudo cargar el catálogo de partes. Revisa tu conexión a internet y recarga la página.'); return; }
   window.CatalogoPartes.abrir({
-    code: ACCESS_CODE, usuario: PANEL_USUARIO, orden: REFNEC_ORDEN_ACTUAL,
+    code: ACCESS_CODE, usuario: PANEL_USUARIO, orden: REFNEC_ORDEN_ACTUAL, proponerAlAbrir: !!proponer,
     onAgregar: function(item){
       const ya = REFNEC_LISTA_TRABAJO.find(function(it){
         return (item.refaccionId && it.refaccionId === item.refaccionId) || (item.piezaManualId && it.piezaManualId === item.piezaManualId);
@@ -12465,7 +12574,9 @@ document.getElementById('refnec-btn-catalogo').addEventListener('click', functio
       renderRefnecLista();
     }
   });
-});
+}
+document.getElementById('refnec-btn-catalogo').addEventListener('click', function(){ abrirCatalogoRefnec_(false); });
+document.getElementById('refnec-btn-proponer-ia').addEventListener('click', function(){ abrirCatalogoRefnec_(true); });
 
 document.getElementById('refnec-btn-interpretar').addEventListener('click', function(){
   const texto = document.getElementById('refnec-f-texto').value.trim();

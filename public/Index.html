@@ -302,6 +302,14 @@
     overflow:hidden;
   }
   .photo-box.has-photo{ padding: 0; border-style: solid; }
+  .fotos-extra-rep{ margin-top:8px; }
+  .fotos-extra-lista{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  .fotos-extra-lista:empty{ display:none; }
+  .foto-extra-item{ position:relative; }
+  .foto-extra-item img{ width:76px; height:76px; object-fit:cover; border-radius:6px; border:1px solid var(--line); display:block; }
+  .foto-extra-quitar{ position:absolute; top:2px; right:2px; background:rgba(0,0,0,.65); color:#fff; border:none; border-radius:4px; font-size:13px; line-height:1; padding:3px 6px; }
+  .fotos-extra-btn{ flex-direction:row !important; gap:8px; padding:10px !important; font-size:13px; }
+  .fotos-extra-btn .icon{ font-size:16px !important; }
   .photo-box img{ width:100%; display:block; max-height:280px; object-fit:cover; }
   .photo-hint{ color: var(--text-dim); font-size: 13px; }
   .photo-hint .icon{ font-size: 26px; display:block; margin-bottom:8px; }
@@ -757,6 +765,15 @@
         <input type="file" id="f-photo-camera" accept="image/*" capture="environment" style="display:none;">
         <input type="file" id="f-video-camera" accept="video/*" capture="environment" style="display:none;">
         <input type="file" id="f-gallery" accept="image/*,video/*" style="display:none;">
+        <!-- Más fotos de la falla (opcional, oct-2026): se mandan junto con el reporte. -->
+        <div class="fotos-extra-rep" id="fotos-extra-rep">
+          <div class="fotos-extra-lista" id="fotos-extra-lista"></div>
+          <div class="media-btn fotos-extra-btn" id="btn-foto-extra">
+            <span class="icon">➕</span>
+            <span>Agregar más fotos (opcional)</span>
+          </div>
+          <input type="file" id="f-fotos-extra" accept="image/*" multiple style="display:none;">
+        </div>
       </div>
       <div class="field">
         <label>Nombre de quien reporta <span class="req">*</span></label>
@@ -2734,6 +2751,57 @@ function handleSelectedFile(file){
   reader.readAsDataURL(file);
 }
 
+// --- Más fotos de la falla (opcional): solo imágenes, máximo 5 además de
+// la principal. Se comprimen igual que la principal.
+const MAX_FOTOS_EXTRA_REP = 5;
+let fotosExtraDataUrls = [];
+const fotosExtraInput = document.getElementById('f-fotos-extra');
+document.getElementById('btn-foto-extra').onclick = () => {
+  if(fotosExtraDataUrls.length >= MAX_FOTOS_EXTRA_REP){
+    showStatus('Ya agregaste el máximo de ' + MAX_FOTOS_EXTRA_REP + ' fotos adicionales.', false);
+    return;
+  }
+  fotosExtraInput.click();
+};
+function comprimirFotoExtraRep_(file){
+  return new Promise((ok, mal) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 900 / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        ok(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = mal;
+      img.src = ev.target.result;
+    };
+    reader.onerror = mal;
+    reader.readAsDataURL(file);
+  });
+}
+fotosExtraInput.onchange = async (e) => {
+  const archivos = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
+  fotosExtraInput.value = '';
+  for(const f of archivos){
+    if(fotosExtraDataUrls.length >= MAX_FOTOS_EXTRA_REP) break;
+    try { fotosExtraDataUrls.push(await comprimirFotoExtraRep_(f)); } catch(err){ /* se omite la que no se pudo leer */ }
+  }
+  renderFotosExtraRep_();
+};
+function renderFotosExtraRep_(){
+  const cont = document.getElementById('fotos-extra-lista');
+  cont.innerHTML = fotosExtraDataUrls.map((u, i) =>
+    `<div class="foto-extra-item"><img src="${u}" alt="Foto adicional ${i + 1}"><button type="button" class="foto-extra-quitar" data-i="${i}">✕</button></div>`
+  ).join('');
+  cont.querySelectorAll('.foto-extra-quitar').forEach((b) => {
+    b.onclick = () => { fotosExtraDataUrls.splice(Number(b.dataset.i), 1); renderFotosExtraRep_(); };
+  });
+}
+
 cameraPhotoInput.onchange = (e) => { handleSelectedFile(e.target.files[0]); };
 cameraVideoInput.onchange = (e) => { handleSelectedFile(e.target.files[0]); };
 galleryInput.onchange = (e) => { handleSelectedFile(e.target.files[0]); };
@@ -2788,6 +2856,8 @@ function limpiarFormularioReporte_(){
   cameraPhotoInput.value = '';
   cameraVideoInput.value = '';
   galleryInput.value = '';
+  fotosExtraDataUrls = [];
+  renderFotosExtraRep_();
 }
 
 document.getElementById('btn-submit').onclick = () => {
@@ -2811,7 +2881,8 @@ document.getElementById('btn-submit').onclick = () => {
     descripcion: desc,
     nombre: nombre,
     foto: fotoDataUrl,
-    fotoTipo: fotoTipo
+    fotoTipo: fotoTipo,
+    fotosExtra: fotosExtraDataUrls.slice()
   };
 
   google.script.run

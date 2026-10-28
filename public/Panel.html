@@ -627,6 +627,10 @@
   .ref-modelos-checklist{ max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:10px; }
   .ref-modelos-checklist label{ display:block; font-size:12.5px; padding:4px 0; }
   .ref-modelos-checklist .empty{ margin:0; }
+  .ref-modelos-checklist label{ display:flex !important; align-items:center; gap:8px; text-transform:none !important; letter-spacing:0 !important; font-family:inherit !important; font-weight:400; margin:0; }
+  .ref-modelos-checklist input[type=checkbox]{ width:auto !important; margin:0 !important; flex:0 0 auto; }
+  .cot-item-prov{ display:inline-flex !important; align-items:center; gap:4px; }
+  .cot-item-prov input{ width:auto !important; margin:0 !important; }
   .cot-respuesta-pdf{ display:inline-block; margin-top:2px; font-size:12px; color:var(--amber); text-decoration:underline; }
   .cot-notas-lista{ list-style:none; margin:0; padding:0; }
   .cot-notas-lista li{ background:var(--panel-2); border-radius:6px; padding:8px 10px; margin-bottom:6px; font-size:12.5px; }
@@ -3081,6 +3085,7 @@
               <th>Marca</th>
               <th>Modelos</th>
               <th>Refacciones</th>
+              <th>Proveedores de la marca</th>
               <th>Acciones</th>
             </tr>
           </thead>
@@ -3205,8 +3210,9 @@
           <select id="ref-f-categoria-id"><option value="">Sin categoría...</option></select>
         </div>
         <div class="maq-field">
-          <label>Proveedor</label>
-          <select id="ref-f-proveedor-id"><option value="">Sin proveedor del catálogo...</option></select>
+          <label>Proveedores</label>
+          <div class="mnt-subtext" style="margin-bottom:6px;">Marca todos los que la venden: al cotizarla se le pide precio a cada uno para comparar. El primero que marques queda como principal.</div>
+          <div id="ref-f-proveedores-list" class="ref-modelos-checklist"></div>
           <div class="mnt-subtext" id="ref-f-proveedor-legado" style="display:none;"></div>
         </div>
         <div class="maq-field">
@@ -3254,6 +3260,16 @@
           </div>
           <div class="maq-modal-status" id="modelo-status"></div>
           <ul id="marca-modelos-lista" class="mnt-ref-lista"></ul>
+        </div>
+        <div class="maq-field" id="marca-f-proveedores-wrap" style="display:none;">
+          <label>Proveedores de esta marca</label>
+          <div class="mnt-subtext" style="margin-bottom:6px;">Se agregan a TODAS las refacciones de esta marca (sin quitarles los que ya tengan) y a las que se den de alta después con esta marca.</div>
+          <ul id="marca-proveedores-lista" class="mnt-ref-lista"></ul>
+          <div class="mnt-ref-add-row">
+            <select id="marca-f-proveedor"><option value="">Elige proveedor...</option></select>
+            <button type="button" class="export-btn" id="marca-proveedor-asignar">Asignar a todas sus refacciones</button>
+          </div>
+          <div class="maq-modal-status" id="marca-proveedor-status"></div>
         </div>
         <div class="maq-modal-actions">
           <button class="maq-delete-btn" id="marca-btn-delete" style="display:none;">Eliminar</button>
@@ -3306,7 +3322,7 @@
         </div>
         <div class="maq-field">
           <label>Refacciones a cotizar</label>
-          <div class="mnt-subtext" style="margin-bottom:6px;">El proveedor de cada refacción se toma del catálogo. Si vienen piezas de más de un proveedor, se generará una solicitud por separado para cada uno. Si a una pieza no le corresponde proveedor en el catálogo, elígelo aquí abajo solo para esta cotización.</div>
+          <div class="mnt-subtext" style="margin-bottom:6px;">Los proveedores de cada refacción se toman del catálogo (puede tener varios). Se genera una solicitud por proveedor, y una pieza con varios proveedores se les pide a todos para comparar precios. Puedes desmarcar alguno o agregar otro solo para esta cotización.</div>
           <div class="mnt-ref-add-row">
             <select id="cot-ref-select"><option value="">Selecciona refacción...</option></select>
             <input type="number" id="cot-ref-cantidad" min="0.01" step="0.01" value="1" placeholder="Cant.">
@@ -6796,6 +6812,7 @@ ptabRefacciones.addEventListener('click', function(){
   if(!MODELOS_CARGADOS){ cargarModelos(); }
   if(!REFACCIONES_CARGADAS){ cargarRefacciones(); }
   if(!MANUALES_PARTES_CARGADOS){ cargarManualesPartes(); }
+  cargarProveedoresPorMarca();
   if(!PROVEEDORES_CARGADOS){ cargarProveedores(); }
   if(!SOLICITUDES_CARGADAS){ cargarSolicitudesCotizacion(); }
   if(!MANTENIMIENTO_CARGADO){ cargarMantenimiento(); } else { renderRefaccionesChecklist(); }
@@ -17960,16 +17977,33 @@ document.getElementById('ref-export').addEventListener('click', function(){
 // --- Modal agregar/editar refacción ---
 const refModalOverlay = document.getElementById('ref-modal-overlay');
 
-function poblarSelectProveedoresRef(){
-  const sel = document.getElementById('ref-f-proveedor-id');
-  const valorActual = sel.value;
+// Varios proveedores por refacción (oct-2026): checklist. REF_PROVEEDORES_ORDEN
+// guarda el orden en que se marcaron (el primero = principal).
+let REF_PROVEEDORES_ORDEN = [];
+function poblarSelectProveedoresRef(seleccionados){
+  const cont = document.getElementById('ref-f-proveedores-list');
+  if(!cont) return;
+  if(Array.isArray(seleccionados)) REF_PROVEEDORES_ORDEN = seleccionados.map(Number);
   const ordenado = ALL_PROVEEDORES.slice().sort(function(a,b){
     return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
   });
-  sel.innerHTML = '<option value="">Sin proveedor del catálogo...</option>' + ordenado.map(function(p){
-    return '<option value="' + p.Id + '">' + escapeHtml(p.Nombre) + '</option>';
+  if(ordenado.length === 0){
+    cont.innerHTML = '<div class="empty">No hay proveedores dados de alta (más abajo, en Proveedores).</div>';
+    return;
+  }
+  cont.innerHTML = ordenado.map(function(p){
+    const pos = REF_PROVEEDORES_ORDEN.indexOf(p.Id);
+    return '<label><input type="checkbox" class="ref-f-proveedor-chk" value="' + p.Id + '"' + (pos !== -1 ? ' checked' : '') + '> ' + escapeHtml(p.Nombre) +
+      (pos === 0 ? ' <span class="mnt-subtext" style="display:inline;">(principal)</span>' : '') + '</label>';
   }).join('');
-  if(valorActual) sel.value = valorActual;
+  cont.querySelectorAll('.ref-f-proveedor-chk').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      const id = Number(cb.value);
+      REF_PROVEEDORES_ORDEN = REF_PROVEEDORES_ORDEN.filter(function(x){ return x !== id; });
+      if(cb.checked) REF_PROVEEDORES_ORDEN.push(id);
+      poblarSelectProveedoresRef();
+    });
+  });
 }
 
 function poblarSelectCategoriasRef(){
@@ -18025,6 +18059,12 @@ function renderModelosChecklistRefaccion(marcaId, seleccionados){
 
 document.getElementById('ref-f-marca-id').addEventListener('change', function(){
   renderModelosChecklistRefaccion(this.value, []);
+  // Refacción nueva: se marcan solos los proveedores de esa marca (p.ej. SAMEI para KUBOTA).
+  if(!document.getElementById('ref-f-id').value){
+    const deMarca = PROVEEDORES_POR_MARCA.filter(function(x){ return String(x.MarcaId) === String(this.value); }, this).map(function(x){ return x.ProveedorId; });
+    deMarca.forEach(function(pid){ if(REF_PROVEEDORES_ORDEN.indexOf(pid) === -1) REF_PROVEEDORES_ORDEN.push(pid); });
+    if(deMarca.length) poblarSelectProveedoresRef();
+  }
 });
 
 function limpiarModalRefaccion(){
@@ -18034,7 +18074,7 @@ function limpiarModalRefaccion(){
   document.getElementById('ref-f-descripcion').value = '';
   document.getElementById('ref-f-precio').value = '';
   document.getElementById('ref-f-categoria-id').value = '';
-  document.getElementById('ref-f-proveedor-id').value = '';
+  poblarSelectProveedoresRef([]);
   document.getElementById('ref-f-marca-id').value = '';
   renderModelosChecklistRefaccion('', []);
   document.getElementById('ref-f-codigo-wrap').style.display = 'none';
@@ -18064,7 +18104,7 @@ function abrirModalRefaccion(ref){
     document.getElementById('ref-f-descripcion').value = ref.Descripcion || '';
     document.getElementById('ref-f-precio').value = ref.Precio !== null && ref.Precio !== undefined ? ref.Precio : '';
     document.getElementById('ref-f-categoria-id').value = ref.CategoriaId || '';
-    document.getElementById('ref-f-proveedor-id').value = ref.ProveedorId || '';
+    poblarSelectProveedoresRef(ref.ProveedorIds && ref.ProveedorIds.length ? ref.ProveedorIds : (ref.ProveedorId ? [ref.ProveedorId] : []));
     document.getElementById('ref-f-marca-id').value = ref.MarcaId || '';
     renderModelosChecklistRefaccion(ref.MarcaId, ref.ModeloIds || []);
     if(!ref.ProveedorId && ref.Proveedor){
@@ -18110,7 +18150,7 @@ document.getElementById('ref-btn-save').addEventListener('click', function(){
     descripcion: descripcion,
     precio: document.getElementById('ref-f-precio').value,
     categoriaId: document.getElementById('ref-f-categoria-id').value,
-    proveedorId: document.getElementById('ref-f-proveedor-id').value,
+    proveedorIds: REF_PROVEEDORES_ORDEN.slice(),
     marcaId: document.getElementById('ref-f-marca-id').value,
     modeloIds: modeloIds
   };
@@ -18749,6 +18789,7 @@ document.getElementById('refcat-btn-delete').addEventListener('click', function(
 
 // --- Marcas y modelos compatibles (apartado dentro de la pestaña Refacciones) ---
 let ALL_MARCAS = [];
+let PROVEEDORES_POR_MARCA = []; // [{MarcaId, ProveedorId, Nombre}] (ver cargarProveedoresPorMarca)
 let MARCAS_CARGADAS = false;
 let ALL_MODELOS = [];
 let MODELOS_CARGADOS = false;
@@ -19239,7 +19280,7 @@ function renderMarcas(){
   const tbody = document.getElementById('marca-table-body');
   document.getElementById('marca-summary').textContent = ALL_MARCAS.length + ' marca(s)';
   if(ALL_MARCAS.length === 0){
-    tbody.innerHTML = '<tr><td colspan="4"><div class="empty">No hay marcas dadas de alta todavía.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No hay marcas dadas de alta todavía.</div></td></tr>';
     return;
   }
   const ordenado = ALL_MARCAS.slice().sort(function(a,b){
@@ -19254,6 +19295,7 @@ function renderMarcas(){
       <td>${escapeHtml(m.Nombre)}</td>
       <td>${modelosDeMarca.length ? escapeHtml(modelosDeMarca.map(function(mo){ return mo.Nombre; }).join(', ')) : '—'}</td>
       <td>${usos}</td>
+      <td>${escapeHtml(PROVEEDORES_POR_MARCA.filter(function(x){ return x.MarcaId === m.Id; }).map(function(x){ return x.Nombre; }).join(', ') || '—')}</td>
       <td><button type="button" class="export-btn marca-btn-editar" data-id="${m.Id}" style="padding:6px 10px;font-size:11px;">Editar</button></td>
     </tr>
     `;
@@ -19319,12 +19361,80 @@ function abrirModalMarca(marca){
     document.getElementById('marca-btn-delete').style.display = '';
     document.getElementById('marca-f-modelos-wrap').style.display = '';
     renderModelosDeMarcaLista(marca.Id);
+    document.getElementById('marca-f-proveedores-wrap').style.display = '';
+    renderProveedoresDeMarca_(marca.Id);
   } else {
     document.getElementById('marca-modal-title').textContent = 'Agregar marca';
     document.getElementById('marca-btn-delete').style.display = 'none';
+    document.getElementById('marca-f-proveedores-wrap').style.display = 'none';
   }
   marcaModalOverlay.classList.add('open');
 }
+
+
+// --- Proveedores de una marca (p.ej. SAMEI para todas las KUBOTA) ---
+function cargarProveedoresPorMarca(callback){
+  google.script.run
+    .withSuccessHandler(function(rows){
+      PROVEEDORES_POR_MARCA = rows || [];
+      renderMarcas();
+      if(typeof callback === 'function') callback();
+    })
+    .withFailureHandler(function(){})
+    .getProveedoresPorMarca(ACCESS_CODE, PANEL_USUARIO);
+}
+
+function renderProveedoresDeMarca_(marcaId){
+  const ul = document.getElementById('marca-proveedores-lista');
+  const lista = PROVEEDORES_POR_MARCA.filter(function(x){ return x.MarcaId === Number(marcaId); });
+  ul.innerHTML = lista.length === 0
+    ? '<li style="background:none;">Ninguno todavía.</li>'
+    : lista.map(function(x){
+        return '<li><span>' + escapeHtml(x.Nombre) + '</span><button type="button" class="mnt-ref-quitar marca-proveedor-quitar" data-proveedor="' + x.ProveedorId + '" title="Quitar">&times;</button></li>';
+      }).join('');
+  const sel = document.getElementById('marca-f-proveedor');
+  sel.innerHTML = '<option value="">Elige proveedor...</option>' + ALL_PROVEEDORES.slice().sort(function(a,b){
+    return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
+  }).map(function(p){ return '<option value="' + p.Id + '">' + escapeHtml(p.Nombre) + '</option>'; }).join('');
+  ul.querySelectorAll('.marca-proveedor-quitar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const pid = Number(btn.dataset.proveedor);
+      const quitarTambien = confirm('¿Quitarle también este proveedor a las refacciones de esta marca que ya lo tienen?\n\nAceptar = sí, quitárselo a todas.\nCancelar = solo deja de asignarse a las nuevas.');
+      google.script.run
+        .withSuccessHandler(function(r){
+          const st = document.getElementById('marca-proveedor-status');
+          st.textContent = r && r.success ? ('Listo.' + (quitarTambien ? ' Se quitó de ' + r.quitadas + ' refacciones.' : '')) : ((r && r.error) || 'No se pudo quitar.');
+          st.className = 'maq-modal-status show ' + (r && r.success ? 'ok' : 'err');
+          cargarProveedoresPorMarca(function(){ renderProveedoresDeMarca_(marcaId); });
+          cargarRefacciones();
+        })
+        .withFailureHandler(function(){ alert('No se pudo quitar. Intenta de nuevo.'); })
+        .quitarProveedorDeMarca(ACCESS_CODE, PANEL_USUARIO, Number(marcaId), pid, quitarTambien);
+    });
+  });
+  ocultarControlesSoloLectura();
+}
+
+document.getElementById('marca-proveedor-asignar').addEventListener('click', function(){
+  const marcaId = Number(document.getElementById('marca-f-id').value);
+  const proveedorId = Number(document.getElementById('marca-f-proveedor').value);
+  const st = document.getElementById('marca-proveedor-status');
+  if(!marcaId) return;
+  if(!proveedorId){ st.textContent = 'Elige el proveedor.'; st.className = 'maq-modal-status show err'; return; }
+  const btn = this;
+  btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo asignar.'; st.className = 'maq-modal-status show err'; return; }
+      st.textContent = 'Listo: ' + r.proveedor + ' quedó como proveedor de ' + r.total + ' refacciones ' + r.marca + ' (' + r.agregadas + ' no lo tenían) y de las nuevas que se den de alta.';
+      st.className = 'maq-modal-status show ok';
+      cargarProveedoresPorMarca(function(){ renderProveedoresDeMarca_(marcaId); });
+      cargarRefacciones();
+    })
+    .withFailureHandler(function(){ btn.disabled = false; st.textContent = 'No se pudo asignar. Intenta de nuevo.'; st.className = 'maq-modal-status show err'; })
+    .asignarProveedorAMarca(ACCESS_CODE, PANEL_USUARIO, marcaId, proveedorId);
+});
 
 function cerrarModalMarca(){
   marcaModalOverlay.classList.remove('open');
@@ -19758,7 +19868,7 @@ document.getElementById('prov-btn-delete').addEventListener('click', function(){
 
 // --- Solicitudes de cotización ---
 let ALL_SOLICITUDES_COTIZACION = [];
-let cotFormItems = []; // [{refaccionId, cantidad}]
+let cotFormItems = []; // [{refaccionId, cantidad, proveedorIds}]
 const COT_FILTRO_ESTATUS = new Set(['pendiente', 'respondida', 'autorizada']); // 'cancelada' oculta por default
 
 function estadoMostradoCot(s){
@@ -19929,6 +20039,15 @@ function poblarSelectRefaccionesCot(){
 // aquí se muestra un <select> para elegirlo nada más para esta cotización
 // (no modifica el catálogo). Al generar, se agrupan automáticamente por
 // proveedorId — una solicitud distinta por cada proveedor involucrado.
+// Proveedores con los que se cotiza una pieza: los de su ficha (todos
+// marcados). Cada item: { refaccionId, cantidad, proveedorIds: [...] }.
+function proveedoresDeRefaccionCot_(refaccionId){
+  const ref = ALL_REFACCIONES.find(function(r){ return r.Id === refaccionId; });
+  if(!ref) return [];
+  if(ref.ProveedorIds && ref.ProveedorIds.length) return ref.ProveedorIds.slice();
+  return ref.ProveedorId ? [ref.ProveedorId] : [];
+}
+
 function renderListaRefaccionesCot(){
   const ul = document.getElementById('cot-ref-lista');
   if(cotFormItems.length === 0){
@@ -19938,17 +20057,23 @@ function renderListaRefaccionesCot(){
   const proveedoresOrdenados = ALL_PROVEEDORES.slice().sort(function(a,b){
     return (a.Nombre || '').localeCompare(b.Nombre || '', 'es');
   });
-  const opcionesProveedor = '<option value="">Elige proveedor...</option>' + proveedoresOrdenados.map(function(p){
-    return '<option value="' + p.Id + '">' + escapeHtml(p.Nombre) + '</option>';
-  }).join('');
   ul.innerHTML = cotFormItems.map(function(it, idx){
     const ref = ALL_REFACCIONES.find(function(r){ return r.Id === it.refaccionId; });
     const label = ref ? ((ref.NoParte ? ref.NoParte + ' - ' : '') + ref.Descripcion) : ('Refacción #' + it.refaccionId);
-    const proveedorHtml = it.proveedorId
-      ? '<span class="mnt-subtext" style="white-space:nowrap;">' + escapeHtml(nombreProveedorPorId_(it.proveedorId)) + '</span>'
-      : '<select class="cot-item-proveedor-select" data-idx="' + idx + '">' + opcionesProveedor + '</select>';
+    const deFicha = proveedoresDeRefaccionCot_(it.refaccionId);
+    // Se muestran los de la ficha + los que se hayan agregado solo aquí.
+    const mostrar = deFicha.concat((it.proveedorIds || []).filter(function(pid){ return deFicha.indexOf(pid) === -1; }));
+    const checks = mostrar.map(function(pid){
+      return '<label class="cot-item-prov" style="white-space:nowrap;font-size:12px;"><input type="checkbox" class="cot-item-prov-chk" data-idx="' + idx + '" value="' + pid + '"' +
+        ((it.proveedorIds || []).indexOf(pid) !== -1 ? ' checked' : '') + '> ' + escapeHtml(nombreProveedorPorId_(pid)) + '</label>';
+    }).join(' ');
+    const otros = proveedoresOrdenados.filter(function(p){ return mostrar.indexOf(p.Id) === -1; });
+    const agregarOtro = otros.length
+      ? '<select class="cot-item-proveedor-select" data-idx="' + idx + '" style="max-width:190px;"><option value="">' + (mostrar.length ? '+ Otro proveedor...' : 'Elige proveedor...') + '</option>' +
+        otros.map(function(p){ return '<option value="' + p.Id + '">' + escapeHtml(p.Nombre) + '</option>'; }).join('') + '</select>'
+      : '';
     return '<li style="flex-wrap:wrap;gap:6px;"><span>' + escapeHtml(label) + ' × ' + it.cantidad + '</span>' +
-      proveedorHtml +
+      '<span class="cot-item-provs" style="display:flex;flex-wrap:wrap;gap:8px;">' + checks + '</span>' + agregarOtro +
       '<button type="button" class="mnt-ref-quitar" data-idx="' + idx + '">&times;</button></li>';
   }).join('');
   ul.querySelectorAll('.mnt-ref-quitar').forEach(function(btn){
@@ -19957,10 +20082,23 @@ function renderListaRefaccionesCot(){
       renderListaRefaccionesCot();
     });
   });
+  ul.querySelectorAll('.cot-item-prov-chk').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      const it = cotFormItems[Number(cb.dataset.idx)];
+      if(!it) return;
+      const pid = Number(cb.value);
+      it.proveedorIds = (it.proveedorIds || []).filter(function(x){ return x !== pid; });
+      if(cb.checked) it.proveedorIds.push(pid);
+    });
+  });
   ul.querySelectorAll('.cot-item-proveedor-select').forEach(function(sel){
     sel.addEventListener('change', function(){
-      const idx = Number(sel.dataset.idx);
-      if(cotFormItems[idx]) cotFormItems[idx].proveedorId = Number(sel.value) || null;
+      const it = cotFormItems[Number(sel.dataset.idx)];
+      const pid = Number(sel.value);
+      if(it && pid){
+        it.proveedorIds = (it.proveedorIds || []).filter(function(x){ return x !== pid; }).concat([pid]);
+        renderListaRefaccionesCot();
+      }
     });
   });
 }
@@ -19971,11 +20109,9 @@ document.getElementById('cot-ref-agregar').addEventListener('click', function(){
   const cantidad = Number(document.getElementById('cot-ref-cantidad').value);
   if(!refaccionId){ alert('Selecciona una refacción.'); return; }
   if(!cantidad || cantidad <= 0){ alert('Captura una cantidad válida.'); return; }
-  const ref = ALL_REFACCIONES.find(function(r){ return r.Id === refaccionId; });
-  const proveedorId = ref && ref.ProveedorId ? ref.ProveedorId : null;
   const existente = cotFormItems.find(function(it){ return it.refaccionId === refaccionId; });
-  if(existente){ existente.cantidad = cantidad; if(!existente.proveedorId) existente.proveedorId = proveedorId; }
-  else { cotFormItems.push({ refaccionId: refaccionId, cantidad: cantidad, proveedorId: proveedorId }); }
+  if(existente){ existente.cantidad = cantidad; }
+  else { cotFormItems.push({ refaccionId: refaccionId, cantidad: cantidad, proveedorIds: proveedoresDeRefaccionCot_(refaccionId) }); }
   sel.value = '';
   document.getElementById('cot-ref-cantidad').value = '1';
   renderListaRefaccionesCot();
@@ -20036,11 +20172,9 @@ function precargarRefaccionesCotDesdeOrden_(orden){
       cotFormItems = [];
       catalogadas.forEach(function(it){
         const cantidad = it.cantidad && it.cantidad > 0 ? it.cantidad : 1;
-        const ref = ALL_REFACCIONES.find(function(r){ return r.Id === it.refaccionId; });
-        const proveedorId = ref && ref.ProveedorId ? ref.ProveedorId : null;
         const existente = cotFormItems.find(function(x){ return x.refaccionId === it.refaccionId; });
         if(existente){ existente.cantidad += cantidad; }
-        else { cotFormItems.push({ refaccionId: it.refaccionId, cantidad: cantidad, proveedorId: proveedorId }); }
+        else { cotFormItems.push({ refaccionId: it.refaccionId, cantidad: cantidad, proveedorIds: proveedoresDeRefaccionCot_(it.refaccionId) }); }
       });
       renderListaRefaccionesCot();
 
@@ -20189,7 +20323,7 @@ document.getElementById('cot-btn-generar').addEventListener('click', function(){
     statusEl.className = 'maq-modal-status show err';
     return;
   }
-  if(cotFormItems.some(function(it){ return !it.proveedorId; })){
+  if(cotFormItems.some(function(it){ return !(it.proveedorIds && it.proveedorIds.length); })){
     statusEl.textContent = 'Falta elegir proveedor para una o más refacciones de la lista.';
     statusEl.className = 'maq-modal-status show err';
     return;
@@ -20250,14 +20384,33 @@ function formatoPct_(n){
 
 function abrirModalVerCotizacion(sol){
   const link = armarEnlaceCotizacion(sol.Token);
-  const respuestas = sol.Respuestas || [];
   const fechaHora = function(iso){ return iso ? new Date(iso).toLocaleString('es-MX') : ''; };
 
-  // Índice rápido: para cada pieza pedida, qué contestó cada respuesta
-  // (puede que una respuesta no haya cotizado todas las piezas).
+  // Cotizar con varios proveedores (oct-2026): el comparativo junta las
+  // respuestas de ESTA solicitud con las de los otros proveedores a los que
+  // se les pidió para la misma orden (solicitudes no canceladas), pieza por
+  // pieza (por refacción). Se autoriza una sola entre todos.
+  const hermanas = sol.Orden
+    ? ALL_SOLICITUDES_COTIZACION.filter(function(x){ return x.Id === sol.Id || (x.Orden === sol.Orden && x.Estado !== 'cancelada'); })
+        .sort(function(a, b){ return (a.Id === sol.Id ? -1 : 0) - (b.Id === sol.Id ? -1 : 0) || a.Id - b.Id; })
+    : [sol];
+  const nombresProveedores = hermanas.map(function(h){ return h.ProveedorNombre; }).filter(function(n, i, arr){ return arr.indexOf(n) === i; });
+  const variosProveedores = nombresProveedores.length > 1;
+  const respuestas = [];
+  hermanas.forEach(function(h){
+    const refDeItem = {};
+    (h.Items || []).forEach(function(it){ refDeItem[it.ItemId] = it.RefaccionId; });
+    (h.Respuestas || []).forEach(function(r){
+      respuestas.push(Object.assign({}, r, { ProveedorNombre: h.ProveedorNombre, Folio: h.Folio, EsOtra: h.Id !== sol.Id,
+        Items: (r.Items || []).map(function(ri){ return Object.assign({}, ri, { RefaccionId: refDeItem[ri.ItemId] }); }) }));
+    });
+  });
+
+  // Índice rápido: para cada pieza pedida (por refacción), qué contestó
+  // cada respuesta (puede que una respuesta no haya cotizado todas).
   const respuestaItemPorClave = {};
   respuestas.forEach(function(r){
-    (r.Items || []).forEach(function(ri){ respuestaItemPorClave[r.RespuestaId + '_' + ri.ItemId] = ri; });
+    (r.Items || []).forEach(function(ri){ respuestaItemPorClave[r.RespuestaId + '_' + ri.RefaccionId] = ri; });
   });
 
   // Con 2 o más respuestas sí tiene sentido resaltar en verde el precio
@@ -20269,7 +20422,7 @@ function abrirModalVerCotizacion(sol){
     let mejorPrecio = null, mejorFecha = null;
     respuestas.forEach(function(r){
       const ri = respuestaItemPorClave[r.RespuestaId + '_' + itemId];
-      if(!ri) return;
+      if(!ri || ri.PrecioCotizado === null) return;
       if(ri.PrecioTotal !== null && (mejorPrecio === null || ri.PrecioTotal < mejorPrecio)) mejorPrecio = ri.PrecioTotal;
       if(ri.FechaEntrega && (mejorFecha === null || ri.FechaEntrega < mejorFecha)) mejorFecha = ri.FechaEntrega;
     });
@@ -20281,7 +20434,8 @@ function abrirModalVerCotizacion(sol){
   if(respuestas.length > 0){
     const encabezadoProveedores = respuestas.map(function(r){
       const desc = (r.DescuentoPct !== null && r.DescuentoPct > 0) ? (' — Desc. ' + formatoPct_(r.DescuentoPct) + '%') : '';
-      return '<th colspan="5" style="text-align:center;border-left:2px solid var(--maq-line, #ddd);">' + escapeHtml(r.NombreResponde) + desc + '</th>';
+      const quien = variosProveedores ? (r.ProveedorNombre + ' — ' + r.NombreResponde) : r.NombreResponde;
+      return '<th colspan="5" style="text-align:center;border-left:2px solid var(--maq-line, #ddd);">' + escapeHtml(quien) + desc + (r.EsOtra ? '<div class="mnt-subtext" style="text-transform:none;">' + escapeHtml(r.Folio) + '</div>' : '') + '</th>';
     }).join('');
     const encabezadoSub = respuestas.map(function(){
       return '<th style="border-left:2px solid var(--maq-line, #ddd);">Precio unit.</th><th>IVA</th><th>Precio total</th><th>Entrega</th><th style="text-align:center;">Aut</th>';
@@ -20289,9 +20443,9 @@ function abrirModalVerCotizacion(sol){
 
     const filas = sol.Items.map(function(it){
       const identificadores = [it.Codigo, it.NoParte ? ('No. de parte: ' + it.NoParte) : ''].filter(Boolean).join(' · ');
-      const mejores = mejoresDeLaPieza_(it.ItemId);
+      const mejores = mejoresDeLaPieza_(it.RefaccionId);
       const celdas = respuestas.map(function(r){
-        const ri = respuestaItemPorClave[r.RespuestaId + '_' + it.ItemId];
+        const ri = respuestaItemPorClave[r.RespuestaId + '_' + it.RefaccionId];
         if(!ri || ri.PrecioCotizado === null){
           return '<td class="cot-cmp-vacio" style="border-left:2px solid var(--maq-line, #ddd);">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio" style="text-align:center;">—</td>';
         }
@@ -20311,7 +20465,7 @@ function abrirModalVerCotizacion(sol){
     }).join('');
 
     const notasRespuestas = '<ul class="cot-notas-lista">' + respuestas.map(function(r){
-      return '<li><b>' + escapeHtml(r.NombreResponde) + '</b> <span class="mnt-subtext" style="display:inline;">— ' + escapeHtml(fechaHora(r.CreadoEn)) + '</span>'
+      return '<li><b>' + escapeHtml(variosProveedores ? r.ProveedorNombre + ' — ' + r.NombreResponde : r.NombreResponde) + '</b> <span class="mnt-subtext" style="display:inline;">— ' + escapeHtml(fechaHora(r.CreadoEn)) + '</span>'
         + (r.Comentario ? '<div class="mnt-subtext" style="margin-top:2px;">' + escapeHtml(r.Comentario) + '</div>' : '')
         + (r.PdfUrl ? '<div><a class="cot-respuesta-pdf" href="' + escapeHtml(r.PdfUrl) + '" target="_blank" rel="noopener">📄 ' + escapeHtml(r.PdfNombre || 'Ver PDF adjunto') + '</a></div>' : '')
         + '</li>';
@@ -20327,7 +20481,7 @@ function abrirModalVerCotizacion(sol){
           <tbody>${filas}</tbody>
         </table>
       </div>
-      ${hayComparacion ? '<div class="mnt-subtext" style="margin-top:6px;">En verde: el precio total más bajo y la entrega más próxima de cada pieza, entre las cotizaciones recibidas. El botón "Aut" aplica ese precio (ya con descuento) al catálogo.</div>' : ''}
+      ${hayComparacion ? '<div class="mnt-subtext" style="margin-top:6px;">En verde: el precio total más bajo y la entrega más próxima de cada pieza, entre las cotizaciones recibidas' + (variosProveedores ? ' de todos los proveedores a los que se les pidió para esta orden (' + nombresProveedores.join(', ') + ')' : '') + '. El botón "Aut" aplica ese precio (ya con descuento) al catálogo; solo queda autorizada una por pieza.</div>' : ''}
       <div class="maq-field" style="margin-top:14px;"><label>Notas por proveedor</label></div>
       ${notasRespuestas}
     `;
@@ -20351,7 +20505,7 @@ function abrirModalVerCotizacion(sol){
     </div>
     <div class="maq-field"><label>Enlace para el proveedor</label><input type="text" readonly value="${escapeHtml(link)}" onclick="this.select();"></div>
     ${sol.Mensaje ? '<div class="maq-field"><label>Mensaje enviado</label><div class="mnt-subtext">' + escapeHtml(sol.Mensaje) + '</div></div>' : ''}
-    <div class="maq-field" style="margin-top:14px;"><label>Comparativo de cotizaciones${respuestas.length > 0 ? ' (' + respuestas.length + ')' : ''}</label></div>
+    <div class="maq-field" style="margin-top:14px;"><label>Comparativo de cotizaciones${respuestas.length > 0 ? ' (' + respuestas.length + ')' : ''}${variosProveedores ? ' — ' + nombresProveedores.length + ' proveedores de la orden' : ''}</label></div>
     ${tablaComparativaHtml}
   `;
 

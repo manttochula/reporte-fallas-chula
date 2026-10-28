@@ -2921,3 +2921,31 @@ CREATE TABLE IF NOT EXISTS manuales_partes_piezas (
   INDEX idx_mpp_seccion (seccion_id),
   INDEX idx_mpp_codigo (codigo_norm)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Varios proveedores por refacción (oct-2026): para cotizarla con más de
+-- uno y comparar. refacciones.proveedor_id se queda como el "principal" (el
+-- primero de la lista) para lo que ya lo usaba. La línea INSERT IGNORE pasa
+-- a esta tabla el proveedor que ya tenía cada refacción (se puede volver a
+-- correr sin duplicar).
+-- marcas_proveedores: proveedor(es) de una marca (p.ej. SAMEI para KUBOTA):
+-- se asignan a todas las refacciones de la marca desde Refacciones -> Marcas
+-- y modelos -> "Proveedores", y a las nuevas que se den de alta con ella.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS refacciones_proveedores (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  refaccion_id INT NOT NULL,
+  proveedor_id INT NOT NULL,
+  UNIQUE KEY uq_refaccion_proveedor (refaccion_id, proveedor_id),
+  INDEX idx_refprov_proveedor (proveedor_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO refacciones_proveedores (refaccion_id, proveedor_id)
+SELECT id, proveedor_id FROM refacciones WHERE proveedor_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS marcas_proveedores (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  marca_id     INT NOT NULL,
+  proveedor_id INT NOT NULL,
+  UNIQUE KEY uq_marca_proveedor (marca_id, proveedor_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

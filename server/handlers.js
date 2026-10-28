@@ -4697,8 +4697,24 @@ async function getRefacciones(code, nombreUsuario) {
     if (!modelosPorRefaccion[mr.RefaccionId]) modelosPorRefaccion[mr.RefaccionId] = [];
     modelosPorRefaccion[mr.RefaccionId].push({ Id: mr.ModeloId, Nombre: mr.ModeloNombre });
   });
+  // Varios proveedores por refacción (oct-2026): para poder cotizarla con
+  // más de uno. refacciones.proveedor_id sigue siendo el "principal" (el
+  // primero de la lista).
+  const [provRows] = await pool.query(`
+    SELECT rp.refaccion_id AS RefaccionId, p.id AS ProveedorId, p.nombre AS Nombre
+    FROM refacciones_proveedores rp
+    JOIN proveedores p ON p.id = rp.proveedor_id
+    ORDER BY p.nombre
+  `);
+  const proveedoresPorRefaccion = {};
+  provRows.forEach((pr) => {
+    if (!proveedoresPorRefaccion[pr.RefaccionId]) proveedoresPorRefaccion[pr.RefaccionId] = [];
+    proveedoresPorRefaccion[pr.RefaccionId].push({ Id: pr.ProveedorId, Nombre: pr.Nombre });
+  });
   return rows.map((r) => {
     const modelos = modelosPorRefaccion[r.Id] || [];
+    // El principal primero, luego los demás.
+    const provs = (proveedoresPorRefaccion[r.Id] || []).slice().sort((a, b) => (b.Id === r.ProveedorId) - (a.Id === r.ProveedorId));
     return {
       Id: r.Id,
       Codigo: r.Codigo || '',
@@ -4707,9 +4723,10 @@ async function getRefacciones(code, nombreUsuario) {
       Descripcion: r.Descripcion,
       Precio: r.Precio !== null && r.Precio !== undefined ? Number(r.Precio) : null,
       ProveedorId: r.ProveedorId || null,
-      // Nombre a mostrar: el del catálogo de proveedores si está ligado,
+      ProveedorIds: provs.map((p) => p.Id),
+      // Nombre(s) a mostrar: los del catálogo de proveedores si está ligada,
       // si no, el texto libre que se haya capturado antes de ese catálogo.
-      Proveedor: r.ProveedorNombre || r.ProveedorTexto || '',
+      Proveedor: provs.length ? provs.map((p) => p.Nombre).join(', ') : (r.ProveedorNombre || r.ProveedorTexto || ''),
       CategoriaId: r.CategoriaId || null,
       Categoria: r.CategoriaNombre || '',
       MarcaId: r.MarcaId || null,
@@ -4736,8 +4753,18 @@ async function guardarRefaccion(code, nombreUsuario, id, data) {
     }
     const precio = (data.precio === '' || data.precio === undefined || data.precio === null)
       ? null : Number(data.precio);
-    const proveedorId = (data.proveedorId === '' || data.proveedorId === undefined || data.proveedorId === null)
-      ? null : Number(data.proveedorId);
+    // Varios proveedores (oct-2026): data.proveedorIds; se sigue aceptando
+    // data.proveedorId (uno solo) por compatibilidad.
+    let proveedorIds = Array.isArray(data.proveedorIds)
+      ? data.proveedorIds
+      : (data.proveedorId === '' || data.proveedorId === undefined || data.proveedorId === null ? [] : [data.proveedorId]);
+    proveedorIds = Array.from(new Set(proveedorIds.map(Number).filter((n) => n > 0)));
+    if (proveedorIds.length) {
+      const [existen] = await pool.query('SELECT id FROM proveedores WHERE id IN (?)', [proveedorIds]);
+      const ok = new Set(existen.map((x) => x.id));
+      proveedorIds = proveedorIds.filter((pid) => ok.has(pid));
+    }
+    const proveedorId = proveedorIds.length ? proveedorIds[0] : null;
     const categoriaId = (data.categoriaId === '' || data.categoriaId === undefined || data.categoriaId === null)
       ? null : Number(data.categoriaId);
     const marcaId = (data.marcaId === '' || data.marcaId === undefined || data.marcaId === null)
@@ -4786,6 +4813,10 @@ async function guardarRefaccion(code, nombreUsuario, id, data) {
       const values = modeloIds.map((mid) => [refaccionId, mid]);
       await pool.query('INSERT INTO refacciones_modelos (refaccion_id, modelo_id) VALUES ?', [values]);
     }
+    await pool.query('DELETE FROM refacciones_proveedores WHERE refaccion_id = ?', [refaccionId]);
+    if (proveedorIds.length > 0) {
+      await pool.query('INSERT INTO refacciones_proveedores (refaccion_id, proveedor_id) VALUES ?', [proveedorIds.map((pid) => [refaccionId, pid])]);
+    }
 
     return { success: true, id: refaccionId };
   } catch (err) {
@@ -4798,6 +4829,7 @@ async function eliminarRefaccion(code, nombreUsuario, id) {
   await pool.query('DELETE FROM mantenimiento_regla_refacciones WHERE refaccion_id = ?', [id]);
   await pool.query('DELETE FROM solicitud_cotizacion_items WHERE refaccion_id = ?', [id]);
   await pool.query('DELETE FROM refacciones_modelos WHERE refaccion_id = ?', [id]);
+  await pool.query('DELETE FROM refacciones_proveedores WHERE refaccion_id = ?', [id]);
   // Las órdenes que ya tenían esta refacción marcada como necesaria no
   // pierden el dato: se conserva como texto libre (con la descripción que
   // tenía) en vez de quedar huérfanas apuntando a un id que ya no existe.
@@ -5705,6 +5737,17 @@ async function altaRefaccionDesdeManual_(piezaManualId) {
       [codigo, p.codigo, (p.descripcion || p.codigo).slice(0, 255), categoriaId, p.marca_id || null]
     );
     refaccionId = ins.insertId;
+    // Proveedores de la marca (p.ej. SAMEI para Kubota).
+    if (p.marca_id) {
+      await pool.query(
+        'INSERT IGNORE INTO refacciones_proveedores (refaccion_id, proveedor_id) SELECT ?, proveedor_id FROM marcas_proveedores WHERE marca_id = ?',
+        [refaccionId, p.marca_id]
+      );
+      await pool.query(
+        'UPDATE refacciones SET proveedor_id = (SELECT MIN(proveedor_id) FROM marcas_proveedores WHERE marca_id = ?) WHERE id = ? AND proveedor_id IS NULL',
+        [p.marca_id, refaccionId]
+      );
+    }
   }
   if (p.modelo_id) {
     await pool.query('INSERT IGNORE INTO refacciones_modelos (refaccion_id, modelo_id) VALUES (?, ?)', [refaccionId, p.modelo_id]);
@@ -7871,8 +7914,64 @@ async function eliminarMarca(code, nombreUsuario, id) {
   }
   await pool.query('DELETE FROM modelos_refacciones WHERE marca_id = ?', [id]);
   await pool.query('UPDATE refacciones SET marca_id = NULL WHERE marca_id = ?', [id]);
+  await pool.query('DELETE FROM marcas_proveedores WHERE marca_id = ?', [id]);
   await pool.query('DELETE FROM marcas_refacciones WHERE id = ?', [id]);
   return { success: true };
+}
+
+// Proveedor(es) de una marca (oct-2026, "a todas las de la marca Kubota
+// agrégale el proveedor SAMEI"): se agrega a TODAS las refacciones de esa
+// marca (sin quitarles los que ya tengan) y se recuerda para las que se den
+// de alta después con esa marca (ver marcas_proveedores).
+async function getProveedoresPorMarca(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_MARCAS_, 'visualizar');
+  const [rows] = await pool.query(`
+    SELECT mp.marca_id AS MarcaId, p.id AS ProveedorId, p.nombre AS Nombre
+    FROM marcas_proveedores mp JOIN proveedores p ON p.id = mp.proveedor_id
+    ORDER BY p.nombre`);
+  return rows;
+}
+
+async function asignarProveedorAMarca(code, nombreUsuario, marcaId, proveedorId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const mId = Number(marcaId);
+  const pId = Number(proveedorId);
+  const [m] = await pool.query('SELECT nombre FROM marcas_refacciones WHERE id = ?', [mId]);
+  if (!m.length) return { success: false, error: 'No se encontró la marca.' };
+  const [p] = await pool.query('SELECT nombre FROM proveedores WHERE id = ?', [pId]);
+  if (!p.length) return { success: false, error: 'Elige el proveedor.' };
+  await pool.query('INSERT IGNORE INTO marcas_proveedores (marca_id, proveedor_id) VALUES (?, ?)', [mId, pId]);
+  const [ins] = await pool.query(
+    'INSERT IGNORE INTO refacciones_proveedores (refaccion_id, proveedor_id) SELECT id, ? FROM refacciones WHERE marca_id = ?',
+    [pId, mId]
+  );
+  await pool.query('UPDATE refacciones SET proveedor_id = ? WHERE marca_id = ? AND proveedor_id IS NULL', [pId, mId]);
+  const [[t]] = await pool.query('SELECT COUNT(*) AS n FROM refacciones WHERE marca_id = ?', [mId]);
+  await registrarAuditoria_('marcas_refacciones', mId, 'asignar_proveedor', nombreUsuario, p[0].nombre + ' a ' + m[0].nombre + ' (' + ins.affectedRows + ' refacciones)');
+  return { success: true, agregadas: ins.affectedRows, total: Number(t.n), marca: m[0].nombre, proveedor: p[0].nombre };
+}
+
+// Deja de ser proveedor "de la marca" (para las nuevas). Con quitarDeRefacciones
+// también se le quita a las refacciones de esa marca que ya lo tenían.
+async function quitarProveedorDeMarca(code, nombreUsuario, marcaId, proveedorId, quitarDeRefacciones) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const mId = Number(marcaId);
+  const pId = Number(proveedorId);
+  await pool.query('DELETE FROM marcas_proveedores WHERE marca_id = ? AND proveedor_id = ?', [mId, pId]);
+  let quitadas = 0;
+  if (quitarDeRefacciones) {
+    const [d] = await pool.query(
+      'DELETE rp FROM refacciones_proveedores rp JOIN refacciones r ON r.id = rp.refaccion_id WHERE r.marca_id = ? AND rp.proveedor_id = ?',
+      [mId, pId]
+    );
+    quitadas = d.affectedRows;
+    await pool.query(
+      `UPDATE refacciones r SET proveedor_id = (SELECT MIN(rp.proveedor_id) FROM refacciones_proveedores rp WHERE rp.refaccion_id = r.id)
+       WHERE r.marca_id = ? AND r.proveedor_id = ?`,
+      [mId, pId]
+    );
+  }
+  return { success: true, quitadas };
 }
 
 async function getModelos(code, nombreUsuario) {
@@ -8024,7 +8123,14 @@ async function guardarProveedor(code, nombreUsuario, id, data) {
 
 async function eliminarProveedor(code, nombreUsuario, id) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
-  await pool.query('UPDATE refacciones SET proveedor_id = NULL WHERE proveedor_id = ?', [id]);
+  await pool.query('DELETE FROM refacciones_proveedores WHERE proveedor_id = ?', [id]);
+  await pool.query('DELETE FROM marcas_proveedores WHERE proveedor_id = ?', [id]);
+  // Si era el principal de alguna refacción, pasa a serlo otro de su lista (o ninguno).
+  await pool.query(
+    `UPDATE refacciones r SET proveedor_id = (SELECT MIN(rp.proveedor_id) FROM refacciones_proveedores rp WHERE rp.refaccion_id = r.id)
+     WHERE r.proveedor_id = ?`,
+    [id]
+  );
   await pool.query('DELETE FROM proveedor_contactos WHERE proveedor_id = ?', [id]);
   const [solicitudes] = await pool.query('SELECT id FROM solicitudes_cotizacion WHERE proveedor_id = ?', [id]);
   for (const s of solicitudes) {
@@ -8174,18 +8280,22 @@ async function crearSolicitudesCotizacion(code, nombreUsuario, data) {
     const [ordenes] = await pool.query('SELECT orden FROM reportes WHERE orden = ?', [orden]);
     if (ordenes.length === 0) return { success: false, error: 'No se encontró esa orden de trabajo.' };
 
-    // Agrupa por proveedorId, validando que cada item traiga uno.
+    // Agrupa por proveedor, validando que cada item traiga al menos uno.
+    // Una pieza con varios proveedores (it.proveedorIds) va en la solicitud
+    // de cada uno, para comparar precios (oct-2026).
     const grupos = new Map(); // proveedorId -> [items]
     for (const it of items) {
       const refaccionId = Number(it.refaccionId);
       if (!refaccionId) continue;
-      const proveedorId = Number(it.proveedorId);
-      if (!proveedorId) {
+      const ids = Array.from(new Set((Array.isArray(it.proveedorIds) ? it.proveedorIds : [it.proveedorId]).map(Number).filter((n) => n > 0)));
+      if (!ids.length) {
         return { success: false, error: 'Falta asignar proveedor a una o más refacciones antes de generar la solicitud.' };
       }
       const cantidad = Number(it.cantidad) || 1;
-      if (!grupos.has(proveedorId)) grupos.set(proveedorId, []);
-      grupos.get(proveedorId).push({ refaccionId, cantidad });
+      ids.forEach((proveedorId) => {
+        if (!grupos.has(proveedorId)) grupos.set(proveedorId, []);
+        grupos.get(proveedorId).push({ refaccionId, cantidad });
+      });
     }
     if (grupos.size === 0) return { success: false, error: 'Selecciona al menos una refacción para cotizar.' };
 
@@ -8568,6 +8678,18 @@ async function autorizarPrecioItem(code, nombreUsuario, respuestaItemId) {
        SET ri.autorizado = 0
        WHERE ri.item_id = ? AND r.solicitud_id = ?`,
       [row.ItemId, row.SolicitudId]
+    );
+    // ...y también la de los OTROS proveedores a los que se les pidió la
+    // misma pieza para la misma orden (se cotiza con varios, gana uno).
+    await pool.query(
+      `UPDATE solicitud_cotizacion_respuesta_items ri
+       INNER JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+       INNER JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+       INNER JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+       INNER JOIN solicitudes_cotizacion propia ON propia.id = ?
+       SET ri.autorizado = 0
+       WHERE sci.refaccion_id = ? AND propia.orden IS NOT NULL AND s.orden = propia.orden`,
+      [row.SolicitudId, row.RefaccionId]
     );
     await pool.query('UPDATE solicitud_cotizacion_respuesta_items SET autorizado = 1 WHERE id = ?', [respuestaItemId]);
 
@@ -9072,6 +9194,9 @@ module.exports = {
   interpretarRefaccionesFoto,
   getRefaccionesNecesarias,
   guardarRefaccionesNecesarias,
+  getProveedoresPorMarca,
+  asignarProveedorAMarca,
+  quitarProveedorDeMarca,
   getManualesPartes,
   crearManualPartes,
   guardarSeccionManualPartes,

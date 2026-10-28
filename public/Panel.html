@@ -1098,6 +1098,8 @@
   /* Se abre encima de la ventana de la solicitud de cotización. */
   #ocp-modal-overlay{ z-index:210; }
   .cce-tabla td input{ width:100%; }
+  .correo-vias{ display:inline-flex; gap:6px; flex-wrap:wrap; }
+  .correo-via-ultima{ font-weight:700; }
   .ocp-seccion{ margin-top:16px; padding:10px 12px; border:1px solid rgba(60,110,200,0.35); border-radius:8px; background:rgba(60,110,200,0.05); }
   .ocp-pend{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; font-size:12.5px; }
   .ocp-oc{ border-top:1px solid rgba(0,0,0,0.08); padding:8px 0; font-size:12.5px; }
@@ -3106,123 +3108,8 @@
     </div>
 
     <div id="pview-refacciones" style="display:none;">
-      <div class="toolbar">
-        <input type="text" id="ref-search" placeholder="Buscar por descripción, no. de parte o proveedor...">
-        <button class="export-btn" id="ref-add">+ Agregar refacción</button>
-        <button class="export-btn" id="ref-export">Exportar catálogo a Excel</button>
-      </div>
-      <div class="summary" id="ref-summary"></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Folio comercial</th>
-              <th>No. de parte (marca)</th>
-              <th>Descripción</th>
-              <th>Categoría</th>
-              <th>Marca</th>
-              <th>Modelos compatibles</th>
-              <th>Precio</th>
-              <th>Proveedor</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="ref-table-body"></tbody>
-        </table>
-      </div>
-
-      <h3 class="ref-reporte-titulo">Categorías de refacciones</h3>
-      <div class="mnt-subtext" style="margin-bottom:8px;">Agrupan el catálogo (por ejemplo "Aceite", "Filtros", "Llantas"...). La categoría "Aceite" es la que usa el selector de aceite en Mantenimiento — asigna esa categoría a cada refacción que sea un aceite para que aparezca ahí.</div>
-      <div class="toolbar">
-        <button class="export-btn" id="refcat-add">+ Agregar categoría</button>
-      </div>
-      <div class="summary" id="refcat-summary"></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Refacciones</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="refcat-table-body"></tbody>
-        </table>
-      </div>
-
-      <h3 class="ref-reporte-titulo">Marcas y modelos compatibles</h3>
-      <div class="mnt-subtext" style="margin-bottom:8px;">Catálogo de marcas (ej. "JOHN DEERE") y sus modelos (ej. "5415", "5615"...), para poder marcar con qué modelos es compatible cada refacción. Da de alta primero la marca y luego, desde "Editar", agrega sus modelos.</div>
-      <div class="toolbar">
-        <button class="export-btn" id="marca-add">+ Agregar marca</button>
-      </div>
-      <div class="summary" id="marca-summary"></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Marca</th>
-              <th>Modelos</th>
-              <th>Refacciones</th>
-              <th>Proveedores de la marca</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="marca-table-body"></tbody>
-        </table>
-      </div>
-
-      <h3 class="ref-reporte-titulo">Catálogos de partes (PDF del fabricante)</h3>
-      <div class="mnt-subtext" style="margin-bottom:8px;">Sube el catálogo de partes de cada modelo (por ejemplo el PDF de Kubota L3800). Se lee solo: secciones, dibujos y la tabla de piezas. Después, en cada orden de un equipo de ese modelo, el botón "📖 Catálogo del equipo" (en Refaccionamiento, aquí y en Taller) lo muestra para escoger las piezas, con propuesta de la IA según la falla. El modelo del equipo se toma de Maquinaria. Si subes otro PDF para el mismo modelo, reemplaza al anterior.</div>
-      <div class="toolbar" id="manpar-subir">
-        <select id="manpar-modelo"><option value="">Modelo del catálogo...</option></select>
-        <input type="file" id="manpar-archivo" accept="application/pdf,.pdf">
-        <button class="export-btn" id="manpar-btn-subir">Subir catálogo de partes (PDF)</button>
-      </div>
-      <div class="maq-modal-status" id="manpar-status"></div>
-      <div class="summary" id="manpar-summary"></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Marca</th>
-              <th>Modelo</th>
-              <th>Equipos de ese modelo</th>
-              <th>Secciones</th>
-              <th>Piezas</th>
-              <th>Archivo</th>
-              <th>Subido por</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="manpar-table-body"></tbody>
-        </table>
-      </div>
-
-      <h3 class="ref-reporte-titulo">Proveedores</h3>
-      <div class="toolbar">
-        <input type="text" id="prov-search" placeholder="Buscar por nombre, correo o marca...">
-        <button class="export-btn" id="prov-add">+ Agregar proveedor</button>
-      </div>
-      <div class="summary" id="prov-summary"></div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Código en Comercial</th>
-              <th>Correo</th>
-              <th>Teléfono</th>
-              <th>Contacto</th>
-              <th>Marcas</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody id="prov-table-body"></tbody>
-        </table>
-      </div>
-
-      <h3 class="ref-reporte-titulo">Solicitudes de cotización</h3>
+      <!-- Orden de las secciones pedido por Carlos (oct-2026): Solicitudes, Reporte, Proveedores, Catálogos de partes, Marcas, Categorías y al final el listado. -->
+      <h3 class="ref-reporte-titulo" style="margin-top:0;">Solicitudes de cotización</h3>
       <div class="toolbar">
         <button class="export-btn" id="cot-add">+ Nueva solicitud</button>
         <button class="export-btn" id="ocpl-abrir" title="Órdenes de compra enviadas a proveedores y sus facturas (con la nota contable)">🧾 OC a proveedores</button>
@@ -3273,6 +3160,123 @@
             </tr>
           </thead>
           <tbody id="ref-rep-table-body"><tr><td colspan="7"><div class="empty">Selecciona servicios arriba y da clic en "Generar reporte".</div></td></tr></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Proveedores</h3>
+      <div class="toolbar">
+        <input type="text" id="prov-search" placeholder="Buscar por nombre, correo o marca...">
+        <button class="export-btn" id="prov-add">+ Agregar proveedor</button>
+      </div>
+      <div class="summary" id="prov-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Código en Comercial</th>
+              <th>Correo</th>
+              <th>Teléfono</th>
+              <th>Contacto</th>
+              <th>Marcas</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="prov-table-body"></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Catálogos de partes (PDF del fabricante)</h3>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Sube el catálogo de partes de cada modelo (por ejemplo el PDF de Kubota L3800). Se lee solo: secciones, dibujos y la tabla de piezas. Después, en cada orden de un equipo de ese modelo, el botón "📖 Catálogo del equipo" (en Refaccionamiento, aquí y en Taller) lo muestra para escoger las piezas, con propuesta de la IA según la falla. El modelo del equipo se toma de Maquinaria. Si subes otro PDF para el mismo modelo, reemplaza al anterior.</div>
+      <div class="toolbar" id="manpar-subir">
+        <select id="manpar-modelo"><option value="">Modelo del catálogo...</option></select>
+        <input type="file" id="manpar-archivo" accept="application/pdf,.pdf">
+        <button class="export-btn" id="manpar-btn-subir">Subir catálogo de partes (PDF)</button>
+      </div>
+      <div class="maq-modal-status" id="manpar-status"></div>
+      <div class="summary" id="manpar-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Marca</th>
+              <th>Modelo</th>
+              <th>Equipos de ese modelo</th>
+              <th>Secciones</th>
+              <th>Piezas</th>
+              <th>Archivo</th>
+              <th>Subido por</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="manpar-table-body"></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Marcas y modelos compatibles</h3>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Catálogo de marcas (ej. "JOHN DEERE") y sus modelos (ej. "5415", "5615"...), para poder marcar con qué modelos es compatible cada refacción. Da de alta primero la marca y luego, desde "Editar", agrega sus modelos.</div>
+      <div class="toolbar">
+        <button class="export-btn" id="marca-add">+ Agregar marca</button>
+      </div>
+      <div class="summary" id="marca-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Marca</th>
+              <th>Modelos</th>
+              <th>Refacciones</th>
+              <th>Proveedores de la marca</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="marca-table-body"></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Categorías de refacciones</h3>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Agrupan el catálogo (por ejemplo "Aceite", "Filtros", "Llantas"...). La categoría "Aceite" es la que usa el selector de aceite en Mantenimiento — asigna esa categoría a cada refacción que sea un aceite para que aparezca ahí.</div>
+      <div class="toolbar">
+        <button class="export-btn" id="refcat-add">+ Agregar categoría</button>
+      </div>
+      <div class="summary" id="refcat-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Refacciones</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="refcat-table-body"></tbody>
+        </table>
+      </div>
+
+      <h3 class="ref-reporte-titulo">Listado de refacciones</h3>
+      <div class="toolbar">
+        <input type="text" id="ref-search" placeholder="Buscar por descripción, no. de parte o proveedor...">
+        <button class="export-btn" id="ref-add">+ Agregar refacción</button>
+        <button class="export-btn" id="ref-export">Exportar catálogo a Excel</button>
+      </div>
+      <div class="summary" id="ref-summary"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Folio comercial</th>
+              <th>No. de parte (marca)</th>
+              <th>Descripción</th>
+              <th>Categoría</th>
+              <th>Marca</th>
+              <th>Modelos compatibles</th>
+              <th>Precio</th>
+              <th>Proveedor</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="ref-table-body"></tbody>
         </table>
       </div>
     </div>
@@ -20617,7 +20621,7 @@ function renderResultadoCot_(solicitudes){
       : '<div class="ref-rep-checklist" style="max-height:120px;">' + opciones.map(function(o){
           return '<label><input type="checkbox" class="cot-res-dest-check" value="' + escapeHtml(o.correo) + '" checked> ' + escapeHtml(o.label) + '</label>';
         }).join('') + '</div>' +
-        '<button type="button" class="export-btn cot-res-btn-correo" data-idx="' + i + '">Enviar por correo</button>' +
+        '<div class="mnt-subtext" style="margin:4px 0;">Enviar por correo con:</div>' + botonesCorreoHtml_('export-btn cot-res-btn-correo', 'data-idx="' + i + '"') +
         '<div class="maq-modal-status cot-res-correo-status" data-idx="' + i + '"></div>';
     return '<div class="cot-resultado-card">' +
       '<h4>' + escapeHtml(s.proveedorNombre) + ' — folio ' + escapeHtml(s.folio) + ' (' + s.cantidadPiezas + ' pieza(s))</h4>' +
@@ -20661,8 +20665,8 @@ function renderResultadoCot_(solicitudes){
       const statusEl = card.querySelector('.cot-res-correo-status[data-idx="' + idx + '"]');
       if(correos.length === 0) return;
       const link = cont.querySelector('.cot-res-link[data-idx="' + idx + '"]').value.trim();
-      const asunto = encodeURIComponent('Solicitud de cotización ' + s.folio);
-      const cuerpo = encodeURIComponent(
+      const asunto = 'Solicitud de cotización ' + s.folio;
+      const cuerpo = (
         'Buen día,\n' +
         'Solicitamos su apoyo para cotizar las siguientes refacciones/materiales:\n' +
         'Favor de incluir la información solicitada en el siguiente link:\n' +
@@ -20677,11 +20681,9 @@ function renderResultadoCot_(solicitudes){
       // "(No hay sugerencias)". Los navegadores/clientes de correo web (Gmail,
       // etc.) también aceptan punto y coma sin problema, así que usamos ese
       // separador para que funcione en ambos casos.
-      const para = correos.map(encodeURIComponent).join(';');
-      abrirMailto_('mailto:' + para + '?subject=' + asunto + '&body=' + cuerpo);
-
+      const msg = enviarCorreoVia_(btn.dataset.via || 'app', correos, asunto, cuerpo);
       if(statusEl){
-        statusEl.textContent = '✓ Se abrió tu programa de correo con ' + correos.length + ' correo(s) del proveedor en "Para". Sale de la cuenta de correo de esta computadora; termina de enviarlo desde ahí.';
+        statusEl.textContent = msg;
         statusEl.className = 'maq-modal-status cot-res-correo-status show ok';
       }
     });
@@ -20966,6 +20968,41 @@ let OCPL_DATOS = [];
 
 // Abre el programa de correo de ESTA computadora (aparte para poder probarlo).
 function abrirMailto_(url){ window.location.href = url; }
+function abrirVentanaCorreo_(url){ window.open(url, '_blank', 'noopener'); }
+// Cuatro formas de mandar un correo (oct-2026): el "mailto:" no hace nada en
+// las computadoras que no tienen un programa de correo configurado, así que
+// también se puede abrir Gmail u Outlook en el navegador (sale de la cuenta
+// con la que se haya entrado ahí) o copiar el correo completo.
+// Regresa el texto para el letrero de estado.
+function enviarCorreoVia_(via, correos, asunto, cuerpo){
+  try { localStorage.setItem('panel_correo_via', via); } catch(e){}
+  const n = correos.length;
+  if(via === 'gmail'){
+    abrirVentanaCorreo_('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(correos.join(',')) + '&su=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo));
+    return '✓ Se abrió Gmail en otra pestaña con ' + n + ' correo(s) en "Para". Sale de la cuenta de Gmail con la que entraste en este navegador.';
+  }
+  if(via === 'outlook'){
+    abrirVentanaCorreo_('https://outlook.office.com/mail/deeplink/compose?to=' + encodeURIComponent(correos.join(',')) + '&subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo));
+    return '✓ Se abrió Outlook en otra pestaña con ' + n + ' correo(s) en "Para". Sale de la cuenta de Outlook/Office 365 con la que entraste en este navegador.';
+  }
+  if(via === 'copiar'){
+    const texto = 'Para: ' + correos.join('; ') + '\nAsunto: ' + asunto + '\n\n' + cuerpo;
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(texto).catch(function(){ prompt('Copia este correo:', texto); });
+    else prompt('Copia este correo:', texto);
+    return '✓ Se copió el correo (destinatarios, asunto y mensaje). Pégalo en tu correo.';
+  }
+  // Outlook de escritorio pide ";" entre direcciones en un mailto:.
+  abrirMailto_('mailto:' + correos.map(encodeURIComponent).join(';') + '?subject=' + encodeURIComponent(asunto) + '&body=' + encodeURIComponent(cuerpo));
+  return '✓ Se mandó a tu programa de correo con ' + n + ' correo(s) en "Para". Si no se abrió ninguna ventana, esta computadora no tiene programa de correo: usa "Gmail", "Outlook web" o "Copiar correo".';
+}
+function botonesCorreoHtml_(clase, attrs){
+  let via = 'app';
+  try { via = localStorage.getItem('panel_correo_via') || 'app'; } catch(e){}
+  const opc = [['app', '✉️ Programa de correo'], ['gmail', 'Gmail'], ['outlook', 'Outlook web'], ['copiar', '📋 Copiar correo']];
+  return '<span class="correo-vias">' + opc.map(function(o){
+    return '<button type="button" class="' + clase + (o[0] === via ? ' correo-via-ultima' : '') + '" data-via="' + o[0] + '" ' + (attrs || '') + '>' + o[1] + '</button>';
+  }).join('') + '</span>';
+}
 function baseUrlPublica_(){ return PUBLIC_BASE_URL_CONFIG || window.location.origin; }
 function enlaceFacturaOc_(oc){ return baseUrlPublica_() + '/factura?token=' + oc.token; }
 function enlacePdfOc_(oc){ return baseUrlPublica_() + '/oc/pdf?token=' + oc.token; }
@@ -20993,7 +21030,7 @@ function accionesOcHtml_(oc){
   const b = [];
   b.push('<a class="row-view" href="' + escapeHtml(enlacePdfOc_(oc)) + '" target="_blank" rel="noopener">📄 PDF de la OC</a>');
   if(oc.estado !== 'cancelada'){
-    b.push('<button type="button" class="row-view ocp-btn-correo" data-id="' + oc.id + '"' + (oc.correos.length ? '' : ' title="El proveedor no tiene correo: se abre sin destinatario"') + '>✉️ Enviar por correo</button>');
+    b.push(botonesCorreoHtml_('row-view ocp-btn-correo', 'data-id="' + oc.id + '"' + (oc.correos.length ? '' : ' title="El proveedor no tiene correo: se abre sin destinatario"')));
     const tel = telefonoWhatsApp_(oc.telefonos[0]);
     if(tel) b.push('<button type="button" class="row-view ocp-btn-wa" data-id="' + oc.id + '">💬 WhatsApp</button>');
     b.push('<button type="button" class="row-view ocp-btn-copiar" data-id="' + oc.id + '">🔗 Copiar enlace de factura</button>');
@@ -21016,12 +21053,9 @@ function enlazarAccionesOc_(cont, lista, alCambiar){
   cont.querySelectorAll('.ocp-btn-correo').forEach(function(btn){
     btn.addEventListener('click', function(){
       const oc = porId[Number(btn.dataset.id)];
-      // Outlook pide ";" entre direcciones (ver el correo de cotizaciones).
-      const para = oc.correos.map(encodeURIComponent).join(';');
-      // Sin copia fija: sale de la cuenta de correo de esta computadora.
-      abrirMailto_('mailto:' + para +
-        '?subject=' + encodeURIComponent('Orden de compra ' + oc.serie + ' ' + oc.folio + ' — ' + oc.empresa) +
-        '&body=' + encodeURIComponent(textoCorreoOc_(oc)));
+      const msg = enviarCorreoVia_(btn.dataset.via || 'app', oc.correos, 'Orden de compra ' + oc.serie + ' ' + oc.folio + ' — ' + oc.empresa, textoCorreoOc_(oc));
+      const st = document.getElementById('ocp-status');
+      if(st && ocpOverlay.classList.contains('open')){ st.textContent = msg; st.className = 'maq-modal-status show ok'; }
       marcarEnviada(oc);
     });
   });

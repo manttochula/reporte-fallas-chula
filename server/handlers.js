@@ -9430,7 +9430,7 @@ async function getSolicitudesCotizacion(code, nombreUsuario) {
 // se recibieron, como referencia.
 async function getSolicitudCotizacionPublica(token) {
   const [solicitudes] = await pool.query(`
-    SELECT s.id AS Id, s.folio AS Folio, s.estado AS Estado, s.mensaje AS Mensaje,
+    SELECT s.id AS Id, s.folio AS Folio, s.estado AS Estado, s.mensaje AS Mensaje, s.orden AS Orden, s.proveedor_id AS ProveedorId,
            p.nombre AS ProveedorNombre, p.contacto AS ProveedorContacto
     FROM solicitudes_cotizacion s
     INNER JOIN proveedores p ON p.id = s.proveedor_id
@@ -9452,7 +9452,41 @@ async function getSolicitudCotizacionPublica(token) {
     'SELECT COUNT(*) AS RespuestasCount FROM solicitud_cotizacion_respuestas WHERE solicitud_id = ?',
     [s.Id]
   );
+  // Oct-2026 (Carlos): en este MISMO enlace el proveedor ve lo que se le
+  // autorizó y, ya generada, su orden de compra con la opción de adjuntar
+  // la factura (PDF + XML, ver subirFacturaOc). Solo lo de ESTE proveedor
+  // en esta orden; nunca precios de otros proveedores.
+  const [autRows] = await pool.query(
+    `SELECT ref.descripcion, ref.no_parte, sci.cantidad, ri.precio_cotizado, r.descuento_pct
+     FROM solicitud_cotizacion_respuesta_items ri
+     JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+     JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+     JOIN refacciones ref ON ref.id = sci.refaccion_id
+     WHERE sci.solicitud_id = ? AND ri.autorizado = 1
+     ORDER BY ref.descripcion`,
+    [s.Id]
+  );
+  const [ocRows] = s.Orden ? await pool.query(
+    "SELECT token FROM ordenes_compra WHERE orden = ? AND proveedor_id = ? AND estado <> 'cancelada' ORDER BY id",
+    [s.Orden, s.ProveedorId]
+  ) : [[]];
+  const ordenesCompra = [];
+  for (const o of ocRows) {
+    const oc = await datosOcCompletos_(o.token);
+    if (!oc) continue;
+    ordenesCompra.push({
+      Token: oc.token, Serie: oc.serie, Folio: oc.folio, Fecha: oc.fecha, Estado: oc.estado,
+      Partidas: oc.partidas, Subtotal: oc.subtotal, Descuento: oc.descuento, Iva: oc.iva, Total: oc.total,
+      FacturaEn: oc.facturaEn, FacturaNombre: oc.facturaNombre,
+      Empresa: { RazonSocial: oc.empresa.razonSocial, Rfc: oc.empresa.rfc, Domicilio: oc.empresa.domicilio, UsoCfdi: oc.empresa.usoCfdi },
+    });
+  }
   return {
+    Autorizadas: autRows.map((x) => ({
+      Descripcion: x.descripcion, NoParte: x.no_parte || '', Cantidad: Number(x.cantidad),
+      Precio: calcularPreciosCotizados(x.precio_cotizado === null ? null : Number(x.precio_cotizado), x.descuento_pct, null).PrecioConDescuento,
+    })),
+    OrdenesCompra: ordenesCompra,
     Folio: s.Folio,
     Estado: s.Estado,
     Mensaje: s.Mensaje || '',

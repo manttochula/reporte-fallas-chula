@@ -83,6 +83,25 @@
     font-size:13.5px;
   }
   .empty{ text-align:center; padding:40px 0; color: var(--text-dim); }
+  /* Orden de compra en el mismo enlace (oct-2026) */
+  .oc-card{ border-color: rgba(95,163,106,0.55); }
+  .oc-titulo{ font-family:'Oswald',sans-serif; font-size:18px; text-transform:uppercase; margin:0 0 6px; }
+  .oc-estado{ display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; margin-left:6px; background: rgba(232,135,30,0.15); color: var(--amber); }
+  .oc-estado.facturada{ background: rgba(95,163,106,0.18); color: var(--ok); }
+  .oc-botones{ display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+  .btn-sec{ background:transparent; color: var(--text); border:1px solid var(--line); border-radius:6px; padding:9px 14px; font-size:13px; text-decoration:none; display:inline-block; }
+  .oc-totales{ display:flex; gap:16px; justify-content:flex-end; flex-wrap:wrap; font-size:13.5px; margin-top:8px; }
+  .oc-facturacion{ white-space:pre-line; font-size:13px; color: var(--text-dim); background: var(--panel-2); border-radius:8px; padding:10px 14px; margin:10px 0; }
+  .oc-subir{ border-top:1px solid var(--line); margin-top:14px; padding-top:14px; }
+  .aviso-aut{ background: rgba(95,163,106,0.12); color: var(--ok); border-radius:8px; padding:10px 14px; font-size:13.5px; }
+  .seccion-titulo{ font-family:'Oswald',sans-serif; font-size:16px; text-transform:uppercase; color: var(--text-dim); margin: 6px 0 10px; }
+  @media (max-width: 640px){
+    .app{ padding:14px; } .card{ padding:14px; }
+    .card table{ display:block; overflow-x:auto; max-width:100%; }
+    .oc-totales{ justify-content:flex-start; gap:4px 14px; }
+    .oc-botones .btn-sec{ flex:1 1 auto; text-align:center; }
+  }
+  .card{ min-width:0; max-width:100%; }
   .loading{ text-align:center; padding:40px 0; color: var(--text-dim); }
 </style>
 </head>
@@ -171,15 +190,19 @@ function renderSolicitud(){
   document.getElementById('titulo-folio').textContent = 'Cotización ' + SOLICITUD.Folio;
   document.getElementById('subtitulo').textContent = 'Para: ' + SOLICITUD.ProveedorNombre + (SOLICITUD.ProveedorContacto ? ' (' + SOLICITUD.ProveedorContacto + ')' : '');
 
+  // Orden de compra / piezas autorizadas (oct-2026): van ARRIBA de todo.
+  const ocHtml = htmlOrdenCompra_();
+
   // Si la cancelaron desde el Panel, ya no se acepta ninguna cotización más
   // por este enlace (aunque siga siendo válido) — se avisa y no se muestra
   // el formulario.
   if(SOLICITUD.Estado === 'cancelada'){
-    document.getElementById('contenido').innerHTML = `
+    document.getElementById('contenido').innerHTML = ocHtml + `
       <div class="card">
         <div class="aviso-cancelada">Esta solicitud de cotización fue cancelada. Ya no se aceptan cotizaciones para ella — si crees que esto es un error, contacta a quien te la envió.</div>
       </div>
     `;
+    enlazarOrdenCompra_();
     return;
   }
 
@@ -200,7 +223,9 @@ function renderSolicitud(){
     `;
   }).join('');
 
-  document.getElementById('contenido').innerHTML = `
+  const hayOc = (SOLICITUD.OrdenesCompra || []).length > 0;
+  document.getElementById('contenido').innerHTML = ocHtml + `
+    ${ocHtml ? '<div class="seccion-titulo">' + (hayOc ? 'Cotización (ya enviada)' : 'Cotización') + '</div>' : ''}
     <div class="card">
       ${numRespuestas > 0 ? '<div class="aviso-info">Ya se registró' + (numRespuestas === 1 ? ' 1 cotización' : 'n ' + numRespuestas + ' cotizaciones') + ' para esta solicitud. Puedes agregar la tuya sin problema — no se afecta lo que ya cargó nadie más.</div>' : ''}
       ${SOLICITUD.Mensaje ? '<div class="mensaje-proveedor">' + escapeHtml(SOLICITUD.Mensaje) + '</div>' : ''}
@@ -237,6 +262,99 @@ function renderSolicitud(){
   `;
 
   document.getElementById('cot-btn-enviar').addEventListener('click', enviarCotizacion);
+  enlazarOrdenCompra_();
+}
+
+function dinero_(n){ return '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fechaCorta_(iso){ const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : (iso || ''); }
+
+// Lo autorizado y la(s) orden(es) de compra de este proveedor en esta orden.
+function htmlOrdenCompra_(){
+  const ocs = SOLICITUD.OrdenesCompra || [];
+  const aut = SOLICITUD.Autorizadas || [];
+  if(ocs.length){
+    return ocs.map(function(oc, i){
+      const e = oc.Empresa || {};
+      const filas = (oc.Partidas || []).map(function(p){
+        return '<tr><td>' + escapeHtml(p.cantidad) + '</td><td class="desc">' + escapeHtml(p.observaciones) + '</td><td>' + dinero_(p.precio) + '</td><td>' + dinero_(p.importe) + '</td></tr>';
+      }).join('');
+      const pdf = '/oc/pdf?token=' + encodeURIComponent(oc.Token);
+      const facturada = !!oc.FacturaEn;
+      return `
+      <div class="card oc-card" data-oc-idx="${i}">
+        <div class="eyebrow">Su cotización fue autorizada</div>
+        <div class="oc-titulo">Orden de compra ${escapeHtml(oc.Serie + ' ' + oc.Folio)}<span class="oc-estado${facturada ? ' facturada' : ''}">${facturada ? 'Factura recibida' : 'Pendiente de factura'}</span></div>
+        <div class="subtitulo">Fecha ${escapeHtml(fechaCorta_(oc.Fecha))} · Total ${dinero_(oc.Total)} (IVA incluido)</div>
+        <div class="oc-botones">
+          <a class="btn-sec" href="${pdf}" target="_blank" rel="noopener">📄 Ver orden de compra (PDF)</a>
+          <a class="btn-sec" href="${pdf}&descargar=1">⬇ Descargar PDF</a>
+        </div>
+        <table>
+          <thead><tr><th>Cant.</th><th>Descripción</th><th>Valor unitario</th><th>Importe</th></tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+        <div class="oc-totales"><span>Subtotal ${dinero_(oc.Subtotal)}</span><span>Descuentos ${dinero_(oc.Descuento)}</span><span>IVA ${dinero_(oc.Iva)}</span><b>Total ${dinero_(oc.Total)}</b></div>
+        <div class="campo" style="margin-top:12px;"><label>Facturar a</label>
+          <div class="oc-facturacion">${escapeHtml([e.RazonSocial, e.Domicilio, e.Rfc ? 'RFC: ' + e.Rfc : '', e.UsoCfdi ? 'Uso del CFDI: ' + e.UsoCfdi : ''].filter(Boolean).join('\n'))}</div>
+          <div class="campo-nota">Indique en su factura la serie y folio de esta orden de compra (${escapeHtml(oc.Serie + ' ' + oc.Folio)}).</div>
+        </div>
+        <div class="oc-subir">
+          <div class="seccion-titulo" style="margin-top:0;">Adjuntar factura</div>
+          ${facturada ? '<div class="aviso-aut" style="margin-bottom:12px;">Ya recibimos su factura el ' + escapeHtml(new Date(oc.FacturaEn).toLocaleString('es-MX')) + (oc.FacturaNombre ? ' (' + escapeHtml(oc.FacturaNombre) + ')' : '') + '. Si hubo un error puede volver a subirla; reemplaza a la anterior.</div>' : ''}
+          <div class="campo"><label>Su nombre *</label><input type="text" class="oc-f-nombre" maxlength="255" placeholder="Quién sube la factura"></div>
+          <div class="campo"><label>PDF de la factura *</label><input type="file" class="oc-f-pdf" accept="application/pdf,.pdf"></div>
+          <div class="campo"><label>XML de la factura *</label><input type="file" class="oc-f-xml" accept=".xml,text/xml,application/xml"></div>
+          <button class="btn oc-btn-enviar">Enviar factura</button>
+          <div class="status oc-status"></div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  if(aut.length){
+    return `
+    <div class="card oc-card">
+      <div class="eyebrow">Cotización autorizada</div>
+      <div class="aviso-aut">Se autorizaron ${aut.length} pieza(s) de su cotización. En cuanto se genere la orden de compra aparecerá aquí mismo, junto con la opción para adjuntar su factura.</div>
+      <table style="margin-top:10px;">
+        <thead><tr><th>Refacción</th><th>Cantidad</th><th>Precio autorizado (sin IVA)</th></tr></thead>
+        <tbody>${aut.map(function(a){ return '<tr><td class="desc">' + escapeHtml(a.Descripcion) + (a.NoParte ? '<span class="no-parte">No. de parte: ' + escapeHtml(a.NoParte) + '</span>' : '') + '</td><td>' + a.Cantidad + '</td><td>' + (a.Precio === null ? '—' : dinero_(a.Precio)) + '</td></tr>'; }).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+  return '';
+}
+
+function enlazarOrdenCompra_(){
+  document.querySelectorAll('.oc-card[data-oc-idx]').forEach(function(card){
+    const oc = SOLICITUD.OrdenesCompra[Number(card.dataset.ocIdx)];
+    const btn = card.querySelector('.oc-btn-enviar');
+    const st = card.querySelector('.oc-status');
+    const msg = function(t, cls){ st.innerHTML = t; st.className = 'status oc-status show ' + cls; };
+    btn.addEventListener('click', function(){
+      const nombre = card.querySelector('.oc-f-nombre').value.trim();
+      const pdf = card.querySelector('.oc-f-pdf').files[0];
+      const xml = card.querySelector('.oc-f-xml').files[0];
+      if(!nombre){ msg('Escriba su nombre.', 'err'); return; }
+      if(!pdf || !/\.pdf$/i.test(pdf.name)){ msg('Adjunte el PDF de la factura.', 'err'); return; }
+      if(!xml || !/\.xml$/i.test(xml.name)){ msg('Adjunte el XML de la factura.', 'err'); return; }
+      if(pdf.size > 15 * 1024 * 1024 || xml.size > 15 * 1024 * 1024){ msg('El archivo es demasiado grande (máximo 15 MB).', 'err'); return; }
+      btn.disabled = true; btn.textContent = 'Enviando...';
+      Promise.all([leerArchivoComoDataUrl_(pdf), leerArchivoComoDataUrl_(xml)]).then(function(r){
+        google.script.run
+          .withSuccessHandler(function(res){
+            btn.disabled = false; btn.textContent = 'Enviar factura';
+            if(!res || !res.success){ msg(escapeHtml((res && res.error) || 'No se pudo enviar.'), 'err'); return; }
+            if(res.avisos && res.avisos.length) msg('✔ Recibimos su factura. ¡Gracias!<br><br><b>Por favor revise:</b><br>' + res.avisos.map(escapeHtml).join('<br>'), 'err');
+            else msg('✔ Recibimos su factura. ¡Gracias!', 'ok');
+            const est = card.querySelector('.oc-estado');
+            if(est){ est.textContent = 'Factura recibida'; est.classList.add('facturada'); }
+            card.querySelector('.oc-f-pdf').value = ''; card.querySelector('.oc-f-xml').value = '';
+          })
+          .withFailureHandler(function(err){ btn.disabled = false; btn.textContent = 'Enviar factura'; msg(escapeHtml((err && err.message) || 'No se pudo enviar. Intente de nuevo.'), 'err'); })
+          .subirFacturaOc(oc.Token, { nombre: nombre, pdf: r[0], xml: r[1] });
+      }).catch(function(){ btn.disabled = false; btn.textContent = 'Enviar factura'; msg('No se pudo leer el archivo.', 'err'); });
+    });
+  });
 }
 
 function leerArchivoComoDataUrl_(file){

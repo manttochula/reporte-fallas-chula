@@ -1098,6 +1098,9 @@
   /* Se abre encima de la ventana de la solicitud de cotización. */
   #ocp-modal-overlay{ z-index:210; }
   .cce-tabla td input{ width:100%; }
+  .prev-umbral-caja{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12.5px; margin:0 0 10px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
+  .prev-umbral-caja input{ width:90px !important; min-width:0; background:transparent; color:inherit; border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+  .prev-umbral-status.ok{ color:#5fa36a; } .prev-umbral-status.err{ color:var(--danger); }
   .correo-vias{ display:inline-flex; gap:6px; flex-wrap:wrap; }
   .correo-via-ultima{ font-weight:700; }
   .ocp-seccion{ margin-top:16px; padding:10px 12px; border:1px solid rgba(60,110,200,0.35); border-radius:8px; background:rgba(60,110,200,0.05); }
@@ -3014,12 +3017,21 @@
 
       <h3 class="ref-reporte-titulo">Servicios (por equipo)</h3>
       <div class="mnt-subtext" style="margin-bottom:8px;">Estado real de cada equipo según la regla de su modelo: último servicio capturado (fecha/horómetro) y próximo servicio calculado a partir de ahí. Un equipo sin ningún registro capturado todavía aparece como "Sin línea base".</div>
+      <div class="prev-umbral-caja" data-scope="agricola">
+        <span>Generar la orden de trabajo sola cuando falten</span>
+        <input type="number" class="prev-umbral-generar" id="srv-umbral-generar" min="0" step="1"> <span>horas</span>
+        <span>· marcar "Por vencer" cuando falten</span>
+        <input type="number" class="prev-umbral-avisar" id="srv-umbral-avisar" min="0" step="1"> <span>horas o menos</span>
+        <button type="button" class="export-btn prev-umbral-guardar" id="srv-umbral-guardar">Guardar</button>
+        <span class="prev-umbral-status" id="srv-umbral-status"></span>
+      </div>
       <div class="toolbar">
         <input type="text" id="srv-search" placeholder="Buscar por unidad, modelo o tipo de preventivo...">
         <select id="srv-huerta"><option value="">Todas las huertas</option></select>
         <select id="srv-estatus">
           <option value="">Todos los estatus</option>
           <option value="vencido">Vencido</option>
+          <option value="por_vencer">Por vencer</option>
           <option value="al_dia">Al día</option>
           <option value="sin_base">Sin línea base</option>
         </select>
@@ -3076,11 +3088,20 @@
 
       <h3 class="ref-reporte-titulo">Servicios (por vehículo)</h3>
       <div class="mnt-subtext" style="margin-bottom:8px;">Estado real de cada vehículo según la regla de su modelo: último servicio capturado (fecha/kilometraje) y próximo servicio calculado a partir de ahí. El kilometraje actual se toma automáticamente de Combustible Automotriz (odómetro capturado en cada ticket), salvo que se actualice a mano. Un vehículo sin ningún registro capturado todavía aparece como "Sin línea base".</div>
+      <div class="prev-umbral-caja" data-scope="automotriz">
+        <span>Generar la orden de trabajo sola cuando falten</span>
+        <input type="number" class="prev-umbral-generar" id="sa-srv-umbral-generar" min="0" step="1"> <span>km</span>
+        <span>· marcar "Por vencer" cuando falten</span>
+        <input type="number" class="prev-umbral-avisar" id="sa-srv-umbral-avisar" min="0" step="1"> <span>km o menos</span>
+        <button type="button" class="export-btn prev-umbral-guardar" id="sa-srv-umbral-guardar">Guardar</button>
+        <span class="prev-umbral-status" id="sa-srv-umbral-status"></span>
+      </div>
       <div class="toolbar">
         <input type="text" id="sa-srv-search" placeholder="Buscar por unidad, modelo o tipo de servicio...">
         <select id="sa-srv-estatus">
           <option value="">Todos los estatus</option>
           <option value="vencido">Vencido</option>
+          <option value="por_vencer">Por vencer</option>
           <option value="al_dia">Al día</option>
           <option value="sin_base">Sin línea base</option>
         </select>
@@ -4906,6 +4927,7 @@ function ocultarControlesSoloLectura(){
       '#mnt-add', '#mnt-tipo-add', '.mnt-btn-editar', '#srv-table-body .mnt-lectura-link',
       '#mnt-btn-save', '#mnt-btn-delete',
       '.srv-btn-editar', '.srv-btn-orden', '#srv-btn-save', '#ord-btn-generar',
+      '#srv-umbral-guardar',
     ]);
   }
   if(!puedeCapturarPestana('servicios_automotrices')){
@@ -4916,6 +4938,7 @@ function ocultarControlesSoloLectura(){
       // acotado a la tabla de Servicios Automotrices (#sa-srv-table-body)
       // para no afectar también la de Preventivos Agrícolas.
       '#sa-mnt-add', '#sa-mnt-tipo-add', '#sa-mnt-import', '.sa-mnt-btn-editar', '#sa-srv-table-body .mnt-lectura-link',
+      '#sa-srv-umbral-guardar',
       '#sa-mnt-btn-save', '#sa-mnt-btn-delete',
       '.sa-srv-btn-editar', '.sa-srv-btn-orden', '#sa-srv-btn-save', '#sa-ord-btn-generar',
       '#sa-imp-btn-confirmar',
@@ -16301,6 +16324,7 @@ function cargarTiposPreventivo(seleccionarId, destino){
 }
 
 function cargarServiciosMantenimiento(){
+  cargarUmbralesPreventivo_();
   const tbody = document.getElementById('srv-table-body');
   tbody.innerHTML = '<tr><td colspan="9"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
@@ -16318,13 +16342,53 @@ function cargarServiciosMantenimiento(){
 // como "Por vencer" — debe coincidir con AUTO_ORDEN_UMBRAL_RESTANTE del
 // servidor solo en el sentido de que 20 (donde se genera la orden sola)
 // cae dentro de este rango de 50 (donde apenas se empieza a avisar).
-const SRV_UMBRAL_POR_VENCER = 50;
+const SRV_UMBRAL_POR_VENCER = 50; // valor de respaldo; el real viene en cada servicio (UmbralAvisar), editable arriba de cada tabla
+
+// Umbrales editables (oct-2026): cuándo se genera la OT sola y cuándo se
+// marca "Por vencer" -- agrícola en horas, automotriz en km. Ver
+// getUmbralesPreventivo / guardarUmbralesPreventivo en handlers.js.
+function cargarUmbralesPreventivo_(){
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success) return;
+      [['agricola', 'srv'], ['automotriz', 'sa-srv']].forEach(function(x){
+        const g = document.getElementById(x[1] + '-umbral-generar');
+        const a = document.getElementById(x[1] + '-umbral-avisar');
+        if(g && document.activeElement !== g) g.value = r[x[0]].generar;
+        if(a && document.activeElement !== a) a.value = r[x[0]].avisar;
+      });
+    })
+    .withFailureHandler(function(){})
+    .getUmbralesPreventivo(ACCESS_CODE, PANEL_USUARIO);
+}
+document.querySelectorAll('.prev-umbral-guardar').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    const caja = btn.closest('.prev-umbral-caja');
+    const scope = caja.dataset.scope;
+    const pref = scope === 'agricola' ? 'srv' : 'sa-srv';
+    const st = document.getElementById(pref + '-umbral-status');
+    const g = document.getElementById(pref + '-umbral-generar').value;
+    const a = document.getElementById(pref + '-umbral-avisar').value;
+    if(!confirm('Con esto el sistema genera solo las órdenes de los ' + (scope === 'agricola' ? 'equipos' : 'vehículos') + ' a los que les falten ' + g + (scope === 'agricola' ? ' horas' : ' km') + ' o menos. Si bajas el número, las órdenes abiertas de los que ya no queden en ese rango se cancelan solas. ¿Guardar?')) return;
+    btn.disabled = true;
+    st.textContent = 'Guardando...'; st.className = 'prev-umbral-status';
+    google.script.run
+      .withSuccessHandler(function(r){
+        btn.disabled = false;
+        if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'prev-umbral-status err'; return; }
+        st.textContent = '✓ Guardado'; st.className = 'prev-umbral-status ok';
+        if(scope === 'agricola') cargarServiciosMantenimiento(); else cargarServiciosAutomotricesDatos();
+      })
+      .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'prev-umbral-status err'; })
+      .guardarUmbralesPreventivo(ACCESS_CODE, PANEL_USUARIO, scope, g, a);
+  });
+});
 
 function getEstadoServicio_(r){
   if(r.SinLineaBase) return { label: 'Sin línea base', cls: 'neutral' };
   if(r.Vencido) return { label: 'Vencido', cls: 'danger' };
   if((r.TipoPeriodicidad === 'horas' || r.TipoPeriodicidad === 'kilometros') &&
-     r.Restante !== null && r.Restante !== undefined && r.Restante <= SRV_UMBRAL_POR_VENCER){
+     r.Restante !== null && r.Restante !== undefined && r.Restante <= (r.UmbralAvisar !== undefined && r.UmbralAvisar !== null ? r.UmbralAvisar : SRV_UMBRAL_POR_VENCER)){
     return { label: 'Por vencer', cls: 'progress' };
   }
   return { label: 'Al día', cls: 'done' };
@@ -16873,6 +16937,7 @@ function getServiciosFiltrados(){
     if(estatus === 'vencido' && !r.Vencido) return false;
     if(estatus === 'al_dia' && (r.Vencido || r.SinLineaBase)) return false;
     if(estatus === 'sin_base' && !r.SinLineaBase) return false;
+    if(estatus === 'por_vencer' && getEstadoServicio_(r).label !== 'Por vencer') return false;
     if(q){
       const haystack = [r.Unidad, r.CodigoUnidad, r.MarcaNombre, r.ModeloNombre, r.TipoPreventivoNombre, r.NombreServicio, r.Huerta].join(' ').toUpperCase();
       if(haystack.indexOf(q) === -1) return false;
@@ -17183,6 +17248,7 @@ function cargarReglasAutomotrices(){
 }
 
 function cargarServiciosAutomotricesDatos(){
+  cargarUmbralesPreventivo_();
   const tbody = document.getElementById('sa-srv-table-body');
   tbody.innerHTML = '<tr><td colspan="9"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
@@ -17620,6 +17686,7 @@ function getServiciosAutomotricesFiltrados(){
     if(estatus === 'vencido' && !r.Vencido) return false;
     if(estatus === 'al_dia' && (r.Vencido || r.SinLineaBase)) return false;
     if(estatus === 'sin_base' && !r.SinLineaBase) return false;
+    if(estatus === 'por_vencer' && getEstadoServicio_(r).label !== 'Por vencer') return false;
     if(q){
       const haystack = [r.Unidad, r.CodigoUnidad, r.MarcaNombre, r.ModeloNombre, r.TipoPreventivoNombre, r.NombreServicio, r.Huerta].join(' ').toUpperCase();
       if(haystack.indexOf(q) === -1) return false;

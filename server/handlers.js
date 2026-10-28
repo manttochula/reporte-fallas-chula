@@ -4596,9 +4596,73 @@ async function obtenerServiciosMantenimiento_(scope) {
     };
   });
 
+  // Umbrales editables (oct-2026): cuándo se genera la OT sola y cuándo se
+  // marca "Por vencer", aparte para agrícola (horas) y automotriz (km).
+  const umbrales = await leerUmbralesPreventivo_();
+  resultado.forEach((r) => {
+    const u = r.EsAutomotriz ? umbrales.automotriz : umbrales.agricola;
+    r.UmbralGenerar = u.generar;
+    r.UmbralAvisar = u.avisar;
+  });
+
   if (scope === 'agricola') resultado = resultado.filter((r) => !r.EsAutomotriz);
   if (scope === 'automotriz') resultado = resultado.filter((r) => r.EsAutomotriz);
   return resultado;
+}
+
+// ---------------------------------------------------------------
+// Umbrales de preventivos (oct-2026, pedido de Carlos): "modificarle tanto
+// en agrícola como en automotriz el kilometraje y la hora de cuándo
+// queremos que se genere la OT y nos avise que está por vencer".
+//  - generar: con cuántas horas (agrícola) / km (automotriz) restantes o
+//    menos se genera la orden de trabajo sola (job de cada 30 min).
+//  - avisar: con cuántas o menos se marca "Por vencer" en Servicios.
+// Se guardan en configuracion_general; sin valor, los de siempre (20 y 50).
+// ---------------------------------------------------------------
+const UMBRALES_PREVENTIVO_DEFECTO_ = { generar: 20, avisar: 50 };
+const UMBRAL_PREVENTIVO_MAX_ = 100000;
+
+async function leerUmbralesPreventivo_() {
+  const [rows] = await pool.query("SELECT clave, valor FROM configuracion_general WHERE clave LIKE 'prev\\_%'");
+  const v = {};
+  rows.forEach((r) => { v[r.clave] = r.valor; });
+  const num = (x, def) => { const n = Number(x); return x !== null && x !== undefined && x !== '' && Number.isFinite(n) && n >= 0 ? n : def; };
+  const de = (scope) => ({
+    generar: num(v['prev_' + scope + '_generar'], UMBRALES_PREVENTIVO_DEFECTO_.generar),
+    avisar: num(v['prev_' + scope + '_avisar'], UMBRALES_PREVENTIVO_DEFECTO_.avisar),
+  });
+  return { agricola: de('agricola'), automotriz: de('automotriz') };
+}
+
+async function getUmbralesPreventivo(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, ['mantenimiento', 'servicios_automotrices'], 'visualizar');
+  return { success: true, ...(await leerUmbralesPreventivo_()) };
+}
+
+// scope: 'agricola' (horas; permiso de Preventivos agrícolas) o
+// 'automotriz' (km; permiso de Servicios automotrices).
+async function guardarUmbralesPreventivo(code, nombreUsuario, scope, generar, avisar) {
+  if (scope !== 'agricola' && scope !== 'automotriz') return { success: false, error: 'Tipo de preventivo no válido.' };
+  await requierePermisoPanel_(code, nombreUsuario, scope === 'agricola' ? 'mantenimiento' : 'servicios_automotrices', 'capturar');
+  const unidad = scope === 'agricola' ? 'horas' : 'km';
+  const g = Number(generar);
+  const a = Number(avisar);
+  if (generar === '' || generar === null || generar === undefined || !Number.isFinite(g) || g < 0 || g > UMBRAL_PREVENTIVO_MAX_) {
+    return { success: false, error: 'Escribe con cuántas ' + unidad + ' antes se genera la orden (0 = hasta que venza).' };
+  }
+  if (avisar === '' || avisar === null || avisar === undefined || !Number.isFinite(a) || a < 0 || a > UMBRAL_PREVENTIVO_MAX_) {
+    return { success: false, error: 'Escribe con cuántas ' + unidad + ' antes se avisa "Por vencer".' };
+  }
+  if (a < g) return { success: false, error: 'El aviso de "Por vencer" debe ser igual o antes (más ' + unidad + ') que la generación de la orden.' };
+  await pool.query(
+    `INSERT INTO configuracion_general (clave, valor, modificado_por) VALUES (?, ?, ?), (?, ?, ?)
+     ON DUPLICATE KEY UPDATE valor = VALUES(valor), modificado_por = VALUES(modificado_por)`,
+    ['prev_' + scope + '_generar', String(g), nombreUsuario, 'prev_' + scope + '_avisar', String(a), nombreUsuario]
+  );
+  await registrarAuditoria_('configuracion_general', 'prev_' + scope, 'editar', nombreUsuario, 'Generar OT a ' + g + ' ' + unidad + ', avisar a ' + a + ' ' + unidad);
+  // Que se note de inmediato (no esperar la revisión de cada 30 min).
+  revisarYGenerarOrdenesPreventivasAutomaticas_().catch(() => {});
+  return { success: true, generar: g, avisar: a };
 }
 
 // Captura/edita a mano el "último servicio" (fecha + horómetro) de un
@@ -9766,7 +9830,8 @@ function estaVencidoOProximo_(s) {
   if (s.TipoPeriodicidad !== 'horas' && s.TipoPeriodicidad !== 'kilometros') return false;
   if (s.SinLineaBase) return false;
   if (s.Restante === null || s.Restante === undefined) return false;
-  return s.Restante <= AUTO_ORDEN_UMBRAL_RESTANTE;
+  const umbral = s.UmbralGenerar !== undefined && s.UmbralGenerar !== null ? Number(s.UmbralGenerar) : AUTO_ORDEN_UMBRAL_RESTANTE;
+  return s.Restante <= umbral;
 }
 
 // Job en segundo plano (ver server.js): recorre todos los "servicios" (cada
@@ -10134,6 +10199,10 @@ module.exports = {
   guardarTipoUnidad,
   eliminarTipoUnidad,
   getEmpresasCatalogo,
+  getUmbralesPreventivo,
+  guardarUmbralesPreventivo,
+  leerUmbralesPreventivo_,
+  estaVencidoOProximo_,
   getOcsProveedorDeOrden,
   prepararOcProveedor,
   generarOcProveedor,

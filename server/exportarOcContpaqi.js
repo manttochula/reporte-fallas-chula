@@ -115,6 +115,7 @@ async function escribirExcel(plan, opciones) {
 
   const gasto = wb.addWorksheet('Gasto directo');
   gasto.columns = [
+    { header: 'Empresa', key: 'empresa', width: 30 },
     { header: 'Orden', key: 'orden', width: 12 }, { header: 'Refacción', key: 'ref', width: 46 },
     { header: 'Código', key: 'cod', width: 12 }, { header: 'Proveedor', key: 'prov', width: 26 },
     { header: 'Cantidad', key: 'cant', width: 10 }, { header: 'Precio s/IVA', key: 'precio', width: 13 },
@@ -122,13 +123,14 @@ async function escribirExcel(plan, opciones) {
   ];
   gasto.getRow(1).font = { bold: true };
   plan.gasto.forEach((p) => {
-    gasto.addRow({ orden: p.orden || '', ref: p.descripcion || '', cod: p.refaccionCodigo || '', prov: p.proveedor || '',
+    gasto.addRow({ empresa: p.empresa || opciones.empresa || '', orden: p.orden || '', ref: p.descripcion || '', cod: p.refaccionCodigo || '', prov: p.proveedor || '',
       cant: Number(p.cantidad) || 0, precio: Number(p.precio) || 0, total: Math.round((Number(p.cantidad) || 0) * (Number(p.precio) || 0) * 100) / 100 });
   });
   ['F', 'G'].forEach((c) => { gasto.getColumn(c).numFmt = '$#,##0.00'; });
 
   const rev = wb.addWorksheet('Revisar');
   rev.columns = [
+    { header: 'Empresa', key: 'empresa', width: 30 },
     { header: 'Orden', key: 'orden', width: 12 }, { header: 'Refacción', key: 'ref', width: 46 },
     { header: 'Folio comercial', key: 'folio', width: 15 }, { header: 'Proveedor', key: 'prov', width: 26 },
     { header: 'Cantidad', key: 'cant', width: 10 }, { header: 'Precio s/IVA', key: 'precio', width: 13 },
@@ -137,7 +139,7 @@ async function escribirExcel(plan, opciones) {
   rev.getRow(1).font = { bold: true };
   plan.revisar.forEach((r) => {
     const p = r.partida;
-    rev.addRow({ orden: p.orden || '', ref: p.descripcion || '', folio: p.folioComercial || '', prov: p.proveedor || '',
+    rev.addRow({ empresa: p.empresa || '', orden: p.orden || '', ref: p.descripcion || '', folio: p.folioComercial || '', prov: p.proveedor || '',
       cant: p.cantidad, precio: p.precio, motivo: r.motivo });
   });
   rev.getColumn('F').numFmt = '$#,##0.00';

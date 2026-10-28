@@ -2058,7 +2058,7 @@
                 <th>Lectura anterior</th><th>Lectura actual</th><th>Horas de labor</th><th>Rendimiento (L/h)</th>
               </tr>
             </thead>
-            <tbody id="dz-notif-table-body"><tr><td colspan="10"><div class="empty">Cargando...</div></td></tr></tbody>
+            <tbody id="dz-notif-table-body"><tr><td colspan="11"><div class="empty">Cargando...</div></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -2747,6 +2747,11 @@
             <div class="buscable-lista" id="maq-f-usuario-app-lista"></div>
           </div>
         </div>
+        <div class="maq-field">
+          <label>Empresa (a quién se factura)</label>
+          <select id="maq-f-empresa"><option value="">Sin empresa...</option></select>
+          <span class="mnt-subtext">Las Órdenes de Compra de las refacciones de este equipo se exportan a CONTPAQi en esta empresa.</span>
+        </div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-usa-diesel"> Funciona con diesel (tractores y retros: aparece para capturar diesel en el Panel y en campo)</label></div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-usa-gasolina"> Aparece en Combustible Automotriz (autos y camionetas: aparece para capturar su combustible en el Panel)</label></div>
         <div class="maq-field"><label><input type="checkbox" id="maq-f-admite-terceros"> Admite reparación con terceros (permite marcar esta unidad en la categoría "Reparaciones con terceros" de Órdenes)</label></div>
@@ -2790,6 +2795,7 @@
               <th data-key="Modelo">Modelo <span class="arrow"></span></th>
               <th data-key="Color">Color <span class="arrow"></span></th>
               <th data-key="Huerta">Ubicación <span class="arrow"></span></th>
+              <th data-key="Empresa">Empresa <span class="arrow"></span></th>
               <th data-key="Departamento">Departamento <span class="arrow"></span></th>
               <th data-key="Serie">Serie <span class="arrow"></span></th>
               <th data-key="Placa">Placa <span class="arrow"></span></th>
@@ -3340,6 +3346,11 @@
         <button class="maq-modal-close" id="ocx-modal-close">&times;</button>
         <h3>Exportar OC para CONTPAQi</h3>
         <div class="mnt-subtext" style="margin-bottom:10px;">Toma las refacciones con precio <b>autorizado</b> ("Aut" en las cotizaciones) y arma el Excel con la hoja <b>Lote</b> para tu macro. Una OC por proveedor y por orden. Precio sin IVA (con el descuento del proveedor ya aplicado). Las refacciones sin folio comercial van a la hoja <b>Gasto directo</b>; las de proveedores sin código en Comercial, a <b>Revisar</b> (esas no se marcan y vuelven a salir).</div>
+        <div class="maq-field">
+          <label>Empresa en Comercial *</label>
+          <select id="ocx-empresa"></select>
+          <span class="mnt-subtext">Cada empresa es una base aparte en Comercial: el Excel trae solo las OC de los equipos de esta empresa (Catálogo → Empresa) y cada una lleva su propio folio.</span>
+        </div>
         <div class="maq-field-row">
           <div class="maq-field"><label>Serie</label><input type="text" id="ocx-serie" maxlength="10"></div>
           <div class="maq-field"><label>Folio inicial *</label><input type="number" id="ocx-folio" min="1" step="1" placeholder="Ej. 101"></div>
@@ -3357,7 +3368,7 @@
           <table class="ocx-tabla">
             <thead><tr>
               <th><input type="checkbox" id="ocx-todas" checked style="width:auto;" title="Todas"></th>
-              <th>Orden</th><th>Proveedor (código)</th><th>Refacción</th><th>Folio comercial</th>
+              <th>Orden</th><th>Empresa</th><th>Proveedor (código)</th><th>Refacción</th><th>Folio comercial</th>
               <th>Cant.</th><th>Precio s/IVA</th><th>Total s/IVA</th><th>Va a</th><th>Ya exportada</th>
             </tr></thead>
             <tbody id="ocx-body"></tbody>
@@ -9586,7 +9597,7 @@ function renderNotificacionesDiesel(){
     statusEl.className = 'maq-modal-status show';
   }
   if(notificaciones.length === 0){
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty">Sin notificaciones en este rango de fechas.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Sin notificaciones en este rango de fechas.</div></td></tr>';
     return;
   }
   tbody.innerHTML = notificaciones.map(function(item){
@@ -10179,7 +10190,7 @@ let mvSortDir = -1;
 
 function cargarMovimientosHistorial(){
   const tbody = document.getElementById('mv-table-body');
-  tbody.innerHTML = '<tr><td colspan="10"><div class="empty">Cargando...</div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
     .withSuccessHandler(function(records){
       MOVIMIENTOS_CARGADOS = true;
@@ -10187,7 +10198,7 @@ function cargarMovimientosHistorial(){
       renderMovimientos();
     })
     .withFailureHandler(function(){
-      tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudieron cargar los movimientos.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudieron cargar los movimientos.</div></td></tr>';
     })
     .getMovimientosHistorial(ACCESS_CODE, PANEL_USUARIO);
 }
@@ -10236,7 +10247,7 @@ function renderMovimientos(){
   if(activeTh){ activeTh.textContent = mvSortDir === 1 ? '▲' : '▼'; }
 
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No hay movimientos que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No hay movimientos que coincidan.</div></td></tr>';
     return;
   }
 
@@ -12521,7 +12532,7 @@ function renderRefnecLista(){
       <span class="refnec-item-texto">${escapeHtml(it.texto)}</span>
       <span class="refnec-item-cantidad">×<input type="number" class="refnec-item-cantidad-input" min="0.01" step="0.01" value="${cantidadValor}" onclick="event.stopPropagation()" oninput="actualizarCantidadRefnec(${idx}, this.value)"></span>
       <span class="refnec-item-badge">${badge}</span>
-      ${it.oc ? '<span class="refnec-item-oc" title="Exportada a CONTPAQi ' + escapeHtml((it.oc.fecha || '') + ' por ' + (it.oc.por || '')) + '">' + (it.oc.tipo === 'oc' ? 'OC ' + escapeHtml(it.oc.serie + ' ' + it.oc.folio) : 'Gasto directo') + '</span>' : ''}
+      ${it.oc ? '<span class="refnec-item-oc" title="Exportada a CONTPAQi ' + escapeHtml((it.oc.empresa ? '(' + it.oc.empresa + ') ' : '') + (it.oc.fecha || '') + ' por ' + (it.oc.por || '')) + '">' + (it.oc.tipo === 'oc' ? 'OC ' + escapeHtml(it.oc.serie + ' ' + it.oc.folio) : 'Gasto directo') + '</span>' : ''}
       ${entregadoHtml}
       ${btnAgregar}
       <button type="button" class="refnec-item-btn refnec-item-quitar" onclick="quitarItemRefnec(${idx})">Quitar</button>
@@ -15533,7 +15544,7 @@ function getMaquinariaFiltrada(){
     if(tipo && (r.TipoUnidad || '').toUpperCase() !== tipo.toUpperCase()) return false;
     if(marca && (r.Marca || '').toUpperCase() !== marca.toUpperCase()) return false;
     if(q){
-      const haystack = [r.Unidad, r.CodigoUnidad, r.Marca, r.Modelo, r.Serie, r.Placa, r.Huerta, r.TipoUnidad].join(' ').toUpperCase();
+      const haystack = [r.Unidad, r.CodigoUnidad, r.Marca, r.Modelo, r.Serie, r.Placa, r.Huerta, r.TipoUnidad, r.Empresa].join(' ').toUpperCase();
       if(haystack.indexOf(q) === -1) return false;
     }
     return true;
@@ -15738,11 +15749,23 @@ function limpiarModalMaquinaria(){
   document.getElementById('maq-f-usa-diesel').checked = false;
   document.getElementById('maq-f-usa-gasolina').checked = false;
   document.getElementById('maq-f-admite-terceros').checked = false;
+  poblarSelectEmpresaMaq_('');
   document.getElementById('maq-f-combustible-tipo').value = 'gasolina';
   document.getElementById('maq-f-observaciones').value = '';
   const statusEl = document.getElementById('maq-modal-status');
   statusEl.textContent = '';
   statusEl.className = 'maq-modal-status';
+}
+
+// Empresa del equipo (oct-2026): del catálogo de Empresas (Catálogo → Catálogos).
+function poblarSelectEmpresaMaq_(valor){
+  const sel = document.getElementById('maq-f-empresa');
+  const empresas = ((typeof CATALOGO_SIMPLE_DATOS !== 'undefined' && CATALOGO_SIMPLE_DATOS.empresas) || []).slice()
+    .sort(function(a, b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
+  sel.innerHTML = '<option value="">Sin empresa...</option>' + empresas.map(function(e){
+    return '<option value="' + e.Id + '">' + escapeHtml(e.Nombre) + '</option>';
+  }).join('');
+  sel.value = valor ? String(valor) : '';
 }
 
 function abrirModalMaquinaria(registro){
@@ -15784,6 +15807,7 @@ function abrirModalMaquinaria(registro){
     document.getElementById('maq-f-usa-diesel').checked = !!registro.UsaDiesel;
     document.getElementById('maq-f-usa-gasolina').checked = !!registro.UsaGasolina;
     document.getElementById('maq-f-admite-terceros').checked = !!registro.AdmiteTerceros;
+    poblarSelectEmpresaMaq_(registro.EmpresaId || '');
     document.getElementById('maq-f-combustible-tipo').value = registro.CombustibleAutomotrizTipo === 'diesel' ? 'diesel' : 'gasolina';
     document.getElementById('maq-f-observaciones').value = (registro.Estatus === 'En mantenimiento') ? '' : (registro.Observaciones || '');
     document.getElementById('maq-btn-delete').style.display = '';
@@ -15896,6 +15920,7 @@ document.getElementById('maq-btn-save').addEventListener('click', function(){
     usaDiesel: document.getElementById('maq-f-usa-diesel').checked,
     usaGasolina: document.getElementById('maq-f-usa-gasolina').checked,
     admiteTerceros: document.getElementById('maq-f-admite-terceros').checked,
+    empresaId: document.getElementById('maq-f-empresa').value,
     combustibleAutomotrizTipo: document.getElementById('maq-f-combustible-tipo').value,
     observaciones: document.getElementById('maq-f-observaciones').value.trim()
   };
@@ -16017,7 +16042,7 @@ function getCatalogoFiltrado(){
     if(departamento && (r.Departamento || '').toUpperCase() !== departamento) return false;
     if(CAT_TIPOS_SELECCIONADOS.size > 0 && !CAT_TIPOS_SELECCIONADOS.has((r.TipoUnidad || '').toString().trim())) return false;
     if(q){
-      const haystack = [r.Unidad, r.CodigoUnidad, r.Marca, r.Modelo, r.Serie, r.Placa, r.Huerta, r.TipoUnidad].join(' ').toUpperCase();
+      const haystack = [r.Unidad, r.CodigoUnidad, r.Marca, r.Modelo, r.Serie, r.Placa, r.Huerta, r.TipoUnidad, r.Empresa].join(' ').toUpperCase();
       if(haystack.indexOf(q) === -1) return false;
     }
     return true;
@@ -16028,7 +16053,7 @@ function renderCatalogo(){
   const tbody = document.getElementById('cat-table-body');
   if(!tbody) return;
   if(ALL_MAQUINARIA.length === 0){
-    tbody.innerHTML = '<tr><td colspan="14"><div class="empty">Cargando...</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15"><div class="empty">Cargando...</div></td></tr>';
     return;
   }
   let records = getCatalogoFiltrado();
@@ -16049,7 +16074,7 @@ function renderCatalogo(){
   if(activeTh){ activeTh.textContent = catSortDir === 1 ? '▲' : '▼'; }
 
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="14"><div class="empty">No hay equipo que coincida.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15"><div class="empty">No hay equipo que coincida.</div></td></tr>';
     return;
   }
 
@@ -16062,6 +16087,7 @@ function renderCatalogo(){
       <td>${escapeHtml(r.Modelo || '—')}</td>
       <td>${escapeHtml(r.Color || '—')}</td>
       <td>${escapeHtml(r.Huerta || '—')}</td>
+      <td>${r.Empresa ? escapeHtml(r.Empresa) : '<span class="mnt-subtext" style="display:inline;">— falta</span>'}</td>
       <td>${escapeHtml(r.Departamento || '—')}</td>
       <td>${escapeHtml(r.Serie || '—')}</td>
       <td>${escapeHtml(r.Placa || '—')}</td>
@@ -16106,6 +16132,7 @@ document.getElementById('cat-export').addEventListener('click', function(){
     {header:'Modelo', key:'modelo', width:16},
     {header:'Color', key:'color', width:12},
     {header:'Huerta', key:'huerta', width:18},
+    {header:'Empresa', key:'empresa', width:30},
     {header:'Departamento', key:'departamento', width:16},
     {header:'Serie', key:'serie', width:20},
     {header:'Placa', key:'placa', width:14},
@@ -16115,7 +16142,7 @@ document.getElementById('cat-export').addEventListener('click', function(){
   const filas = records.map(function(r){
     return {
       unidad: r.Unidad, anio: (r.Anio === null || r.Anio === undefined || r.Anio === '') ? null : Number(r.Anio),
-      marca: r.Marca, modelo: r.Modelo, color: r.Color, huerta: r.Huerta, departamento: r.Departamento,
+      marca: r.Marca, modelo: r.Modelo, color: r.Color, huerta: r.Huerta, empresa: r.Empresa || '', departamento: r.Departamento,
       serie: r.Serie, placa: r.Placa, tipoUnidad: r.TipoUnidad, operadorAsignado: r.OperadorAsignado,
     };
   });
@@ -18082,7 +18109,7 @@ function renderRefacciones(){
   const records = getRefaccionesFiltradas();
   document.getElementById('ref-summary').textContent = records.length + ' de ' + ALL_REFACCIONES.length + ' refacciones';
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No hay refacciones que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No hay refacciones que coincidan.</div></td></tr>';
     return;
   }
   tbody.innerHTML = records.map(function(r){
@@ -18417,7 +18444,7 @@ function cargarCatalogoInsumos(){
 
 function cargarInsumos(){
   const tbody = document.getElementById('ins-table-body');
-  tbody.innerHTML = '<tr><td colspan="10"><div class="empty">Cargando...</div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Cargando...</div></td></tr>';
   const incluirEliminados = document.getElementById('ins-mostrar-eliminados').checked;
   google.script.run
     .withSuccessHandler(function(records){
@@ -18426,7 +18453,7 @@ function cargarInsumos(){
       renderInsumos();
     })
     .withFailureHandler(function(){
-      tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudieron cargar las solicitudes de insumos.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudieron cargar las solicitudes de insumos.</div></td></tr>';
     })
     .getInsumos(ACCESS_CODE, PANEL_USUARIO, incluirEliminados);
 }
@@ -18486,7 +18513,7 @@ function renderInsumos(){
   if(activeTh){ activeTh.textContent = insSortDir === 1 ? '▲' : '▼'; }
 
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No hay solicitudes de insumos que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No hay solicitudes de insumos que coincidan.</div></td></tr>';
     return;
   }
 
@@ -20547,7 +20574,9 @@ document.getElementById('cot-btn-generar').addEventListener('click', function(){
 // servidor. Lista para palomear las partidas autorizadas pendientes; arma el
 // .xlsx (hojas Lote / Gasto directo / Revisar) y lo descarga.
 // ---------------------------------------------------------------
-let OCX_PARTIDAS = [];
+let OCX_PARTIDAS = [];   // las de la empresa elegida (ver aplicarEmpresaOcx_)
+let OCX_PARTIDAS_TODAS = [];
+let OCX_DATOS = null;    // respuesta completa (empresas y configuración por empresa)
 let OCX_SELECCION = {}; // respuestaItemId -> true
 const ocxOverlay = document.getElementById('ocx-modal-overlay');
 
@@ -20571,35 +20600,57 @@ function abrirModalOcx(){
 
 function cargarPartidasOcx_(conConfig){
   const body = document.getElementById('ocx-body');
-  body.innerHTML = '<tr><td colspan="10"><div class="empty">Cargando...</div></td></tr>';
+  body.innerHTML = '<tr><td colspan="11"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
     .withSuccessHandler(function(r){
-      if(!r || !r.success){ body.innerHTML = '<tr><td colspan="10"><div class="empty">' + escapeHtml((r && r.error) || 'No se pudo cargar.') + '</div></td></tr>'; return; }
-      OCX_PARTIDAS = r.partidas || [];
+      if(!r || !r.success){ body.innerHTML = '<tr><td colspan="11"><div class="empty">' + escapeHtml((r && r.error) || 'No se pudo cargar.') + '</div></td></tr>'; return; }
+      OCX_DATOS = r;
+      OCX_PARTIDAS_TODAS = r.partidas || [];
+      // Empresa: la que ya estaba elegida o la que más partidas pendientes tiene.
+      const selEmp = document.getElementById('ocx-empresa');
+      const previa = selEmp.value;
+      const cuenta = {};
+      OCX_PARTIDAS_TODAS.forEach(function(p){ if(p.empresaId) cuenta[p.empresaId] = (cuenta[p.empresaId] || 0) + 1; });
+      selEmp.innerHTML = (r.empresas || []).map(function(e){
+        return '<option value="' + e.id + '">' + escapeHtml(e.nombre) + (cuenta[e.id] ? ' (' + cuenta[e.id] + ')' : '') + '</option>';
+      }).join('');
+      const mejor = Object.keys(cuenta).sort(function(a, b){ return cuenta[b] - cuenta[a]; })[0];
+      selEmp.value = (previa && (r.empresas || []).some(function(e){ return String(e.id) === previa; })) ? previa : (mejor || (r.empresas && r.empresas[0] ? String(r.empresas[0].id) : ''));
+      aplicarEmpresaOcx_(conConfig);
+    })
+    .withFailureHandler(function(){ body.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudo cargar. Revisa tu conexión.</div></td></tr>'; })
+    .getPartidasParaOC(ACCESS_CODE, PANEL_USUARIO, document.getElementById('ocx-incluir-exportadas').checked);
+}
+
+// Filtra la lista a la empresa elegida (+ las que no tienen empresa, para
+// que se vea por qué no salen) y llena serie/folio/concepto/almacén de esa
+// empresa.
+function aplicarEmpresaOcx_(conConfig){
+      const r = OCX_DATOS || {};
+      const empresaId = Number(document.getElementById('ocx-empresa').value) || 0;
+      OCX_PARTIDAS = OCX_PARTIDAS_TODAS.filter(function(p){ return !p.empresaId || p.empresaId === empresaId; });
       OCX_SELECCION = {};
-      // Palomeadas: las pendientes; las ya exportadas (o exportadas con otra
-      // cotización) quedan sin palomear para no mandarlas dos veces.
-      OCX_PARTIDAS.forEach(function(p){ if(!p.exportada && !p.exportadaOtra) OCX_SELECCION[p.respuestaItemId] = true; });
+      // Palomeadas: las pendientes de esta empresa; las ya exportadas (o
+      // exportadas con otra cotización) quedan sin palomear.
+      OCX_PARTIDAS.forEach(function(p){ if(!p.exportada && !p.exportadaOtra && (p.empresaId === empresaId || p.destino === 'gasto')) OCX_SELECCION[p.respuestaItemId] = true; });
       if(conConfig){
-        const c = r.config || {};
+        const c = (r.configPorEmpresa && r.configPorEmpresa[empresaId]) || r.config || {};
         document.getElementById('ocx-serie').value = c.serie || 'VER';
         document.getElementById('ocx-concepto').value = c.concepto || 'ORDEN DE COMPRA VRZ';
         document.getElementById('ocx-almacen').value = c.almacen || 'ALMMTTO';
         document.getElementById('ocx-folio').value = c.siguienteFolio || '';
         document.getElementById('ocx-folio-ayuda').textContent = c.ultimoFolio
           ? 'El último folio que se exportó fue ' + (c.serie || 'VER') + ' ' + c.ultimoFolio + '. Revisa en Comercial que el folio inicial no exista.'
-          : 'Escribe el primer folio libre en Comercial; después el sistema propone el siguiente.';
+          : 'Escribe el primer folio libre en Comercial (en esta empresa); después el sistema propone el siguiente.';
       }
       renderPartidasOcx_();
-    })
-    .withFailureHandler(function(){ body.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudo cargar. Revisa tu conexión.</div></td></tr>'; })
-    .getPartidasParaOC(ACCESS_CODE, PANEL_USUARIO, document.getElementById('ocx-incluir-exportadas').checked);
 }
+document.getElementById('ocx-empresa').addEventListener('change', function(){ aplicarEmpresaOcx_(true); });
 
 function renderPartidasOcx_(){
   const body = document.getElementById('ocx-body');
   if(!OCX_PARTIDAS.length){
-    body.innerHTML = '<tr><td colspan="10"><div class="empty">No hay refacciones con precio autorizado pendientes de exportar. Autoriza precios en las cotizaciones ("Aut").</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="11"><div class="empty">No hay refacciones con precio autorizado pendientes de exportar. Autoriza precios en las cotizaciones ("Aut").</div></td></tr>';
     renderResumenOcx_();
     return;
   }
@@ -20613,6 +20664,7 @@ function renderPartidasOcx_(){
     return '<tr>' +
       '<td><input type="checkbox" class="ocx-chk" data-id="' + p.respuestaItemId + '"' + (OCX_SELECCION[p.respuestaItemId] ? ' checked' : '') + ' style="width:auto;"></td>' +
       '<td>' + escapeHtml(p.orden || '—') + (p.ordenUnidad ? '<div class="mnt-subtext">' + escapeHtml(p.ordenUnidad) + '</div>' : '') + '</td>' +
+      '<td>' + (p.empresa ? escapeHtml(p.empresa.split(',')[0]) : '<span class="ocx-destino-revisar">Sin empresa</span>') + '</td>' +
       '<td>' + escapeHtml(p.proveedor) + ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(p.codigoComercial || 'sin código') + ')</span></td>' +
       '<td>' + escapeHtml(p.descripcion) + '<div class="mnt-subtext">' + escapeHtml([p.refaccionCodigo, p.noParte].filter(Boolean).join(' · ')) + '</div></td>' +
       '<td>' + escapeHtml(p.folioComercial || '—') + '</td>' +
@@ -20641,7 +20693,9 @@ function renderResumenOcx_(){
   const rango = nOc && folio ? ' (folios ' + serie + ' ' + folio + (nOc > 1 ? '–' + (folio + nOc - 1) : '') + ')' : '';
   const nGasto = sel.filter(function(p){ return p.destino === 'gasto'; }).length;
   const nRev = sel.filter(function(p){ return p.destino === 'revisar'; }).length;
-  document.getElementById('ocx-resumen').textContent = sel.length + ' de ' + OCX_PARTIDAS.length + ' partidas palomeadas → ' +
+  const selEmp = document.getElementById('ocx-empresa');
+  const nombreEmp = selEmp.selectedIndex >= 0 ? selEmp.options[selEmp.selectedIndex].textContent.replace(/\s*\(\d+\)$/, '').split(',')[0] : '';
+  document.getElementById('ocx-resumen').textContent = (nombreEmp ? nombreEmp + ': ' : '') + sel.length + ' de ' + OCX_PARTIDAS.length + ' partidas palomeadas → ' +
     nOc + ' OC' + rango + ', ' + nGasto + ' a gasto directo, ' + nRev + ' a revisar.';
   document.getElementById('ocx-todas').checked = sel.length === OCX_PARTIDAS.length && OCX_PARTIDAS.length > 0;
 }
@@ -20679,6 +20733,7 @@ document.getElementById('ocx-btn-generar').addEventListener('click', function(){
   if(!ids.length){ st.textContent = 'Palomea al menos una partida.'; st.className = 'maq-modal-status show err'; return; }
   if(yaExportadas && !confirm('Palomeaste ' + yaExportadas + ' partida(s) que YA se habían exportado. Si sigues, se vuelven a mandar con el folio nuevo. ¿Continuar?')) return;
   const datos = {
+    empresaId: Number(document.getElementById('ocx-empresa').value) || 0,
     respuestaItemIds: ids,
     serie: document.getElementById('ocx-serie').value,
     folioInicial: Number(document.getElementById('ocx-folio').value),
@@ -20695,7 +20750,7 @@ document.getElementById('ocx-btn-generar').addEventListener('click', function(){
       btn.disabled = false; btn.textContent = 'Generar Excel';
       if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo generar.'; st.className = 'maq-modal-status show err'; return; }
       descargarBase64Ocx_(r.archivoBase64, r.nombreArchivo);
-      st.textContent = 'Listo: se descargó ' + r.nombreArchivo + '.';
+      st.textContent = 'Listo: se descargó ' + r.nombreArchivo + '. Cárgalo en Comercial en la empresa ' + r.empresa + '.';
       st.className = 'maq-modal-status show ok';
       document.getElementById('ocx-resultado').innerHTML =
         '<div class="mnt-subtext" style="margin-top:8px;"><b>' + r.ocs.length + ' OC:</b> ' +

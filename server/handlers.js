@@ -3194,8 +3194,11 @@ const MAQUINARIA_SELECT = `
     m.combustible_automotriz_tipo AS CombustibleAutomotrizTipo,
     m.operador_asignado AS OperadorAsignado,
     m.usuario_asignado_app AS UsuarioAsignadoApp,
-    m.admite_terceros AS AdmiteTerceros
+    m.admite_terceros AS AdmiteTerceros,
+    m.empresa_id      AS EmpresaId,
+    emp.nombre        AS Empresa
   FROM maquinaria m
+  LEFT JOIN empresas emp ON emp.id = m.empresa_id
   LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
   LEFT JOIN modelos_refacciones mdo ON mdo.id = m.modelo_id
 `;
@@ -3327,11 +3330,26 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
     // pueden usar esa categoría al crear/editar una orden — ver es_terceros
     // en db/schema.sql y la validación en crearOrdenPanel/editarOrden.
     const admiteTerceros = data.admiteTerceros ? 1 : 0;
+    // Empresa a la que se factura lo de este equipo (oct-2026). Si no viene
+    // en data (versión vieja del Panel), se conserva la que tenía.
+    let empresaId;
+    if (Object.prototype.hasOwnProperty.call(data, 'empresaId')) {
+      empresaId = data.empresaId === '' || data.empresaId === null ? null : Number(data.empresaId);
+      if (empresaId) {
+        const [e] = await pool.query('SELECT id FROM empresas WHERE id = ?', [empresaId]);
+        if (!e.length) return { success: false, error: 'Esa empresa ya no existe en el catálogo.' };
+      }
+    } else if (codigo) {
+      const [actual] = await pool.query('SELECT empresa_id FROM maquinaria WHERE codigo_unidad = ?', [codigo]);
+      empresaId = actual.length ? actual[0].empresa_id : null;
+    } else {
+      empresaId = null;
+    }
 
     await pool.query(
       `INSERT INTO maquinaria
-        (codigo_unidad, unidad, departamento, marca_id, modelo_id, anio, color, serie, placa, tipo_unidad, observaciones, usa_diesel, usa_gasolina, combustible_automotriz_tipo, operador_asignado, usuario_asignado_app, admite_terceros)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (codigo_unidad, unidad, departamento, marca_id, modelo_id, anio, color, serie, placa, tipo_unidad, observaciones, usa_diesel, usa_gasolina, combustible_automotriz_tipo, operador_asignado, usuario_asignado_app, admite_terceros, empresa_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
         unidad = VALUES(unidad), departamento = VALUES(departamento), marca_id = VALUES(marca_id),
         modelo_id = VALUES(modelo_id), anio = VALUES(anio), color = VALUES(color), serie = VALUES(serie),
@@ -3340,7 +3358,8 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
         combustible_automotriz_tipo = VALUES(combustible_automotriz_tipo),
         operador_asignado = VALUES(operador_asignado),
         usuario_asignado_app = VALUES(usuario_asignado_app),
-        admite_terceros = VALUES(admite_terceros)`,
+        admite_terceros = VALUES(admite_terceros),
+        empresa_id = VALUES(empresa_id)`,
       [
         codigo,
         unidad,
@@ -3359,6 +3378,7 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
         operadorAsignado,
         usuarioAsignadoApp,
         admiteTerceros,
+        empresaId || null,
       ]
     );
     return { success: true, codigoUnidad: codigo };
@@ -8125,15 +8145,20 @@ async function eliminarModelo(code, nombreUsuario, id) {
 // ---------------------------------------------------------------
 const OC_CONFIG_DEFAULT_ = { serie: 'VER', concepto: 'ORDEN DE COMPRA VRZ', almacen: 'ALMMTTO' };
 
-async function leerConfigOc_() {
-  const [rows] = await pool.query("SELECT clave, valor FROM configuracion WHERE clave IN ('oc_serie', 'oc_concepto', 'oc_almacen', 'oc_ultimo_folio')");
+// Configuración de la exportación. Cada empresa es una base aparte en
+// Comercial, así que serie/concepto/almacén y el último folio se guardan POR
+// EMPRESA (claves oc_serie_e<ID>...); si una empresa todavía no tiene, toma
+// los generales (y si no, VER / ORDEN DE COMPRA VRZ / ALMMTTO).
+async function leerConfigOc_(empresaId) {
+  const [rows] = await pool.query("SELECT clave, valor FROM configuracion WHERE clave LIKE 'oc\\_%'");
   const v = {};
   rows.forEach((r) => { v[r.clave] = r.valor; });
-  const ultimo = Number(v.oc_ultimo_folio) || 0;
+  const suf = empresaId ? '_e' + Number(empresaId) : '';
+  const ultimo = Number(v['oc_ultimo_folio' + suf]) || 0;
   return {
-    serie: v.oc_serie || OC_CONFIG_DEFAULT_.serie,
-    concepto: v.oc_concepto || OC_CONFIG_DEFAULT_.concepto,
-    almacen: v.oc_almacen || OC_CONFIG_DEFAULT_.almacen,
+    serie: v['oc_serie' + suf] || v.oc_serie || OC_CONFIG_DEFAULT_.serie,
+    concepto: v['oc_concepto' + suf] || v.oc_concepto || OC_CONFIG_DEFAULT_.concepto,
+    almacen: v['oc_almacen' + suf] || v.oc_almacen || OC_CONFIG_DEFAULT_.almacen,
     ultimoFolio: ultimo || null,
     siguienteFolio: ultimo ? ultimo + 1 : null,
   };
@@ -8151,7 +8176,7 @@ async function partidasOc_(ids) {
     `SELECT ri.id AS respuestaItemId, sci.cantidad AS cantidad, ri.precio_cotizado AS precioCotizado, r.descuento_pct AS descuentoPct,
             s.folio AS solicitudFolio, s.orden AS orden, s.proveedor_id AS proveedorId, p.nombre AS proveedor, p.codigo_comercial AS codigoComercial,
             ref.id AS refaccionId, ref.codigo AS refaccionCodigo, ref.descripcion AS descripcion, ref.no_parte AS noParte, ref.folio_comercial AS folioComercial,
-            rep.unidad AS ordenUnidad,
+            rep.unidad AS ordenUnidad, rep.codigo_unidad AS codigoUnidad, mq.empresa_id AS empresaId, emp.nombre AS empresa,
             x.tipo AS expTipo, x.serie AS expSerie, x.folio AS expFolio, x.fecha_oc AS expFecha, x.exportado_por AS expPor, x.exportado_en AS expEn
      FROM solicitud_cotizacion_respuesta_items ri
      JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
@@ -8160,6 +8185,8 @@ async function partidasOc_(ids) {
      JOIN proveedores p ON p.id = s.proveedor_id
      JOIN refacciones ref ON ref.id = sci.refaccion_id
      LEFT JOIN reportes rep ON rep.orden = s.orden
+     LEFT JOIN maquinaria mq ON mq.codigo_unidad = rep.codigo_unidad
+     LEFT JOIN empresas emp ON emp.id = mq.empresa_id
      LEFT JOIN oc_exportaciones x ON x.respuesta_item_id = ri.id
      WHERE ri.autorizado = 1${filtroIds}
      ORDER BY s.orden, p.nombre, ref.descripcion`,
@@ -8177,10 +8204,13 @@ async function partidasOc_(ids) {
     else if (!(Number(x.cantidad) > 0)) { destino = 'revisar'; motivo = 'Sin cantidad.'; }
     else if (precio === null) { destino = 'revisar'; motivo = 'Sin precio autorizado.'; }
     else if (!(x.codigoComercial || '').trim()) { destino = 'revisar'; motivo = 'El proveedor no tiene "Código en Comercial".'; }
+    else if (!x.empresaId) { destino = 'revisar'; motivo = 'La unidad ' + (x.ordenUnidad || x.codigoUnidad || '') + ' no tiene empresa: asígnala en el Catálogo de maquinaria.'; }
     return {
       respuestaItemId: x.respuestaItemId,
       orden: x.orden || '',
       ordenUnidad: x.ordenUnidad || '',
+      empresaId: x.empresaId || null,
+      empresa: x.empresa || '',
       solicitudFolio: x.solicitudFolio || '',
       proveedorId: x.proveedorId,
       proveedor: x.proveedor || '',
@@ -8204,7 +8234,10 @@ async function getPartidasParaOC(code, nombreUsuario, incluirExportadas) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
   const todas = await partidasOc_(null);
   const partidas = incluirExportadas ? todas : todas.filter((p) => !p.exportada);
-  return { success: true, partidas, config: await leerConfigOc_() };
+  const [empresas] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
+  const configPorEmpresa = {};
+  for (const e of empresas) configPorEmpresa[e.id] = await leerConfigOc_(e.id);
+  return { success: true, partidas, config: await leerConfigOc_(), empresas: empresas.map((e) => ({ id: e.id, nombre: e.nombre })), configPorEmpresa };
 }
 
 async function exportarOCContpaqi(code, nombreUsuario, data) {
@@ -8212,6 +8245,11 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
   data = data || {};
   const ids = (Array.isArray(data.respuestaItemIds) ? data.respuestaItemIds : []).map(Number).filter((n) => n > 0);
   if (!ids.length) return { success: false, error: 'Palomea al menos una partida.' };
+  // Una exportación = UNA empresa (en Comercial cada una es una base aparte).
+  const empresaId = Number(data.empresaId) || 0;
+  const [empRows] = await pool.query('SELECT id, nombre FROM empresas WHERE id = ?', [empresaId]);
+  if (!empRows.length) return { success: false, error: 'Elige la empresa a la que se van a cargar las OC.' };
+  const empresaNombre = empRows[0].nombre;
   const serie = (data.serie || '').toString().trim().toUpperCase();
   const concepto = (data.concepto || '').toString().trim();
   const almacen = (data.almacen || '').toString().trim().toUpperCase();
@@ -8225,49 +8263,62 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { success: false, error: 'Elige la fecha de la OC.' };
   if (fechaEntrega && (!/^\d{4}-\d{2}-\d{2}$/.test(fechaEntrega) || fechaEntrega < fecha)) return { success: false, error: 'La fecha de entrega no puede ser antes de la fecha de la OC.' };
 
-  const partidas = await partidasOc_(ids);
-  if (!partidas.length) return { success: false, error: 'Esas partidas ya no están autorizadas. Actualiza la lista.' };
+  const todasSel = await partidasOc_(ids);
+  if (!todasSel.length) return { success: false, error: 'Esas partidas ya no están autorizadas. Actualiza la lista.' };
+  // Las de otra empresa (o de una unidad sin empresa) no van en este archivo.
+  const otrasRevisar = [];
+  const partidas = [];
+  todasSel.forEach((p) => {
+    if (p.destino === 'gasto' && (!p.empresaId || p.empresaId === empresaId)) partidas.push(p);
+    else if (!p.empresaId) otrasRevisar.push({ partida: p, motivo: p.motivo || 'La unidad no tiene empresa.' });
+    else if (p.empresaId !== empresaId) otrasRevisar.push({ partida: p, motivo: 'Es de ' + p.empresa + ': expórtala eligiendo esa empresa.' });
+    else partidas.push(p);
+  });
   const plan = exportarOc.planearOcs(partidas, { serie, folioInicial, concepto, almacen });
+  plan.revisar = plan.revisar.concat(otrasRevisar);
   if (!plan.ocs.length && !plan.gasto.length) {
     return { success: false, error: 'Ninguna partida se puede exportar todavía: ' + plan.revisar.map((r) => r.motivo).filter((m, i, a) => a.indexOf(m) === i).join(' ') };
   }
-  const buffer = await exportarOc.escribirExcel(plan, { fecha, fechaEntrega, concepto, almacen });
+  const buffer = await exportarOc.escribirExcel(plan, { fecha, fechaEntrega, concepto, almacen, empresa: empresaNombre });
 
   // Se marca lo exportado (OC y gasto directo); lo de "Revisar" no.
   const por = (nombreUsuario || '').toString().trim() || null;
   const marcar = async (p, tipo, s, f) => {
     await pool.query(
-      `INSERT INTO oc_exportaciones (respuesta_item_id, orden, refaccion_id, proveedor_id, tipo, serie, folio, fecha_oc, cantidad, precio, exportado_por, exportado_en)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-       ON DUPLICATE KEY UPDATE orden = VALUES(orden), refaccion_id = VALUES(refaccion_id), proveedor_id = VALUES(proveedor_id), tipo = VALUES(tipo),
+      `INSERT INTO oc_exportaciones (respuesta_item_id, orden, refaccion_id, proveedor_id, tipo, serie, folio, fecha_oc, cantidad, precio, exportado_por, empresa_id, exportado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE orden = VALUES(orden), refaccion_id = VALUES(refaccion_id), proveedor_id = VALUES(proveedor_id), tipo = VALUES(tipo), empresa_id = VALUES(empresa_id),
          serie = VALUES(serie), folio = VALUES(folio), fecha_oc = VALUES(fecha_oc), cantidad = VALUES(cantidad), precio = VALUES(precio),
          exportado_por = VALUES(exportado_por), exportado_en = NOW()`,
-      [p.respuestaItemId, p.orden || null, p.refaccionId, p.proveedorId, tipo, s, f, fecha, p.cantidad, p.precio, por]
+      [p.respuestaItemId, p.orden || null, p.refaccionId, p.proveedorId, tipo, s, f, fecha, p.cantidad, p.precio, por, p.empresaId || empresaId]
     );
   };
   for (const oc of plan.ocs) for (const p of oc.partidas) await marcar(p, 'oc', oc.serie, oc.folio);
   for (const p of plan.gasto) await marcar(p, 'gasto_directo', null, null);
-  await guardarConfigOc_('oc_serie', serie);
-  await guardarConfigOc_('oc_concepto', concepto);
-  await guardarConfigOc_('oc_almacen', almacen);
+  const suf = '_e' + empresaId;
+  await guardarConfigOc_('oc_serie' + suf, serie);
+  await guardarConfigOc_('oc_concepto' + suf, concepto);
+  await guardarConfigOc_('oc_almacen' + suf, almacen);
   if (plan.ocs.length) {
     const ultimo = plan.ocs[plan.ocs.length - 1].folio;
-    const actual = (await leerConfigOc_()).ultimoFolio || 0;
-    if (ultimo > actual) await guardarConfigOc_('oc_ultimo_folio', ultimo);
+    const actual = (await leerConfigOc_(empresaId)).ultimoFolio || 0;
+    if (ultimo > actual) await guardarConfigOc_('oc_ultimo_folio' + suf, ultimo);
   }
   const ordenesOc = Array.from(new Set(plan.ocs.map((o) => o.orden).filter(Boolean)));
   for (const o of ordenesOc) {
     const suyas = plan.ocs.filter((x) => x.orden === o).map((x) => x.serie + ' ' + x.folio + ' (' + x.proveedor + ')');
-    await agregarObservacionOrden_(o, (por || 'Alguien') + ' exportó a CONTPAQi: OC ' + suyas.join(', ') + '.');
+    await agregarObservacionOrden_(o, (por || 'Alguien') + ' exportó a CONTPAQi (' + empresaNombre + '): OC ' + suyas.join(', ') + '.');
   }
   await registrarAuditoria_('oc_exportaciones', serie + '-' + folioInicial, 'exportar', nombreUsuario,
-    plan.ocs.length + ' OC, ' + plan.gasto.length + ' gasto directo, ' + plan.revisar.length + ' a revisar');
+    empresaNombre + ': ' + plan.ocs.length + ' OC, ' + plan.gasto.length + ' gasto directo, ' + plan.revisar.length + ' a revisar');
 
   const folios = plan.ocs.map((o) => o.folio);
-  const nombre = 'OC_CONTPAQi_' + serie + '_' + (folios.length ? folios[0] + (folios.length > 1 ? '-' + folios[folios.length - 1] : '') : 'sin-OC') + '_' + fecha + '.xlsx';
+  const empresaCorta = empresaNombre.split(',')[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+  const nombre = 'OC_CONTPAQi_' + empresaCorta + '_' + serie + '_' + (folios.length ? folios[0] + (folios.length > 1 ? '-' + folios[folios.length - 1] : '') : 'sin-OC') + '_' + fecha + '.xlsx';
   return {
     success: true,
     nombreArchivo: nombre,
+    empresa: empresaNombre,
     archivoBase64: buffer.toString('base64'),
     ocs: plan.ocs.map((o) => ({ serie: o.serie, folio: o.folio, orden: o.orden, proveedor: o.proveedor, codigoProveedor: o.codigoProveedor, partidas: o.partidas.length })),
     gasto: plan.gasto.length,
@@ -8278,12 +8329,12 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
 // Para la orden (Refaccionamiento): OC/gasto directo de cada refacción.
 async function ocsDeOrden_(orden) {
   const [rows] = await pool.query(
-    'SELECT refaccion_id, tipo, serie, folio, fecha_oc, exportado_por FROM oc_exportaciones WHERE orden = ? ORDER BY exportado_en',
+    'SELECT x.refaccion_id, x.tipo, x.serie, x.folio, x.fecha_oc, x.exportado_por, e.nombre AS empresa FROM oc_exportaciones x LEFT JOIN empresas e ON e.id = x.empresa_id WHERE x.orden = ? ORDER BY x.exportado_en',
     [orden]
   );
   const porRef = {};
   rows.forEach((r) => {
-    porRef[r.refaccion_id] = { tipo: r.tipo, serie: r.serie || '', folio: r.folio, fecha: fechaSoloOrNull(r.fecha_oc), por: r.exportado_por || '' };
+    porRef[r.refaccion_id] = { tipo: r.tipo, serie: r.serie || '', folio: r.folio, fecha: fechaSoloOrNull(r.fecha_oc), por: r.exportado_por || '', empresa: r.empresa || '' };
   });
   return porRef;
 }

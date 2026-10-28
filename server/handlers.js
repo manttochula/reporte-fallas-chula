@@ -11,6 +11,7 @@ const { siguienteFolio_, tieneAccesoModulo_, requiereClave_, tienePermisoPanel_ 
 const { guardarArchivo_, leerArchivoComoBuffer_ } = require('./storage');
 const avisos = require('./avisos');
 const exportarOc = require('./exportarOcContpaqi');
+const ocProv = require('./ordenCompraProveedor');
 const {
   preguntarleAClaudeSobreImagen_,
   preguntarleAClaudeSobreImagenes_,
@@ -7897,8 +7898,13 @@ async function eliminarDepartamento(code, nombreUsuario, id) { return catalogoDe
 // fabricaCatalogoSimple_ (eliminar sí la sigue usando, no cambia).
 async function getTiposUnidad(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
-  const [rows] = await pool.query('SELECT id AS Id, nombre AS Nombre, categoria AS Categoria FROM tipos_unidad ORDER BY nombre');
-  return rows.map((r) => ({ Id: r.Id, Nombre: r.Nombre, Categoria: r.Categoria || '' }));
+  const [rows] = await pool.query(
+    `SELECT t.id AS Id, t.nombre AS Nombre, t.categoria AS Categoria, t.cuenta_contable_id AS CuentaContableId,
+            c.nombre AS CuentaNombre, c.numero AS CuentaNumero
+     FROM tipos_unidad t LEFT JOIN cuentas_contables c ON c.id = t.cuenta_contable_id ORDER BY t.nombre`
+  );
+  return rows.map((r) => ({ Id: r.Id, Nombre: r.Nombre, Categoria: r.Categoria || '', CuentaContableId: r.CuentaContableId || null,
+    CuentaNombre: r.CuentaNombre || '', CuentaNumero: r.CuentaNumero || '' }));
 }
 
 async function guardarTipoUnidad(code, nombreUsuario, id, data) {
@@ -7909,11 +7915,18 @@ async function guardarTipoUnidad(code, nombreUsuario, id, data) {
     if (!nombre) return { success: false, error: 'Escribe el nombre de el tipo de unidad.' };
     const categoriaTxt = (data.categoria || '').toString().trim().toLowerCase();
     const categoria = (categoriaTxt === 'agricola' || categoriaTxt === 'automotriz') ? categoriaTxt : null;
+    // Cuenta contable (oct-2026): la que se usa en la OC al proveedor y en
+    // la nota de su factura para los equipos de este tipo.
+    const cuentaId = Number(data.cuentaContableId) || null;
+    if (cuentaId) {
+      const [c] = await pool.query('SELECT id FROM cuentas_contables WHERE id = ?', [cuentaId]);
+      if (!c.length) return { success: false, error: 'Esa cuenta contable ya no existe. Actualiza la página.' };
+    }
     if (id) {
-      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=? WHERE id=?', [nombre, categoria, id]);
+      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=?, cuenta_contable_id=? WHERE id=?', [nombre, categoria, cuentaId, id]);
       return { success: true, id: Number(id) };
     }
-    const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria) VALUES (?, ?)', [nombre, categoria]);
+    const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria, cuenta_contable_id) VALUES (?, ?, ?)', [nombre, categoria, cuentaId]);
     return { success: true, id: result.insertId };
   } catch (err) {
     if (err && err.code === 'ER_DUP_ENTRY') {
@@ -7971,9 +7984,98 @@ async function guardarOperador(code, nombreUsuario, id, data) {
 
 async function eliminarOperador(code, nombreUsuario, id) { return catalogoOperadores_.eliminar(code, nombreUsuario, id); }
 
-async function getEmpresasCatalogo(code, nombreUsuario) { return catalogoEmpresas_.get(code, nombreUsuario); }
-async function guardarEmpresa(code, nombreUsuario, id, data) { return catalogoEmpresas_.guardar(code, nombreUsuario, id, data); }
-async function eliminarEmpresa(code, nombreUsuario, id) { return catalogoEmpresas_.eliminar(code, nombreUsuario, id); }
+// Empresas (oct-2026): además del nombre, datos fiscales para la OC al
+// proveedor (encabezado, "Datos de Facturación", Autoriza) y las siglas de
+// "Empresa a contabilizar" de la nota contable.
+async function getEmpresasCatalogo(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
+  const [rows] = await pool.query('SELECT id, nombre, siglas, rfc, razon_social, domicilio, uso_cfdi, autoriza_oc FROM empresas ORDER BY nombre');
+  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Siglas: r.siglas || '', Rfc: r.rfc || '', RazonSocial: r.razon_social || '',
+    Domicilio: r.domicilio || '', UsoCfdi: r.uso_cfdi || '', AutorizaOc: r.autoriza_oc || '' }));
+}
+async function guardarEmpresa(code, nombreUsuario, id, data) {
+  data = data || {};
+  const r = await catalogoEmpresas_.guardar(code, nombreUsuario, id, data);
+  if (!r || !r.success) return r;
+  const t = (v, max) => { const x = (v || '').toString().trim(); return x ? x.slice(0, max) : null; };
+  if (['siglas', 'rfc', 'razonSocial', 'domicilio', 'usoCfdi', 'autorizaOc'].some((k) => k in data)) {
+    const rfc = t(data.rfc, 20);
+    if (rfc && !/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i.test(rfc)) return { success: false, error: 'El RFC no tiene el formato correcto (12 o 13 caracteres).', id: r.id };
+    await pool.query('UPDATE empresas SET siglas=?, rfc=?, razon_social=?, domicilio=?, uso_cfdi=?, autoriza_oc=? WHERE id=?',
+      [t(data.siglas, 20) && t(data.siglas, 20).toUpperCase(), rfc && rfc.toUpperCase(), t(data.razonSocial, 255), t(data.domicilio, 2000), t(data.usoCfdi, 80), t(data.autorizaOc, 150), r.id]);
+  }
+  return r;
+}
+
+// Cuentas contables (oct-2026): MTTO TRACTORES 59060003000, segmento 29...
+// Se asignan por Tipo de unidad (Catálogo → Tipos de unidad).
+async function getCuentasContables(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_.concat(['refacciones']), 'visualizar');
+  const [rows] = await pool.query(
+    `SELECT c.id, c.nombre, c.numero, c.segmento, c.descripcion_oc, GROUP_CONCAT(t.nombre ORDER BY t.nombre SEPARATOR ', ') AS tipos
+     FROM cuentas_contables c LEFT JOIN tipos_unidad t ON t.cuenta_contable_id = c.id GROUP BY c.id ORDER BY c.nombre`
+  );
+  const [pe] = await pool.query(
+    'SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento, e.nombre FROM cuentas_contables_empresas x JOIN empresas e ON e.id = x.empresa_id ORDER BY e.nombre'
+  );
+  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', TiposUnidad: r.tipos || '',
+    PorEmpresa: pe.filter((x) => x.cuenta_id === r.id).map((x) => ({ EmpresaId: x.empresa_id, Empresa: x.nombre, Huerta: x.huerta || '', Segmento: x.segmento || '' })) }));
+}
+
+// Huerta/segmento de una cuenta para una empresa (null si no tiene fila).
+async function cuentaPorEmpresa_(cuentaId, empresaId) {
+  const [r] = await pool.query('SELECT huerta, segmento FROM cuentas_contables_empresas WHERE cuenta_id = ? AND empresa_id = ?', [Number(cuentaId) || 0, Number(empresaId) || 0]);
+  return r.length ? { huerta: r[0].huerta || '', segmento: r[0].segmento || '' } : null;
+}
+async function guardarCuentaContable(code, nombreUsuario, id, data) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'capturar');
+  data = data || {};
+  const nombre = (data.nombre || '').toString().trim().toUpperCase();
+  const numero = (data.numero || '').toString().trim();
+  const segmento = (data.segmento || '').toString().trim();
+  const descripcionOc = (data.descripcionOc || '').toString().trim().toUpperCase();
+  if (!nombre) return { success: false, error: 'Escribe el nombre de la cuenta (ej. MTTO TRACTORES).' };
+  if (!numero) return { success: false, error: 'Escribe el número de cuenta (ej. 59060003000).' };
+  if (numero.length > 40 || segmento.length > 20 || descripcionOc.length > 150) return { success: false, error: 'Algún dato es demasiado largo.' };
+  try {
+    // Huerta y segmento por empresa: [{ empresaId, huerta, segmento }]
+    // (solo se toca si viene en data; filas vacías se borran).
+    const porEmpresa = Array.isArray(data.porEmpresa) ? data.porEmpresa.map((x) => ({
+      empresaId: Number(x.empresaId) || 0,
+      huerta: (x.huerta || '').toString().trim().toUpperCase().slice(0, 150),
+      segmento: (x.segmento || '').toString().trim().slice(0, 20),
+    })).filter((x) => x.empresaId && (x.huerta || x.segmento)) : null;
+    let cuentaId = Number(id) || 0;
+    if (cuentaId) {
+      await pool.query('UPDATE cuentas_contables SET nombre=?, numero=?, segmento=?, descripcion_oc=? WHERE id=?', [nombre, numero, segmento || null, descripcionOc || null, cuentaId]);
+    } else {
+      const [res] = await pool.query('INSERT INTO cuentas_contables (nombre, numero, segmento, descripcion_oc) VALUES (?, ?, ?, ?)', [nombre, numero, segmento || null, descripcionOc || null]);
+      cuentaId = res.insertId;
+    }
+    if (porEmpresa) {
+      await pool.query('DELETE FROM cuentas_contables_empresas WHERE cuenta_id = ?', [cuentaId]);
+      for (const x of porEmpresa) {
+        await pool.query('INSERT INTO cuentas_contables_empresas (cuenta_id, empresa_id, huerta, segmento) VALUES (?, ?, ?, ?)', [cuentaId, x.empresaId, x.huerta || null, x.segmento || null]);
+      }
+    }
+    return { success: true, id: cuentaId };
+  } catch (err) {
+    if (err && err.code === 'ER_DUP_ENTRY') return { success: false, error: 'Ya existe una cuenta con ese nombre.' };
+    return { success: false, error: err.toString() };
+  }
+}
+async function eliminarCuentaContable(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'capturar');
+  await pool.query('UPDATE tipos_unidad SET cuenta_contable_id = NULL WHERE cuenta_contable_id = ?', [id]);
+  await pool.query('DELETE FROM cuentas_contables_empresas WHERE cuenta_id = ?', [id]);
+  await pool.query('DELETE FROM cuentas_contables WHERE id = ?', [id]);
+  return { success: true };
+}
+async function eliminarEmpresa(code, nombreUsuario, id) {
+  const r = await catalogoEmpresas_.eliminar(code, nombreUsuario, id);
+  await pool.query('DELETE FROM cuentas_contables_empresas WHERE empresa_id = ?', [id]);
+  return r;
+}
 
 async function getProveedoresCombustibleCatalogo(code, nombreUsuario) { return catalogoProveedoresCombustible_.get(code, nombreUsuario); }
 async function guardarProveedorCombustible(code, nombreUsuario, id, data) { return catalogoProveedoresCombustible_.guardar(code, nombreUsuario, id, data); }
@@ -8339,6 +8441,443 @@ async function ocsDeOrden_(orden) {
   return porRef;
 }
 
+// ---------------------------------------------------------------
+// OC al proveedor + factura con nota contable (oct-2026). Ver
+// server/ordenCompraProveedor.js (PDF, totales, nota, CFDI).
+//  - Una OC por proveedor + orden con las piezas AUTORIZADAS (Aut) que aún
+//    no están en otra OC (no cancelada).
+//  - Folio consecutivo propio por empresa (contadores.ocp_e<ID>), serie
+//    configurable (configuracion.ocp_serie_e<ID>, "mtto" por omisión).
+//  - El Panel abre el correo/WhatsApp ya armado (no hay correo desde el
+//    servidor); el proveedor sube PDF+XML en /factura?token=...
+// ---------------------------------------------------------------
+const OCP_SERIE_DEFAULT_ = 'mtto';
+const OCP_HUERTA_DEFAULT_ = 'PRORRATEABLES';
+
+function huertaParaNota_(huerta) {
+  const h = (huerta || '').toString().trim().toUpperCase();
+  // El taller no es huerta contable: lo de taller se prorratea.
+  if (!h || h === 'TALLER') return OCP_HUERTA_DEFAULT_;
+  return h;
+}
+
+async function serieOcProveedor_(empresaId) {
+  const [r] = await pool.query('SELECT valor FROM configuracion WHERE clave = ?', ['ocp_serie_e' + Number(empresaId)]);
+  return (r.length && r[0].valor) || OCP_SERIE_DEFAULT_;
+}
+async function ultimoFolioOcProveedor_(empresaId) {
+  const [r] = await pool.query('SELECT ultimo FROM contadores WHERE nombre = ?', ['ocp_e' + Number(empresaId)]);
+  return r.length ? Number(r[0].ultimo) || 0 : 0;
+}
+
+// Piezas autorizadas de un proveedor en una orden que todavía no van en
+// ninguna OC (no cancelada).
+async function partidasPendientesOcProveedor_(orden, proveedorId) {
+  const [rows] = await pool.query(
+    `SELECT ri.id AS respuestaItemId, sci.cantidad, ri.precio_cotizado AS precio, ri.iva_pct AS ivaPct, r.descuento_pct AS descuentoPct,
+            ri.autorizado_por AS autorizadoPor, ref.id AS refaccionId, ref.codigo, ref.no_parte AS noParte, ref.descripcion
+     FROM solicitud_cotizacion_respuesta_items ri
+     JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+     JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+     JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+     JOIN refacciones ref ON ref.id = sci.refaccion_id
+     WHERE ri.autorizado = 1 AND s.estado <> 'cancelada' AND s.orden = ? AND s.proveedor_id = ?
+       AND NOT EXISTS (SELECT 1 FROM ordenes_compra_items oi JOIN ordenes_compra o ON o.id = oi.oc_id
+                       WHERE oi.respuesta_item_id = ri.id AND o.estado <> 'cancelada')
+     ORDER BY ref.descripcion`,
+    [orden, Number(proveedorId)]
+  );
+  return rows.map((x) => ({
+    respuestaItemId: x.respuestaItemId,
+    refaccionId: x.refaccionId,
+    codigo: x.codigo || '',
+    noParte: x.noParte || '',
+    descripcion: x.descripcion || '',
+    observaciones: ([x.noParte || x.codigo || '', x.descripcion || ''].filter(Boolean).join(' ')).slice(0, 255),
+    cantidad: Number(x.cantidad),
+    precio: x.precio === null ? null : Number(x.precio),
+    descuentoPct: x.descuentoPct === null ? null : Number(x.descuentoPct),
+    ivaPct: x.ivaPct === null ? null : Number(x.ivaPct),
+    autorizadoPor: x.autorizadoPor || '',
+  }));
+}
+
+// Unidad, huerta, empresa y cuenta (por tipo de unidad) de una orden.
+async function contextoOrdenOc_(orden) {
+  const [rows] = await pool.query(
+    `SELECT rep.orden, rep.unidad, rep.codigo_unidad, rep.huerta, mq.empresa_id, mq.tipo_unidad,
+            t.cuenta_contable_id
+     FROM reportes rep
+     LEFT JOIN maquinaria mq ON mq.codigo_unidad = rep.codigo_unidad
+     LEFT JOIN tipos_unidad t ON LOWER(TRIM(t.nombre)) = LOWER(TRIM(mq.tipo_unidad))
+     WHERE rep.orden = ?`,
+    [orden]
+  );
+  if (!rows.length) return null;
+  const x = rows[0];
+  return {
+    orden: x.orden, unidad: x.unidad || '', codigoUnidad: x.codigo_unidad || '', huerta: x.huerta || '',
+    empresaId: x.empresa_id || null, tipoUnidad: x.tipo_unidad || '', cuentaContableId: x.cuenta_contable_id || null,
+  };
+}
+
+function faltantesEmpresaOc_(e) {
+  const f = [];
+  if (!e) return ['empresa'];
+  if (!e.rfc) f.push('RFC');
+  if (!e.siglas) f.push('siglas (Empresa a contabilizar)');
+  if (!e.domicilio) f.push('domicilio');
+  return f;
+}
+
+// Para el Panel (ventana de la solicitud de cotización): las OC de la orden
+// y, por proveedor, cuántas piezas autorizadas faltan de mandar en OC.
+async function getOcsProveedorDeOrden(code, nombreUsuario, orden) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  orden = (orden || '').toString().trim();
+  if (!orden) return { success: true, ocs: [], pendientes: [] };
+  const ocs = await listarOcsProveedor_({ orden });
+  const [provs] = await pool.query(
+    "SELECT DISTINCT s.proveedor_id AS id, p.nombre FROM solicitudes_cotizacion s JOIN proveedores p ON p.id = s.proveedor_id WHERE s.orden = ? AND s.estado <> 'cancelada'",
+    [orden]
+  );
+  const pendientes = [];
+  for (const p of provs) {
+    const lista = await partidasPendientesOcProveedor_(orden, p.id);
+    if (lista.length) pendientes.push({ proveedorId: p.id, proveedor: p.nombre, partidas: lista.length });
+  }
+  return { success: true, ocs, pendientes };
+}
+
+// Datos para la ventanita "Generar OC" (todo editable antes de generar).
+async function prepararOcProveedor(code, nombreUsuario, orden, proveedorId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const ctx = await contextoOrdenOc_(orden);
+  if (!ctx) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  const partidas = await partidasPendientesOcProveedor_(orden, proveedorId);
+  const [provRows] = await pool.query('SELECT id, nombre, correo, telefono, rfc, domicilio FROM proveedores WHERE id = ?', [Number(proveedorId)]);
+  if (!provRows.length) return { success: false, error: 'No se encontró el proveedor.' };
+  const [contactos] = await pool.query('SELECT nombre, correo, telefono FROM proveedor_contactos WHERE proveedor_id = ?', [Number(proveedorId)]);
+  const [empresas] = await pool.query('SELECT id, nombre, siglas, rfc, domicilio FROM empresas ORDER BY nombre');
+  const cuentas = await getCuentasContables(code, nombreUsuario);
+  const [huertas] = await pool.query('SELECT nombre FROM huertas ORDER BY nombre');
+  const firmas = partidas.map((p) => p.autorizadoPor).filter(Boolean);
+  const firma = firmas.length ? firmas.sort((a, b) => firmas.filter((x) => x === b).length - firmas.filter((x) => x === a).length)[0] : (nombreUsuario || '');
+  const empresaId = ctx.empresaId || null;
+  const prov = provRows[0];
+  const totales = ocProv.calcularTotales(partidas.filter((p) => p.precio !== null));
+  return {
+    success: true,
+    orden: ctx.orden,
+    unidad: ctx.unidad,
+    tipoUnidad: ctx.tipoUnidad,
+    proveedor: { id: prov.id, nombre: prov.nombre, correo: prov.correo || '', telefono: prov.telefono || '', rfc: prov.rfc || '', domicilio: prov.domicilio || '',
+      contactos: contactos.map((c) => ({ nombre: c.nombre || '', correo: c.correo || '', telefono: c.telefono || '' })) },
+    partidas: totales.partidas,
+    totales: { subtotal: totales.subtotal, descuento: totales.descuento, iva: totales.iva, total: totales.total, piezas: totales.piezas },
+    sinPrecio: partidas.filter((p) => p.precio === null).length,
+    empresaId,
+    empresas: empresas.map((e) => ({ id: e.id, nombre: e.nombre, siglas: e.siglas || '', faltan: faltantesEmpresaOc_(e) })),
+    cuentaContableId: ctx.cuentaContableId,
+    cuentas,
+    // Huerta/segmento: los que se capturaron para esa cuenta y esa empresa
+    // (Catálogo → Cuentas contables); si no hay, huerta de la orden y el
+    // segmento general de la cuenta. El Panel los recalcula si cambias
+    // empresa o cuenta.
+    huerta: await (async () => { const pe = await cuentaPorEmpresa_(ctx.cuentaContableId, empresaId); return (pe && pe.huerta) || huertaParaNota_(ctx.huerta); })(),
+    huertaPorOrden: huertaParaNota_(ctx.huerta),
+    segmento: await (async () => { const pe = await cuentaPorEmpresa_(ctx.cuentaContableId, empresaId); if (pe && pe.segmento) return pe.segmento; const c = cuentas.find((x) => x.Id === ctx.cuentaContableId); return c ? c.Segmento : ''; })(),
+    huertaOrden: ctx.huerta,
+    huertas: [OCP_HUERTA_DEFAULT_].concat(huertas.map((h) => h.nombre).filter((h) => h !== OCP_HUERTA_DEFAULT_)),
+    observacion: ocProv.observacionDeUnidad(ctx.unidad, ctx.codigoUnidad),
+    firma,
+    seriesPorEmpresa: Object.fromEntries(await Promise.all(empresas.map(async (e) => [e.id, { serie: await serieOcProveedor_(e.id), siguienteFolio: (await ultimoFolioOcProveedor_(e.id)) + 1 }]))),
+    fecha: fechaHoyLocal_(),
+  };
+}
+
+function fechaHoyLocal_() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+async function generarOcProveedor(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  data = data || {};
+  const orden = (data.orden || '').toString().trim();
+  const proveedorId = Number(data.proveedorId) || 0;
+  const empresaId = Number(data.empresaId) || 0;
+  const cuentaId = Number(data.cuentaContableId) || 0;
+  const t = (v, max) => (v || '').toString().trim().slice(0, max);
+  const huerta = t(data.huerta, 150).toUpperCase();
+  const observacion = t(data.observacion, 255);
+  const firma = t(data.firma, 150);
+  const fecha = t(data.fecha, 10) || fechaHoyLocal_();
+  const serie = t(data.serie, 10) || OCP_SERIE_DEFAULT_;
+  const folioPedido = data.folio === undefined || data.folio === null || data.folio === '' ? null : Number(data.folio);
+  if (!orden || !proveedorId) return { success: false, error: 'Falta la orden o el proveedor.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { success: false, error: 'La fecha no es válida.' };
+  if (folioPedido !== null && (!Number.isInteger(folioPedido) || folioPedido < 1 || folioPedido > 2147483646)) return { success: false, error: 'El folio debe ser un número entero.' };
+  const [empRows] = await pool.query('SELECT * FROM empresas WHERE id = ?', [empresaId]);
+  if (!empRows.length) return { success: false, error: 'Elige a qué empresa se factura (asígnala a la unidad en el Catálogo de maquinaria).' };
+  const emp = empRows[0];
+  const faltan = faltantesEmpresaOc_(emp);
+  if (faltan.length) return { success: false, error: 'A la empresa ' + emp.nombre + ' le falta: ' + faltan.join(', ') + '. Captúralo en Catálogo → Empresa.' };
+  const [cuentaRows] = await pool.query('SELECT * FROM cuentas_contables WHERE id = ?', [cuentaId]);
+  if (!cuentaRows.length) return { success: false, error: 'Elige la cuenta contable (o asígnala al tipo de unidad en Catálogo → Tipos de unidad).' };
+  const cuenta = cuentaRows[0];
+  // Segmento: el que venga de la ventana; si no, el de esa cuenta para esa
+  // empresa; si no, el general de la cuenta.
+  const pe = await cuentaPorEmpresa_(cuentaId, empresaId);
+  const segmento = t(data.segmento, 20) || (pe && pe.segmento) || cuenta.segmento || null;
+  if (!huerta) return { success: false, error: 'Escribe la huerta de la nota (ej. PRORRATEABLES).' };
+  if (!firma) return { success: false, error: 'Escribe quién firma la nota.' };
+
+  const pendientes = await partidasPendientesOcProveedor_(orden, proveedorId);
+  const ids = Array.isArray(data.respuestaItemIds) && data.respuestaItemIds.length ? data.respuestaItemIds.map(Number) : null;
+  const partidas = ids ? pendientes.filter((p) => ids.includes(p.respuestaItemId)) : pendientes;
+  if (!partidas.length) return { success: false, error: 'No hay piezas autorizadas de este proveedor pendientes de OC en esta orden.' };
+  const sinPrecio = partidas.filter((p) => p.precio === null || !(p.cantidad > 0));
+  if (sinPrecio.length) return { success: false, error: 'Hay piezas sin precio o sin cantidad: ' + sinPrecio.map((p) => p.descripcion).join(', ') + '.' };
+  const tot = ocProv.calcularTotales(partidas);
+
+  const con = await pool.getConnection();
+  let ocId, folio, token;
+  try {
+    await con.beginTransaction();
+    const nombreContador = 'ocp_e' + empresaId;
+    await con.query('INSERT IGNORE INTO contadores (nombre, ultimo) VALUES (?, 0)', [nombreContador]);
+    const [[cont]] = await con.query('SELECT ultimo FROM contadores WHERE nombre = ? FOR UPDATE', [nombreContador]);
+    folio = folioPedido || (Number(cont.ultimo) || 0) + 1;
+    const [dup] = await con.query('SELECT id FROM ordenes_compra WHERE empresa_id = ? AND serie = ? AND folio = ?', [empresaId, serie, folio]);
+    if (dup.length) { await con.rollback(); return { success: false, error: 'Ya existe la OC ' + serie + ' ' + folio + ' en ' + emp.nombre + '. Usa otro folio.' }; }
+    await con.query('UPDATE contadores SET ultimo = GREATEST(ultimo, ?) WHERE nombre = ?', [folio, nombreContador]);
+    token = crypto.randomBytes(24).toString('hex');
+    const [res] = await con.query(
+      `INSERT INTO ordenes_compra (token, empresa_id, proveedor_id, orden, serie, folio, fecha, estado, cuenta_nombre, cuenta_numero, segmento, descripcion_oc,
+         huerta, observacion, empresa_siglas, firma, subtotal, descuento, iva, total, generado_por)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'generada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [token, empresaId, proveedorId, orden, serie, folio, fecha, cuenta.nombre, cuenta.numero, segmento, cuenta.descripcion_oc || ('SERVICIO ' + cuenta.nombre),
+        huerta, observacion || null, emp.siglas, firma, tot.subtotal, tot.descuento, tot.iva, tot.total, (nombreUsuario || '').toString().trim() || null]
+    );
+    ocId = res.insertId;
+    for (const p of tot.partidas) {
+      await con.query(
+        'INSERT INTO ordenes_compra_items (oc_id, respuesta_item_id, refaccion_id, observaciones, cantidad, precio, descuento_pct, iva_pct, importe) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [ocId, p.respuestaItemId, p.refaccionId, p.observaciones, p.cantidad, p.precio, p.descuentoPct, p.ivaPct, p.importe]
+      );
+    }
+    await con.query('INSERT INTO configuracion (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)', ['ocp_serie_e' + empresaId, serie]);
+    await con.commit();
+  } catch (err) {
+    try { await con.rollback(); } catch (e) { /* nada */ }
+    if (err && err.code === 'ER_DUP_ENTRY') return { success: false, error: 'Ese folio ya se usó. Intenta de nuevo.' };
+    throw err;
+  } finally {
+    con.release();
+  }
+  const [provRows] = await pool.query('SELECT nombre FROM proveedores WHERE id = ?', [proveedorId]);
+  await agregarObservacionOrden_(orden, (nombreUsuario || 'Alguien') + ' generó la OC ' + serie + ' ' + folio + ' para ' + (provRows[0] ? provRows[0].nombre : 'el proveedor') + ' ($' + tot.total.toFixed(2) + ').');
+  await registrarAuditoria_('ordenes_compra', serie + '-' + folio, 'generar', nombreUsuario, emp.nombre + ' · ' + orden + ' · $' + tot.total.toFixed(2));
+  const ocs = await listarOcsProveedor_({ id: ocId });
+  return { success: true, oc: ocs[0] };
+}
+
+async function listarOcsProveedor_(filtro) {
+  const cond = [];
+  const params = [];
+  if (filtro.id) { cond.push('o.id = ?'); params.push(Number(filtro.id)); }
+  if (filtro.orden) { cond.push('o.orden = ?'); params.push(filtro.orden); }
+  if (filtro.estado) { cond.push('o.estado = ?'); params.push(filtro.estado); }
+  const [rows] = await pool.query(
+    `SELECT o.*, e.nombre AS empresa, p.nombre AS proveedor, p.correo AS proveedorCorreo, p.telefono AS proveedorTelefono, rep.unidad AS unidad,
+            (SELECT COUNT(*) FROM ordenes_compra_items i WHERE i.oc_id = o.id) AS partidas,
+            (SELECT SUM(i.cantidad) FROM ordenes_compra_items i WHERE i.oc_id = o.id) AS piezas
+     FROM ordenes_compra o
+     JOIN empresas e ON e.id = o.empresa_id
+     JOIN proveedores p ON p.id = o.proveedor_id
+     LEFT JOIN reportes rep ON rep.orden = o.orden
+     ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
+     ORDER BY o.generado_en DESC, o.id DESC
+     LIMIT 500`,
+    params
+  );
+  const ids = rows.map((r) => r.id);
+  const correosExtra = {};
+  if (rows.length) {
+    const [cs] = await pool.query('SELECT proveedor_id, correo, telefono FROM proveedor_contactos WHERE proveedor_id IN (?)', [rows.map((r) => r.proveedor_id)]);
+    cs.forEach((c) => { (correosExtra[c.proveedor_id] = correosExtra[c.proveedor_id] || []).push(c); });
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    token: r.token,
+    empresaId: r.empresa_id,
+    empresa: r.empresa,
+    empresaSiglas: r.empresa_siglas || '',
+    proveedorId: r.proveedor_id,
+    proveedor: r.proveedor,
+    correos: [r.proveedorCorreo].concat((correosExtra[r.proveedor_id] || []).map((c) => c.correo)).filter(Boolean).filter((c, i, a) => a.indexOf(c) === i),
+    telefonos: [r.proveedorTelefono].concat((correosExtra[r.proveedor_id] || []).map((c) => c.telefono)).filter(Boolean).filter((c, i, a) => a.indexOf(c) === i),
+    orden: r.orden || '',
+    unidad: r.unidad || '',
+    serie: r.serie,
+    folio: r.folio,
+    fecha: fechaSoloOrNull(r.fecha),
+    estado: r.estado,
+    cuentaNombre: r.cuenta_nombre || '',
+    cuentaNumero: r.cuenta_numero || '',
+    segmento: r.segmento || '',
+    huerta: r.huerta || '',
+    observacion: r.observacion || '',
+    firma: r.firma || '',
+    subtotal: Number(r.subtotal), descuento: Number(r.descuento), iva: Number(r.iva), total: Number(r.total),
+    partidas: Number(r.partidas) || 0,
+    piezas: Number(r.piezas) || 0,
+    generadoPor: r.generado_por || '',
+    generadoEn: isoOrNull(r.generado_en),
+    enviadoEn: isoOrNull(r.enviado_en),
+    facturaPdfUrl: r.factura_pdf_url || '',
+    facturaXmlUrl: r.factura_xml_url || '',
+    facturaSelladaUrl: r.factura_sellada_url || '',
+    facturaUuid: r.factura_uuid || '',
+    facturaTotal: r.factura_total === null ? null : Number(r.factura_total),
+    facturaAvisos: r.factura_avisos ? r.factura_avisos.split('\n').filter(Boolean) : [],
+    facturaNombre: r.factura_nombre || '',
+    facturaEn: isoOrNull(r.factura_en),
+    canceladoPor: r.cancelado_por || '',
+  })).filter((x) => ids.includes(x.id));
+}
+
+async function getOrdenesCompraProveedor(code, nombreUsuario, filtro) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  filtro = filtro || {};
+  return { success: true, ocs: await listarOcsProveedor_({ estado: filtro.estado || null, orden: filtro.orden || null }) };
+}
+
+// El Panel la llama al abrir el correo/WhatsApp ya armado.
+async function marcarOcEnviada(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  await pool.query("UPDATE ordenes_compra SET estado = IF(estado = 'generada', 'enviada', estado), enviado_en = COALESCE(enviado_en, NOW()) WHERE id = ?", [Number(id)]);
+  return { success: true };
+}
+
+async function cancelarOcProveedor(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const [rows] = await pool.query('SELECT serie, folio, orden, estado FROM ordenes_compra WHERE id = ?', [Number(id)]);
+  if (!rows.length) return { success: false, error: 'No se encontró la OC.' };
+  if (rows[0].estado === 'cancelada') return { success: true };
+  await pool.query("UPDATE ordenes_compra SET estado = 'cancelada', cancelado_por = ? WHERE id = ?", [(nombreUsuario || '').toString().trim() || null, Number(id)]);
+  if (rows[0].orden) await agregarObservacionOrden_(rows[0].orden, (nombreUsuario || 'Alguien') + ' canceló la OC ' + rows[0].serie + ' ' + rows[0].folio + '.');
+  await registrarAuditoria_('ordenes_compra', rows[0].serie + '-' + rows[0].folio, 'cancelar', nombreUsuario, '');
+  return { success: true };
+}
+
+// Todo lo que lleva el PDF de la OC (también lo usa la página pública).
+async function datosOcCompletos_(token) {
+  const [rows] = await pool.query(
+    `SELECT o.*, e.nombre AS e_nombre, e.rfc AS e_rfc, e.razon_social AS e_razon, e.domicilio AS e_domicilio, e.uso_cfdi AS e_uso, e.autoriza_oc AS e_autoriza,
+            p.nombre AS p_nombre, p.rfc AS p_rfc, p.domicilio AS p_domicilio, p.notas AS p_notas, p.telefono AS p_telefono, p.correo AS p_correo
+     FROM ordenes_compra o JOIN empresas e ON e.id = o.empresa_id JOIN proveedores p ON p.id = o.proveedor_id
+     WHERE o.token = ?`,
+    [(token || '').toString()]
+  );
+  if (!rows.length) return null;
+  const o = rows[0];
+  const [items] = await pool.query('SELECT observaciones, cantidad, precio, descuento_pct, iva_pct, importe FROM ordenes_compra_items WHERE oc_id = ? ORDER BY id', [o.id]);
+  return {
+    id: o.id, token: o.token, serie: o.serie, folio: o.folio, fecha: fechaSoloOrNull(o.fecha), orden: o.orden || '', estado: o.estado,
+    empresa: { nombre: o.e_nombre, nombreCorto: (o.e_nombre || '').split(',')[0], rfc: o.e_rfc || '', razonSocial: o.e_razon || o.e_nombre, domicilio: o.e_domicilio || '', usoCfdi: o.e_uso || '', autoriza: o.e_autoriza || '' },
+    proveedor: { nombre: o.p_nombre, rfc: o.p_rfc || '', domicilio: o.p_domicilio || '', telefono: o.p_telefono || '', correo: o.p_correo || '' },
+    descripcionOc: o.descripcion_oc || '', segmento: o.segmento || '', observacion: o.observacion || '',
+    cuentaNombre: o.cuenta_nombre || '', cuentaNumero: o.cuenta_numero || '', huerta: o.huerta || '', empresaSiglas: o.empresa_siglas || '', firma: o.firma || '',
+    partidas: items.map((i) => ({ observaciones: i.observaciones || '', cantidad: Number(i.cantidad), precio: Number(i.precio), importe: Number(i.importe) })),
+    piezas: items.reduce((s, i) => s + Number(i.cantidad), 0),
+    subtotal: Number(o.subtotal), descuento: Number(o.descuento), iva: Number(o.iva), total: Number(o.total),
+    facturaEn: isoOrNull(o.factura_en), facturaNombre: o.factura_nombre || '',
+  };
+}
+
+// PDF de la OC (ruta pública /oc/pdf?token=..., ver server/server.js).
+async function pdfOcProveedor_(token, baseUrl) {
+  const oc = await datosOcCompletos_(token);
+  if (!oc) return null;
+  const base = (process.env.PUBLIC_BASE_URL || '').toString().trim().replace(/\/+$/, '') || baseUrl || '';
+  oc.enlaceFactura = base + '/factura?token=' + oc.token;
+  return { buffer: await ocProv.generarPdfOc(oc), nombre: 'OC_' + oc.serie + '_' + oc.folio + '.pdf' };
+}
+
+// Pública (sin clave): la abre el proveedor con /factura?token=...
+async function getOcPublica(token) {
+  const oc = await datosOcCompletos_(token);
+  if (!oc) return { success: false, error: 'Este enlace no es válido o ya no existe.' };
+  return {
+    success: true,
+    serie: oc.serie, folio: oc.folio, fecha: oc.fecha, estado: oc.estado,
+    empresa: { razonSocial: oc.empresa.razonSocial, rfc: oc.empresa.rfc, domicilio: oc.empresa.domicilio, usoCfdi: oc.empresa.usoCfdi },
+    proveedor: oc.proveedor.nombre,
+    partidas: oc.partidas,
+    subtotal: oc.subtotal, descuento: oc.descuento, iva: oc.iva, total: oc.total,
+    facturaEn: oc.facturaEn, facturaNombre: oc.facturaNombre,
+  };
+}
+
+function bufferDeDataUrl_(dataUrl) {
+  const m = /^data:([^;,]*)(;[^,]*)?,(.*)$/s.exec((dataUrl || '').toString());
+  if (!m) return null;
+  return /;base64/i.test(m[2] || '') ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
+}
+
+const MAX_FACTURA_BYTES_ = 15 * 1024 * 1024;
+
+// Pública (sin clave): el proveedor sube su factura (PDF + XML). Se guarda
+// la original, el XML y una copia del PDF con la nota contable.
+async function subirFacturaOc(token, data) {
+  data = data || {};
+  const oc = await datosOcCompletos_(token);
+  if (!oc) return { success: false, error: 'Este enlace no es válido o ya no existe.' };
+  if (oc.estado === 'cancelada') return { success: false, error: 'Esta orden de compra fue cancelada. Comuníquese con Chula Brand.' };
+  const nombre = (data.nombre || '').toString().trim().slice(0, 255);
+  if (!nombre) return { success: false, error: 'Escriba su nombre.' };
+  const pdf = bufferDeDataUrl_(data.pdf);
+  const xml = bufferDeDataUrl_(data.xml);
+  if (!pdf || !pdf.length) return { success: false, error: 'Adjunte el PDF de la factura.' };
+  if (!xml || !xml.length) return { success: false, error: 'Adjunte el XML de la factura.' };
+  if (pdf.length > MAX_FACTURA_BYTES_ || xml.length > MAX_FACTURA_BYTES_) return { success: false, error: 'El archivo es demasiado grande (máximo 15 MB).' };
+  if (pdf.slice(0, 1024).toString('latin1').indexOf('%PDF') < 0) return { success: false, error: 'El archivo de la factura no es un PDF.' };
+  const xmlTexto = xml.toString('utf8').replace(/^﻿/, '');
+  const cfdi = ocProv.leerCfdi(xmlTexto);
+  if (!cfdi) return { success: false, error: 'El XML no es un CFDI (factura electrónica). Revise que sea el XML de la factura.' };
+
+  const [extra] = await pool.query('SELECT e.rfc AS empresaRfc, p.rfc AS proveedorRfc FROM ordenes_compra o JOIN empresas e ON e.id = o.empresa_id JOIN proveedores p ON p.id = o.proveedor_id WHERE o.id = ?', [oc.id]);
+  const avisosCfdi = ocProv.revisarCfdiContraOc(cfdi, { empresaRfc: extra[0].empresaRfc, proveedorRfc: extra[0].proveedorRfc, total: oc.total });
+
+  const pdfUrl = await guardarArchivo_('data:application/pdf;base64,' + pdf.toString('base64'));
+  const xmlUrl = await guardarArchivo_('data:application/xml;base64,' + xml.toString('base64'));
+  let selladaUrl = null;
+  try {
+    const sellada = await ocProv.estamparNotaFactura(pdf, {
+      cuentaNombre: oc.cuentaNombre, cuentaNumero: oc.cuentaNumero, huerta: oc.huerta, segmento: oc.segmento,
+      observacion: oc.observacion, empresaSiglas: oc.empresaSiglas, firma: oc.firma, totalPiezas: Math.round(oc.piezas * 100) / 100,
+      ocTexto: 'OC ' + oc.serie + ' ' + oc.folio + (oc.orden ? ' · Orden ' + oc.orden : ''),
+      fechaTexto: 'Factura recibida ' + ocProv.fechaOc_(fechaHoyLocal_()) + (cfdi.uuid ? ' · UUID ' + cfdi.uuid.slice(0, 8) + '…' : ''),
+    });
+    selladaUrl = await guardarArchivo_('data:application/pdf;base64,' + sellada.buffer.toString('base64'));
+  } catch (err) {
+    avisosCfdi.push('No se pudo agregar la nota contable al PDF (' + (err.message || err) + '): revisar a mano.');
+  }
+  await pool.query(
+    `UPDATE ordenes_compra SET estado = 'facturada', factura_pdf_url = ?, factura_xml_url = ?, factura_sellada_url = ?, factura_uuid = ?,
+       factura_total = ?, factura_avisos = ?, factura_nombre = ?, factura_en = NOW() WHERE id = ?`,
+    [pdfUrl, xmlUrl, selladaUrl, cfdi.uuid || null, cfdi.total, avisosCfdi.join('\n') || null, nombre, oc.id]
+  );
+  if (oc.orden) await agregarObservacionOrden_(oc.orden, 'El proveedor ' + oc.proveedor.nombre + ' subió la factura de la OC ' + oc.serie + ' ' + oc.folio + ' (' + nombre + ').' + (avisosCfdi.length ? ' Revisar: ' + avisosCfdi.join(' ') : ''));
+  avisos.avisarTexto_('Llegó factura de la OC ' + oc.serie + ' ' + oc.folio, [
+    ['Proveedor', oc.proveedor.nombre], ['Orden', oc.orden || '—'], ['Total', '$' + (cfdi.total !== null ? cfdi.total : oc.total).toFixed(2)],
+  ].concat(avisosCfdi.length ? [['Revisar', avisosCfdi.join(' ')]] : []), '/panel', 'oc-factura-' + oc.id);
+  return { success: true, avisos: avisosCfdi };
+}
+
 async function getProveedores(code, nombreUsuario) {
   // También lo usa el selector de "Atendió" en Llantas y Ponches /
   // Reparaciones con terceros (ver abrirModalEditarOrden en Panel.html), no
@@ -8347,7 +8886,8 @@ async function getProveedores(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, ['refacciones', 'ordenes_llantas', 'ordenes_terceros'], 'visualizar');
   const [rows] = await pool.query(`
     SELECT id AS Id, nombre AS Nombre, correo AS Correo, telefono AS Telefono,
-           contacto AS Contacto, marcas AS Marcas, notas AS Notas, codigo_comercial AS CodigoComercial
+           contacto AS Contacto, marcas AS Marcas, notas AS Notas, codigo_comercial AS CodigoComercial,
+           rfc AS Rfc, domicilio AS Domicilio
     FROM proveedores
     ORDER BY nombre
   `);
@@ -8377,6 +8917,8 @@ async function getProveedores(code, nombreUsuario) {
     Marcas: r.Marcas || '',
     Notas: r.Notas || '',
     CodigoComercial: r.CodigoComercial || '',
+    Rfc: r.Rfc || '',
+    Domicilio: r.Domicilio || '',
     Contactos: contactosPorProveedor[r.Id] || [],
   }));
 }
@@ -8399,6 +8941,10 @@ async function guardarProveedor(code, nombreUsuario, id, data) {
       const [dup] = await pool.query('SELECT nombre FROM proveedores WHERE codigo_comercial = ? AND id <> ?', [codigoComercial, Number(id) || 0]);
       if (dup.length) return { success: false, error: 'El código en Comercial ' + codigoComercial + ' ya lo tiene el proveedor ' + dup[0].nombre + '.' };
     }
+    // RFC y domicilio fiscal: salen en la OC al proveedor (oct-2026).
+    const rfc = (data.rfc || '').toString().trim().toUpperCase() || null;
+    if (rfc && !/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/.test(rfc)) return { success: false, error: 'El RFC del proveedor no tiene el formato correcto (12 o 13 caracteres).' };
+    const domicilio = (data.domicilio || '').toString().trim().slice(0, 2000) || null;
     // Contactos adicionales: [{ nombre, correo, telefono, notas }, ...]
     const contactos = Array.isArray(data.contactos) ? data.contactos : [];
 
@@ -8406,13 +8952,13 @@ async function guardarProveedor(code, nombreUsuario, id, data) {
 
     if (proveedorId) {
       await pool.query(
-        'UPDATE proveedores SET nombre=?, correo=?, telefono=?, contacto=?, marcas=?, notas=?, codigo_comercial=? WHERE id=?',
-        [nombre, correo, telefono, contacto, marcas, notas, codigoComercial, proveedorId]
+        'UPDATE proveedores SET nombre=?, correo=?, telefono=?, contacto=?, marcas=?, notas=?, codigo_comercial=?, rfc=?, domicilio=? WHERE id=?',
+        [nombre, correo, telefono, contacto, marcas, notas, codigoComercial, rfc, domicilio, proveedorId]
       );
     } else {
       const [result] = await pool.query(
-        'INSERT INTO proveedores (nombre, correo, telefono, contacto, marcas, notas, codigo_comercial) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [nombre, correo, telefono, contacto, marcas, notas, codigoComercial]
+        'INSERT INTO proveedores (nombre, correo, telefono, contacto, marcas, notas, codigo_comercial, rfc, domicilio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [nombre, correo, telefono, contacto, marcas, notas, codigoComercial, rfc, domicilio]
       );
       proveedorId = result.insertId;
     }
@@ -9008,7 +9554,8 @@ async function autorizarPrecioItem(code, nombreUsuario, respuestaItemId) {
        WHERE sci.refaccion_id = ? AND propia.orden IS NOT NULL AND s.orden = propia.orden`,
       [row.SolicitudId, row.RefaccionId]
     );
-    await pool.query('UPDATE solicitud_cotizacion_respuesta_items SET autorizado = 1 WHERE id = ?', [respuestaItemId]);
+    // Quién dio el Aut: sale como "Firma" en la nota contable de la factura.
+    await pool.query('UPDATE solicitud_cotizacion_respuesta_items SET autorizado = 1, autorizado_por = ?, autorizado_en = NOW() WHERE id = ?', [(nombreUsuario || '').toString().trim() || null, respuestaItemId]);
 
     const { PrecioConDescuento } = calcularPreciosCotizados(Number(row.PrecioCotizado), row.DescuentoPct, null);
     await pool.query('UPDATE refacciones SET precio = ? WHERE id = ?', [PrecioConDescuento, row.RefaccionId]);
@@ -9574,6 +10121,18 @@ module.exports = {
   guardarTipoUnidad,
   eliminarTipoUnidad,
   getEmpresasCatalogo,
+  getOcsProveedorDeOrden,
+  prepararOcProveedor,
+  generarOcProveedor,
+  getOrdenesCompraProveedor,
+  marcarOcEnviada,
+  cancelarOcProveedor,
+  getOcPublica,
+  subirFacturaOc,
+  pdfOcProveedor_,
+  getCuentasContables,
+  guardarCuentaContable,
+  eliminarCuentaContable,
   guardarEmpresa,
   eliminarEmpresa,
   getProveedoresCombustibleCatalogo,

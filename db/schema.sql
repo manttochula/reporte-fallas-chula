@@ -3129,3 +3129,143 @@ JOIN empresas e ON e.nombre = x.empresa
 SET m.empresa_id = e.id
 WHERE @carga_empresas_hecha = 0 AND m.empresa_id IS NULL;
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_empresas_maquinaria_2026_10', 'hecha');
+
+-- ============================================================
+-- Órdenes de compra al proveedor + factura con nota contable (oct-2026).
+-- Ver server/ordenCompraProveedor.js y server/handlers.js (generarOcProveedor,
+-- subirFacturaOc). Decisiones de Carlos:
+--  - Al terminar de autorizar ("Aut") las piezas de un proveedor en una
+--    orden, el Panel genera UNA OC por proveedor + orden y abre el correo /
+--    WhatsApp ya armado con el enlace (no hay correo desde el servidor).
+--  - Folio consecutivo propio POR EMPRESA (serie "mtto" por omisión).
+--  - El proveedor sube PDF + XML de su factura por /factura?token=...; al
+--    PDF se le agrega la nota contable en la PRIMERA hoja (franja nueva al
+--    pie, sin tapar nada). Se guardan la original y la sellada.
+--  - Cuenta contable por Tipo de unidad (Tractor -> MTTO TRACTORES
+--    59060003000, segmento 29).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS cuentas_contables (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  nombre         VARCHAR(150) NOT NULL UNIQUE,     -- ej. MTTO TRACTORES
+  numero         VARCHAR(40)  DEFAULT NULL,        -- ej. 59060003000
+  segmento       VARCHAR(20)  DEFAULT NULL,        -- ej. 29
+  descripcion_oc VARCHAR(150) DEFAULT NULL,        -- texto de la columna Descripción en la OC (ej. SERVICIO MTTO. TRACTORES)
+  creado_en      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tipos_unidad' AND column_name = 'cuenta_contable_id');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE tipos_unidad ADD COLUMN cuenta_contable_id INT DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Datos fiscales de cada empresa (encabezado de la OC, "Datos de
+-- Facturación" y "Empresa a contabilizar" de la nota).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'empresas' AND column_name = 'siglas');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE empresas ADD COLUMN siglas VARCHAR(20) DEFAULT NULL, ADD COLUMN rfc VARCHAR(20) DEFAULT NULL, ADD COLUMN razon_social VARCHAR(255) DEFAULT NULL, ADD COLUMN domicilio TEXT DEFAULT NULL, ADD COLUMN uso_cfdi VARCHAR(80) DEFAULT NULL, ADD COLUMN autoriza_oc VARCHAR(150) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- RFC y domicilio fiscal del proveedor (salen en la OC).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'proveedores' AND column_name = 'rfc');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE proveedores ADD COLUMN rfc VARCHAR(20) DEFAULT NULL, ADD COLUMN domicilio TEXT DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Quién dio el "Aut" (sale como Firma en la nota contable).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'solicitud_cotizacion_respuesta_items' AND column_name = 'autorizado_por');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE solicitud_cotizacion_respuesta_items ADD COLUMN autorizado_por VARCHAR(255) DEFAULT NULL, ADD COLUMN autorizado_en DATETIME DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+CREATE TABLE IF NOT EXISTS ordenes_compra (
+  id                  INT AUTO_INCREMENT PRIMARY KEY,
+  token               VARCHAR(64)  NOT NULL UNIQUE,     -- enlace público /factura?token=...
+  empresa_id          INT          NOT NULL,
+  proveedor_id        INT          NOT NULL,
+  orden               VARCHAR(20)  DEFAULT NULL,        -- orden de trabajo (OF-00001)
+  serie               VARCHAR(10)  NOT NULL,
+  folio               INT          NOT NULL,
+  fecha               DATE         NOT NULL,
+  estado              VARCHAR(20)  NOT NULL DEFAULT 'generada', -- generada | enviada | facturada | cancelada
+  -- Copia de los datos al momento de generar (el histórico no cambia si
+  -- luego se edita un catálogo).
+  cuenta_nombre       VARCHAR(150) DEFAULT NULL,
+  cuenta_numero       VARCHAR(40)  DEFAULT NULL,
+  segmento            VARCHAR(20)  DEFAULT NULL,
+  descripcion_oc      VARCHAR(150) DEFAULT NULL,
+  huerta              VARCHAR(150) DEFAULT NULL,
+  observacion         VARCHAR(255) DEFAULT NULL,        -- ej. AF-648
+  empresa_siglas      VARCHAR(20)  DEFAULT NULL,
+  firma               VARCHAR(150) DEFAULT NULL,
+  subtotal            DECIMAL(12,2) NOT NULL DEFAULT 0,
+  descuento           DECIMAL(12,2) NOT NULL DEFAULT 0,
+  iva                 DECIMAL(12,2) NOT NULL DEFAULT 0,
+  total               DECIMAL(12,2) NOT NULL DEFAULT 0,
+  generado_por        VARCHAR(255) DEFAULT NULL,
+  generado_en         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  enviado_en          DATETIME DEFAULT NULL,
+  factura_pdf_url     VARCHAR(500) DEFAULT NULL,        -- la que mandó el proveedor, tal cual
+  factura_xml_url     VARCHAR(500) DEFAULT NULL,
+  factura_sellada_url VARCHAR(500) DEFAULT NULL,        -- con la nota contable
+  factura_uuid        VARCHAR(60)  DEFAULT NULL,
+  factura_total       DECIMAL(12,2) DEFAULT NULL,
+  factura_avisos      TEXT DEFAULT NULL,                -- diferencias detectadas (RFC, total)
+  factura_nombre      VARCHAR(255) DEFAULT NULL,        -- quién la subió
+  factura_en          DATETIME DEFAULT NULL,
+  cancelado_por       VARCHAR(255) DEFAULT NULL,
+  UNIQUE KEY uq_oc_empresa_folio (empresa_id, serie, folio),
+  INDEX idx_oc_orden (orden),
+  INDEX idx_oc_proveedor (proveedor_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ordenes_compra_items (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  oc_id             INT NOT NULL,
+  respuesta_item_id INT DEFAULT NULL,
+  refaccion_id      INT DEFAULT NULL,
+  observaciones     VARCHAR(255) DEFAULT NULL,   -- no. de parte + descripción
+  cantidad          DECIMAL(10,2) NOT NULL,
+  precio            DECIMAL(12,4) NOT NULL,      -- valor unitario (antes de descuento, sin IVA)
+  descuento_pct     DECIMAL(5,2) DEFAULT NULL,
+  iva_pct           DECIMAL(5,2) DEFAULT NULL,
+  importe           DECIMAL(12,2) NOT NULL,
+  INDEX idx_oci_oc (oc_id),
+  INDEX idx_oci_respuesta (respuesta_item_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Carga inicial (una sola vez): cuenta MTTO TRACTORES para los tipos de
+-- unidad que digan "tractor", y datos fiscales de Chula Brand México
+-- (tomados de la OC de ejemplo de Carlos). Solo llena lo que esté vacío.
+SET @carga_oc_hecha = (SELECT COUNT(*) FROM configuracion WHERE clave = 'carga_cuentas_oc_2026_10');
+INSERT IGNORE INTO cuentas_contables (nombre, numero, segmento, descripcion_oc)
+  SELECT 'MTTO TRACTORES', '59060003000', '29', 'SERVICIO MTTO. TRACTORES' FROM DUAL WHERE @carga_oc_hecha = 0;
+UPDATE tipos_unidad t JOIN cuentas_contables c ON c.nombre = 'MTTO TRACTORES'
+  SET t.cuenta_contable_id = c.id
+  WHERE @carga_oc_hecha = 0 AND t.cuenta_contable_id IS NULL AND UPPER(t.nombre) LIKE '%TRACTOR%';
+UPDATE empresas SET
+  siglas = COALESCE(siglas, 'CBM'),
+  rfc = COALESCE(rfc, 'GAM9702258Z9'),
+  razon_social = COALESCE(razon_social, 'Chula Brand Mexico S. de P.R. de R.L. de C.V.'),
+  domicilio = COALESCE(domicilio, 'Rio Rhin Num.309 Int.Altos\nCol.Del Valle Loc. San Pedro Garza Garcia.\nEstado de Nuevo Leon, C.P.66220'),
+  uso_cfdi = COALESCE(uso_cfdi, 'Gasto General'),
+  autoriza_oc = COALESCE(autoriza_oc, 'ING. JOSE HERNAN ARMIDA CRUZ')
+  WHERE @carga_oc_hecha = 0 AND nombre = 'CHULA BRAND MEXICO, S. DE P.R. DE R.L. DE C.V.';
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_cuentas_oc_2026_10', 'hecha');
+
+-- ------------------------------------------------------------
+-- Huerta y segmento de la nota/OC POR EMPRESA dentro de cada cuenta
+-- contable (oct-2026, pedido de Carlos): ej. MTTO TRACTORES para Chula
+-- Brand México -> PRORRATEABLES, segmento 29; para Chula Brand del Golfo
+-- -> otra huerta/segmento. Si una empresa no tiene fila aquí, se usa el
+-- segmento general de la cuenta y la huerta de la orden.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cuentas_contables_empresas (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  cuenta_id  INT NOT NULL,
+  empresa_id INT NOT NULL,
+  huerta     VARCHAR(150) DEFAULT NULL,
+  segmento   VARCHAR(20)  DEFAULT NULL,
+  UNIQUE KEY uq_cce (cuenta_id, empresa_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @carga_cce_hecha = (SELECT COUNT(*) FROM configuracion WHERE clave = 'carga_cuentas_empresas_2026_10');
+INSERT IGNORE INTO cuentas_contables_empresas (cuenta_id, empresa_id, huerta, segmento)
+  SELECT c.id, e.id, 'PRORRATEABLES', '29' FROM cuentas_contables c JOIN empresas e
+  WHERE @carga_cce_hecha = 0 AND c.nombre = 'MTTO TRACTORES' AND e.nombre = 'CHULA BRAND MEXICO, S. DE P.R. DE R.L. DE C.V.';
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_cuentas_empresas_2026_10', 'hecha');

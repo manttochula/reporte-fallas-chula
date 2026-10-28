@@ -1090,6 +1090,26 @@
   .ocx-destino-gasto{ color:#7a4a17; font-weight:600; }
   .ocx-destino-revisar{ color:#b3261e; font-weight:600; }
   .ocx-ya{ color:#888; font-size:11.5px; }
+  /* OC al proveedor + factura (oct-2026) */
+  .ocx-tabla.ocp-tabla td, .ocx-tabla.ocp-tabla th{ vertical-align:top; }
+  #ocp-modal-overlay .table-wrap, #ocpl-modal-overlay .table-wrap{ background:#fff; border:1px solid #e3e3e3; }
+  #ocp-modal-overlay .ocx-tabla thead th, #ocpl-modal-overlay .ocx-tabla thead th{ background:#f6f6f6; color:#555; position:sticky; top:0; z-index:1; }
+  #ocp-modal-overlay .ocx-tabla tbody td, #ocpl-modal-overlay .ocx-tabla tbody td{ color:#222; background:#fff; border-bottom:1px solid #eee; opacity:1; }
+  /* Se abre encima de la ventana de la solicitud de cotización. */
+  #ocp-modal-overlay{ z-index:210; }
+  .cce-tabla td input{ width:100%; }
+  .ocp-seccion{ margin-top:16px; padding:10px 12px; border:1px solid rgba(60,110,200,0.35); border-radius:8px; background:rgba(60,110,200,0.05); }
+  .ocp-pend{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0; font-size:12.5px; }
+  .ocp-oc{ border-top:1px solid rgba(0,0,0,0.08); padding:8px 0; font-size:12.5px; }
+  .ocp-oc:first-of-type{ border-top:none; }
+  .ocp-acciones{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .ocp-acciones .row-view{ font-size:11.5px; }
+  .ocp-estado{ display:inline-block; font-size:10.5px; padding:2px 7px; border-radius:10px; font-weight:600; background:rgba(60,110,200,0.15); color:#2b5bb5; }
+  .ocp-estado.enviada{ background:rgba(232,135,30,0.15); color:#a55d0e; }
+  .ocp-estado.facturada{ background:rgba(95,163,106,0.18); color:#2f6f3a; }
+  .ocp-estado.cancelada{ background:rgba(179,38,30,0.12); color:#b3261e; }
+  .ocp-aviso{ color:#b3261e; font-size:11.5px; margin-top:3px; }
+  .ocp-totales{ display:flex; gap:14px; flex-wrap:wrap; justify-content:flex-end; font-size:12.5px; margin-top:6px; }
   .refnec-item-oc{ font-size:10.5px; padding:2px 6px; border-radius:3px; background: rgba(60,110,200,0.15); color:#2b5bb5; white-space:nowrap; }
   /* Varias fotos por orden (modal "Ver"): miniaturas + "Agregar más fotos" */
   .modal-fotos-extra{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
@@ -2825,6 +2845,10 @@
           <div class="cat-catalogo-card-head"><span>Tipos de unidad</span><button type="button" class="export-btn cat-catalogo-add" data-catalogo="tiposunidad">+ Agregar</button></div>
           <ul class="cat-catalogo-lista" id="cat-catalogo-lista-tiposunidad"><li class="cat-catalogo-vacio">Cargando...</li></ul>
         </div>
+        <div class="cat-catalogo-card" data-catalogo="cuentascontables">
+          <div class="cat-catalogo-card-head"><span>Cuentas contables</span><button type="button" class="export-btn cat-catalogo-add" data-catalogo="cuentascontables">+ Agregar</button></div>
+          <ul class="cat-catalogo-lista" id="cat-catalogo-lista-cuentascontables"><li class="cat-catalogo-vacio">Cargando...</li></ul>
+        </div>
         <div class="cat-catalogo-card" data-catalogo="operadores">
           <div class="cat-catalogo-card-head"><span>Operadores</span><button type="button" class="export-btn cat-catalogo-add" data-catalogo="operadores">+ Agregar</button></div>
           <ul class="cat-catalogo-lista" id="cat-catalogo-lista-operadores"><li class="cat-catalogo-vacio">Cargando...</li></ul>
@@ -2910,6 +2934,36 @@
             <option value="automotriz">Automotriz</option>
           </select>
           <small style="color:var(--text-dim);">Con esto el sistema decide solo, al capturar un reporte desde el celular, si va a Órdenes Agrícola o a Órdenes Automotriz.</small>
+        </div>
+        <div class="maq-field" id="catsimple-f-tucuenta-wrap" style="display:none;">
+          <label>Cuenta contable</label>
+          <select id="catsimple-f-tucuenta"><option value="">Sin cuenta</option></select>
+          <small style="color:var(--text-dim);">Es la cuenta que sale en la orden de compra al proveedor y en la nota de su factura para los equipos de este tipo (ej. Tractor → MTTO TRACTORES 59060003000). Las cuentas se dan de alta en "Cuentas contables".</small>
+        </div>
+        <div id="catsimple-f-cuenta-wrap" style="display:none;">
+          <div class="maq-field-row">
+            <div class="maq-field"><label>No. de cuenta *</label><input type="text" id="catsimple-f-cuenta-numero" maxlength="40" placeholder="Ej. 59060003000"></div>
+            <div class="maq-field"><label>Segmento</label><input type="text" id="catsimple-f-cuenta-segmento" maxlength="20" placeholder="Ej. 29"></div>
+          </div>
+          <div class="maq-field"><label>Descripción en la OC</label><input type="text" id="catsimple-f-cuenta-descripcion" maxlength="150" placeholder="Ej. SERVICIO MTTO. TRACTORES">
+            <small style="color:var(--text-dim);">Lo que sale en la columna "Descripción" de cada partida de la orden de compra. Si lo dejas vacío sale "SERVICIO " + el nombre de la cuenta.</small></div>
+          <div class="maq-field"><label>Huerta y segmento por empresa</label>
+            <small style="color:var(--text-dim);">Según la empresa del equipo (Catálogo de maquinaria). Ej. Chula Brand México → PRORRATEABLES, 29. Si dejas una empresa vacía: huerta de la orden y el segmento de arriba.</small>
+            <table class="ocx-tabla cce-tabla" style="margin-top:6px;width:100%;"><thead><tr><th>Empresa</th><th>Huerta (nota)</th><th>Segmento</th></tr></thead><tbody id="catsimple-f-cuenta-empresas"></tbody></table>
+          </div>
+        </div>
+        <div id="catsimple-f-fiscal-wrap" style="display:none;">
+          <div class="mnt-subtext" style="margin:2px 0 6px;">Datos para la orden de compra al proveedor y la nota contable de su factura.</div>
+          <div class="maq-field-row">
+            <div class="maq-field"><label>Siglas (Empresa a contabilizar)</label><input type="text" id="catsimple-f-siglas" maxlength="20" placeholder="Ej. CBM"></div>
+            <div class="maq-field"><label>RFC</label><input type="text" id="catsimple-f-rfc" maxlength="13" placeholder="Ej. GAM9702258Z9"></div>
+          </div>
+          <div class="maq-field"><label>Razón social (como va en la factura)</label><input type="text" id="catsimple-f-razon" maxlength="255"></div>
+          <div class="maq-field"><label>Domicilio fiscal</label><textarea id="catsimple-f-domicilio" rows="3" placeholder="Calle y número&#10;Colonia, municipio&#10;Estado, C.P."></textarea></div>
+          <div class="maq-field-row">
+            <div class="maq-field"><label>Uso del CFDI</label><input type="text" id="catsimple-f-usocfdi" maxlength="80" placeholder="Ej. Gasto General"></div>
+            <div class="maq-field"><label>Autoriza (firma de la OC)</label><input type="text" id="catsimple-f-autoriza" maxlength="150" placeholder="Ej. ING. JOSE HERNAN ARMIDA CRUZ"></div>
+          </div>
         </div>
         <div class="maq-field" id="catsimple-f-mapa-wrap" style="display:none;">
           <label>Mapa de la huerta (para Avance Huerta)</label>
@@ -3171,6 +3225,7 @@
       <h3 class="ref-reporte-titulo">Solicitudes de cotización</h3>
       <div class="toolbar">
         <button class="export-btn" id="cot-add">+ Nueva solicitud</button>
+        <button class="export-btn" id="ocpl-abrir" title="Órdenes de compra enviadas a proveedores y sus facturas (con la nota contable)">🧾 OC a proveedores</button>
         <button class="export-btn" id="ocx-abrir" title="Arma el Excel (hoja Lote) para la carga masiva de Órdenes de Compra en CONTPAQi Comercial con las refacciones de precio autorizado">Exportar OC para CONTPAQi</button>
         <div class="cot-filtro-estatus" id="cot-filtro-estatus">
           <span class="cot-filtro-label">Estatus:</span>
@@ -3315,6 +3370,10 @@
         <div class="maq-field"><label>Código en Comercial (CONTPAQi)</label><input type="text" id="prov-f-codigo-comercial" placeholder="Ej. 0283" maxlength="20">
           <span class="mnt-subtext">El código de este proveedor en CONTPAQi Comercial (con sus ceros). Sin él, sus refacciones no se pueden exportar como OC.</span></div>
         <div class="maq-field-row">
+          <div class="maq-field"><label>RFC</label><input type="text" id="prov-f-rfc" maxlength="13" placeholder="Ej. DMS000928DF8"></div>
+          <div class="maq-field"><label>Domicilio fiscal (sale en la OC)</label><input type="text" id="prov-f-domicilio" placeholder="Calle, colonia, ciudad, C.P."></div>
+        </div>
+        <div class="maq-field-row">
           <div class="maq-field"><label>Correo</label><input type="text" id="prov-f-correo" placeholder="ejemplo@proveedor.com"></div>
           <div class="maq-field"><label>Teléfono</label><input type="text" id="prov-f-telefono"></div>
         </div>
@@ -3340,6 +3399,40 @@
       </div>
     </div>
 
+
+    <div class="maq-modal-overlay" id="ocp-modal-overlay">
+      <div class="maq-modal" style="max-width:900px;width:96vw;">
+        <button class="maq-modal-close" id="ocp-modal-close">&times;</button>
+        <h3 id="ocp-titulo">Orden de compra al proveedor</h3>
+        <div id="ocp-contenido"><div class="mnt-subtext">Cargando...</div></div>
+        <div class="maq-modal-status" id="ocp-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="ocpl-modal-overlay">
+      <div class="maq-modal" style="max-width:1150px;width:96vw;">
+        <button class="maq-modal-close" id="ocpl-modal-close">&times;</button>
+        <h3>Órdenes de compra a proveedores</h3>
+        <div class="mnt-subtext" style="margin-bottom:8px;">Se generan desde la solicitud de cotización (Ver) cuando ya autorizaste las piezas. Cuando el proveedor sube su factura, aquí aparece la original, el XML y la copia <b>con la nota contable</b>.</div>
+        <div class="toolbar" style="margin-bottom:8px;">
+          <select id="ocpl-estado">
+            <option value="">Todas</option>
+            <option value="generada">Generadas (sin enviar)</option>
+            <option value="enviada">Enviadas (sin factura)</option>
+            <option value="facturada">Con factura</option>
+            <option value="cancelada">Canceladas</option>
+          </select>
+          <input type="text" id="ocpl-buscar" placeholder="Buscar por folio, orden, proveedor, unidad...">
+        </div>
+        <div class="summary" id="ocpl-resumen"></div>
+        <div class="table-wrap" style="max-height:60vh;overflow:auto;">
+          <table class="ocx-tabla ocp-tabla">
+            <thead><tr><th>OC</th><th>Fecha</th><th>Orden / unidad</th><th>Empresa</th><th>Proveedor</th><th>Total</th><th>Estado</th><th>Factura / acciones</th></tr></thead>
+            <tbody id="ocpl-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
 
     <div class="maq-modal-overlay" id="ocx-modal-overlay">
       <div class="maq-modal" style="max-width:1150px;width:96vw;">
@@ -4264,6 +4357,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true,
+  prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -4832,6 +4926,7 @@ function ocultarControlesSoloLectura(){
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn',
+      '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
     ]);
   }
   if(!puedeCapturarPestana('insumos')){
@@ -4877,6 +4972,7 @@ function iniciarPanel(nombre){
   cargarHuertasCatalogo();
   cargarDepartamentosCatalogo();
   cargarTiposUnidadCatalogo();
+  cargarCatalogoSimple('cuentascontables');
   cargarOperadoresCatalogo();
   cargarUsuariosOperadoresApp();
   cargarEmpresasCatalogo();
@@ -19145,12 +19241,13 @@ document.getElementById('manpar-btn-subir').addEventListener('click', async func
 const CATALOGOS_SIMPLES = [
   { key: 'huertas', singular: 'la huerta', getFn: 'getHuertasCatalogo', guardarFn: 'guardarHuerta', eliminarFn: 'eliminarHuerta', tieneEmpresaProveedor: true, tieneMapaHuerta: true },
   { key: 'departamentos', singular: 'el departamento', getFn: 'getDepartamentosCatalogo', guardarFn: 'guardarDepartamento', eliminarFn: 'eliminarDepartamento' },
-  { key: 'tiposunidad', singular: 'el tipo de unidad', getFn: 'getTiposUnidad', guardarFn: 'guardarTipoUnidad', eliminarFn: 'eliminarTipoUnidad', tieneCategoriaExtra: true },
+  { key: 'tiposunidad', singular: 'el tipo de unidad', getFn: 'getTiposUnidad', guardarFn: 'guardarTipoUnidad', eliminarFn: 'eliminarTipoUnidad', tieneCategoriaExtra: true, tieneCuentaTipo: true },
+  { key: 'cuentascontables', singular: 'la cuenta contable', getFn: 'getCuentasContables', guardarFn: 'guardarCuentaContable', eliminarFn: 'eliminarCuentaContable', tieneCuentaExtra: true },
   { key: 'operadores', singular: 'el operador', getFn: 'getOperadoresCatalogo', guardarFn: 'guardarOperador', eliminarFn: 'eliminarOperador', tieneOperadorExtra: true },
   { key: 'tipospreventivo', singular: 'el tipo de preventivo', getFn: 'getTiposPreventivo', guardarFn: 'guardarTipoPreventivo', eliminarFn: 'eliminarTipoPreventivo', compartida: true },
   { key: 'marcas', singular: 'la marca', getFn: 'getMarcas', guardarFn: 'guardarMarca', eliminarFn: 'eliminarMarca', compartida: true },
   { key: 'modelos', singular: 'el modelo', getFn: 'getModelos', guardarFn: 'guardarModelo', eliminarFn: 'eliminarModelo', compartida: true, tieneMarca: true },
-  { key: 'empresas', singular: 'la empresa', getFn: 'getEmpresasCatalogo', guardarFn: 'guardarEmpresa', eliminarFn: 'eliminarEmpresa' },
+  { key: 'empresas', singular: 'la empresa', getFn: 'getEmpresasCatalogo', guardarFn: 'guardarEmpresa', eliminarFn: 'eliminarEmpresa', tieneFiscal: true },
   { key: 'proveedorescombustible', singular: 'el proveedor', getFn: 'getProveedoresCombustibleCatalogo', guardarFn: 'guardarProveedorCombustible', eliminarFn: 'eliminarProveedorCombustible' },
 ];
 let CATALOGO_SIMPLE_DATOS = {}; // key -> [{Id, Nombre, MarcaId?}]
@@ -19218,8 +19315,20 @@ function renderCatalogoSimple(key){
       if(r.Telefono) partes.push(r.Telefono);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
-    if(cfg.tieneCategoriaExtra && r.Categoria){
-      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(r.Categoria === 'agricola' ? 'Agrícola' : 'Automotriz') + ')</span>';
+    if(cfg.tieneCategoriaExtra && (r.Categoria || r.CuentaNombre)){
+      const partes = [];
+      if(r.Categoria) partes.push(r.Categoria === 'agricola' ? 'Agrícola' : 'Automotriz');
+      if(r.CuentaNombre) partes.push('Cuenta: ' + r.CuentaNombre);
+      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
+    }
+    if(cfg.tieneCuentaExtra){
+      const partes = [r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean)
+        .concat((r.PorEmpresa || []).map(function(x){ return x.Empresa.split(',')[0] + ': ' + [x.Huerta, x.Segmento ? 'seg. ' + x.Segmento : ''].filter(Boolean).join(' '); }));
+      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
+    }
+    if(cfg.tieneFiscal){
+      const partes = [r.Siglas, r.Rfc].filter(Boolean);
+      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.length ? partes.join(' · ') : 'faltan datos fiscales') + ')</span>';
     }
     return '<li data-id="' + r.Id + '"><span>' + escapeHtml(r.Nombre) + extra + '</span><button type="button" class="cat-catalogo-editar" title="Editar">✎ Editar</button></li>';
   }).join('');
@@ -19290,6 +19399,50 @@ function abrirModalCatalogoSimple(key, registro){
   } else {
     categoriaWrap.style.display = 'none';
   }
+  const tuCuentaWrap = document.getElementById('catsimple-f-tucuenta-wrap');
+  if(cfg.tieneCuentaTipo){
+    tuCuentaWrap.style.display = '';
+    const cuentas = (CATALOGO_SIMPLE_DATOS.cuentascontables || []).slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
+    const selCta = document.getElementById('catsimple-f-tucuenta');
+    selCta.innerHTML = '<option value="">Sin cuenta</option>' + cuentas.map(function(c){
+      return '<option value="' + c.Id + '">' + escapeHtml(c.Nombre + (c.Numero ? ' — ' + c.Numero : '')) + '</option>';
+    }).join('');
+    selCta.value = registro && registro.CuentaContableId ? registro.CuentaContableId : '';
+  } else {
+    tuCuentaWrap.style.display = 'none';
+  }
+  const cuentaWrap = document.getElementById('catsimple-f-cuenta-wrap');
+  if(cfg.tieneCuentaExtra){
+    cuentaWrap.style.display = '';
+    document.getElementById('catsimple-f-cuenta-numero').value = (registro && registro.Numero) || '';
+    document.getElementById('catsimple-f-cuenta-segmento').value = (registro && registro.Segmento) || '';
+    document.getElementById('catsimple-f-cuenta-descripcion').value = (registro && registro.DescripcionOc) || '';
+    const porEmp = (registro && registro.PorEmpresa) || [];
+    const empresasCce = (CATALOGO_SIMPLE_DATOS.empresas || []).slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
+    document.getElementById('catsimple-f-cuenta-empresas').innerHTML = empresasCce.map(function(e){
+      const x = porEmp.find(function(p){ return p.EmpresaId === e.Id; }) || {};
+      return '<tr data-empresa-id="' + e.Id + '"><td>' + escapeHtml(e.Nombre) + '</td>' +
+        '<td><input type="text" class="cce-huerta" maxlength="150" list="cce-huertas" value="' + escapeHtml(x.Huerta || '') + '" placeholder="Huerta de la orden"></td>' +
+        '<td><input type="text" class="cce-segmento" maxlength="20" value="' + escapeHtml(x.Segmento || '') + '" placeholder="General" style="max-width:110px;"></td></tr>';
+    }).join('') || '<tr><td colspan="3" class="mnt-subtext">Da de alta las empresas primero.</td></tr>';
+    let dl = document.getElementById('cce-huertas');
+    if(!dl){ dl = document.createElement('datalist'); dl.id = 'cce-huertas'; document.body.appendChild(dl); }
+    dl.innerHTML = ['PRORRATEABLES'].concat((CATALOGO_SIMPLE_DATOS.huertas || []).map(function(h){ return h.Nombre; })).map(function(h){ return '<option value="' + escapeHtml(h) + '">'; }).join('');
+  } else {
+    cuentaWrap.style.display = 'none';
+  }
+  const fiscalWrap = document.getElementById('catsimple-f-fiscal-wrap');
+  if(cfg.tieneFiscal){
+    fiscalWrap.style.display = '';
+    document.getElementById('catsimple-f-siglas').value = (registro && registro.Siglas) || '';
+    document.getElementById('catsimple-f-rfc').value = (registro && registro.Rfc) || '';
+    document.getElementById('catsimple-f-razon').value = (registro && registro.RazonSocial) || '';
+    document.getElementById('catsimple-f-domicilio').value = (registro && registro.Domicilio) || '';
+    document.getElementById('catsimple-f-usocfdi').value = (registro && registro.UsoCfdi) || '';
+    document.getElementById('catsimple-f-autoriza').value = (registro && registro.AutorizaOc) || '';
+  } else {
+    fiscalWrap.style.display = 'none';
+  }
   const mapaWrap = document.getElementById('catsimple-f-mapa-wrap');
   const mapaPreview = document.getElementById('catsimple-f-mapa-preview');
   const mapaStatus = document.getElementById('catsimple-mapa-status');
@@ -19351,6 +19504,29 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
   }
   if(cfg.tieneCategoriaExtra){
     data.categoria = document.getElementById('catsimple-f-categoria').value;
+  }
+  if(cfg.tieneCuentaTipo){
+    data.cuentaContableId = document.getElementById('catsimple-f-tucuenta').value || null;
+  }
+  if(cfg.tieneCuentaExtra){
+    data.numero = document.getElementById('catsimple-f-cuenta-numero').value.trim();
+    data.segmento = document.getElementById('catsimple-f-cuenta-segmento').value.trim();
+    data.descripcionOc = document.getElementById('catsimple-f-cuenta-descripcion').value.trim();
+    data.porEmpresa = Array.from(document.querySelectorAll('#catsimple-f-cuenta-empresas tr[data-empresa-id]')).map(function(tr){
+      return { empresaId: Number(tr.dataset.empresaId), huerta: tr.querySelector('.cce-huerta').value.trim(), segmento: tr.querySelector('.cce-segmento').value.trim() };
+    });
+    if(!data.numero){
+      statusEl.textContent = 'Escribe el número de cuenta.'; statusEl.className = 'maq-modal-status show err';
+      return;
+    }
+  }
+  if(cfg.tieneFiscal){
+    data.siglas = document.getElementById('catsimple-f-siglas').value.trim();
+    data.rfc = document.getElementById('catsimple-f-rfc').value.trim();
+    data.razonSocial = document.getElementById('catsimple-f-razon').value.trim();
+    data.domicilio = document.getElementById('catsimple-f-domicilio').value.trim();
+    data.usoCfdi = document.getElementById('catsimple-f-usocfdi').value.trim();
+    data.autorizaOc = document.getElementById('catsimple-f-autoriza').value.trim();
   }
   const btn = this;
   btn.disabled = true;
@@ -19457,7 +19633,8 @@ function recargarCatalogoSimpleYDependientes(key){
   if(key === 'modelos'){ cargarModelos(); return; }
   if(key === 'huertas'){ cargarHuertasCatalogo(); return; }
   if(key === 'departamentos'){ cargarDepartamentosCatalogo(); return; }
-  if(key === 'tiposunidad'){ cargarTiposUnidadCatalogo(); return; }
+  if(key === 'tiposunidad'){ cargarTiposUnidadCatalogo(); cargarCatalogoSimple('cuentascontables'); return; }
+  if(key === 'cuentascontables'){ cargarCatalogoSimple('cuentascontables'); cargarTiposUnidadCatalogo(); return; }
   if(key === 'operadores'){ cargarOperadoresCatalogo(); return; }
   // Empresas/Proveedores: además de su propia tarjeta, alimentan los
   // selects de captura de Combustible Automotriz y el nombre que se
@@ -19945,6 +20122,8 @@ function limpiarModalProveedor(){
   document.getElementById('prov-f-id').value = '';
   document.getElementById('prov-f-nombre').value = '';
   document.getElementById('prov-f-codigo-comercial').value = '';
+  document.getElementById('prov-f-rfc').value = '';
+  document.getElementById('prov-f-domicilio').value = '';
   document.getElementById('prov-f-correo').value = '';
   document.getElementById('prov-f-telefono').value = '';
   document.getElementById('prov-f-contacto').value = '';
@@ -19964,6 +20143,8 @@ function abrirModalProveedor(prov){
     document.getElementById('prov-f-id').value = prov.Id;
     document.getElementById('prov-f-nombre').value = prov.Nombre || '';
     document.getElementById('prov-f-codigo-comercial').value = prov.CodigoComercial || '';
+    document.getElementById('prov-f-rfc').value = prov.Rfc || '';
+    document.getElementById('prov-f-domicilio').value = prov.Domicilio || '';
     document.getElementById('prov-f-correo').value = prov.Correo || '';
     document.getElementById('prov-f-telefono').value = prov.Telefono || '';
     document.getElementById('prov-f-contacto').value = prov.Contacto || '';
@@ -20011,6 +20192,8 @@ document.getElementById('prov-btn-save').addEventListener('click', function(){
     marcas: document.getElementById('prov-f-marcas').value.trim(),
     notas: document.getElementById('prov-f-notas').value.trim(),
     codigoComercial: document.getElementById('prov-f-codigo-comercial').value.trim(),
+    rfc: document.getElementById('prov-f-rfc').value.trim(),
+    domicilio: document.getElementById('prov-f-domicilio').value.trim(),
     contactos: provFormContactos
   };
 
@@ -20763,6 +20946,305 @@ document.getElementById('ocx-btn-generar').addEventListener('click', function(){
     .exportarOCContpaqi(ACCESS_CODE, PANEL_USUARIO, datos);
 });
 
+// ---------------------------------------------------------------
+// OC al proveedor + factura con nota contable (oct-2026, pedido de Carlos).
+// Al terminar de autorizar ("Aut") las piezas de un proveedor en una orden,
+// en la ventana de la solicitud sale "📤 Generar OC". La OC se manda desde
+// aquí: abre el correo (o WhatsApp) ya armado con el enlace del PDF de la OC
+// y el enlace para que el proveedor suba su factura (PDF + XML). Al llegar
+// la factura, el servidor le agrega la nota contable (cuenta del tipo de
+// unidad, huerta, segmento, unidad, empresa y firma). Ver server/handlers.js:
+// prepararOcProveedor / generarOcProveedor / subirFacturaOc.
+// ---------------------------------------------------------------
+const ocpOverlay = document.getElementById('ocp-modal-overlay');
+const ocplOverlay = document.getElementById('ocpl-modal-overlay');
+let OCP_ORDEN_ACTUAL = null;
+let OCPL_DATOS = [];
+
+function baseUrlPublica_(){ return PUBLIC_BASE_URL_CONFIG || window.location.origin; }
+function enlaceFacturaOc_(oc){ return baseUrlPublica_() + '/factura?token=' + oc.token; }
+function enlacePdfOc_(oc){ return baseUrlPublica_() + '/oc/pdf?token=' + oc.token; }
+function dineroOc_(n){ return '$' + Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fechaOcCorta_(iso){ if(!iso) return ''; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); return m ? m[3] + '/' + m[2] + '/' + m[1] : iso; }
+const OCP_ESTADOS_ = { generada: 'Generada (sin enviar)', enviada: 'Enviada — esperando factura', facturada: 'Factura recibida', cancelada: 'Cancelada' };
+
+function textoCorreoOc_(oc){
+  return 'Buen día,\n\n' +
+    'Le enviamos la orden de compra ' + oc.serie + ' ' + oc.folio + ' de ' + oc.empresa + ' por ' + dineroOc_(oc.total) + ' (IVA incluido)' + (oc.orden ? ', orden de trabajo ' + oc.orden : '') + '.\n\n' +
+    'Orden de compra (PDF):\n' + enlacePdfOc_(oc) + '\n\n' +
+    'Favor de facturar a nombre de los Datos de Facturación que vienen en la orden, indicando la serie y folio de la OC, y subir el PDF y el XML de su factura en:\n' +
+    enlaceFacturaOc_(oc) + '\n\n' +
+    'Saludos,\nChula Brand';
+}
+
+function telefonoWhatsApp_(tel){
+  let d = (tel || '').replace(/\D/g, '');
+  if(d.length === 10) d = '52' + d;
+  return d.length >= 11 ? d : '';
+}
+
+// Botones de una OC (los usan la ventana de la solicitud y la lista).
+function accionesOcHtml_(oc){
+  const b = [];
+  b.push('<a class="row-view" href="' + escapeHtml(enlacePdfOc_(oc)) + '" target="_blank" rel="noopener">📄 PDF de la OC</a>');
+  if(oc.estado !== 'cancelada'){
+    b.push('<button type="button" class="row-view ocp-btn-correo" data-id="' + oc.id + '"' + (oc.correos.length ? '' : ' title="El proveedor no tiene correo: se abre sin destinatario"') + '>✉️ Enviar por correo</button>');
+    const tel = telefonoWhatsApp_(oc.telefonos[0]);
+    if(tel) b.push('<button type="button" class="row-view ocp-btn-wa" data-id="' + oc.id + '">💬 WhatsApp</button>');
+    b.push('<button type="button" class="row-view ocp-btn-copiar" data-id="' + oc.id + '">🔗 Copiar enlace de factura</button>');
+  }
+  if(oc.facturaSelladaUrl) b.push('<a class="row-view" href="' + escapeHtml(oc.facturaSelladaUrl) + '" target="_blank" rel="noopener" style="font-weight:600;">🧾 Factura con nota</a>');
+  if(oc.facturaPdfUrl) b.push('<a class="row-view" href="' + escapeHtml(oc.facturaPdfUrl) + '" target="_blank" rel="noopener">Factura original</a>');
+  if(oc.facturaXmlUrl) b.push('<a class="row-view" href="' + escapeHtml(oc.facturaXmlUrl) + '" target="_blank" rel="noopener" download>XML</a>');
+  if(oc.estado !== 'cancelada' && oc.estado !== 'facturada') b.push('<button type="button" class="row-view ocp-btn-cancelar" data-id="' + oc.id + '" style="color:var(--danger);border-color:var(--danger);">Cancelar OC</button>');
+  return '<div class="ocp-acciones">' + b.join('') + '</div>' +
+    (oc.facturaAvisos.length ? '<div class="ocp-aviso">⚠ ' + oc.facturaAvisos.map(escapeHtml).join('<br>⚠ ') + '</div>' : '');
+}
+
+function enlazarAccionesOc_(cont, lista, alCambiar){
+  const porId = {};
+  lista.forEach(function(o){ porId[o.id] = o; });
+  const marcarEnviada = function(oc){
+    if(oc.estado !== 'generada') return;
+    google.script.run.withSuccessHandler(function(){ if(alCambiar) alCambiar(); }).withFailureHandler(function(){}).marcarOcEnviada(ACCESS_CODE, PANEL_USUARIO, oc.id);
+  };
+  cont.querySelectorAll('.ocp-btn-correo').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const oc = porId[Number(btn.dataset.id)];
+      // Outlook pide ";" entre direcciones (ver el correo de cotizaciones).
+      const para = oc.correos.map(encodeURIComponent).join(';');
+      window.location.href = 'mailto:' + para + '?cc=' + encodeURIComponent('carlos.contreras@chulabrand.com') +
+        '&subject=' + encodeURIComponent('Orden de compra ' + oc.serie + ' ' + oc.folio + ' — ' + oc.empresa) +
+        '&body=' + encodeURIComponent(textoCorreoOc_(oc));
+      marcarEnviada(oc);
+    });
+  });
+  cont.querySelectorAll('.ocp-btn-wa').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const oc = porId[Number(btn.dataset.id)];
+      window.open('https://wa.me/' + telefonoWhatsApp_(oc.telefonos[0]) + '?text=' + encodeURIComponent(textoCorreoOc_(oc)), '_blank', 'noopener');
+      marcarEnviada(oc);
+    });
+  });
+  cont.querySelectorAll('.ocp-btn-copiar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const oc = porId[Number(btn.dataset.id)];
+      const txt = textoCorreoOc_(oc);
+      const ok = function(){ btn.textContent = '✓ Copiado (mensaje con enlaces)'; marcarEnviada(oc); };
+      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function(){ prompt('Copia este mensaje:', txt); ok(); });
+      else { prompt('Copia este mensaje:', txt); ok(); }
+    });
+  });
+  cont.querySelectorAll('.ocp-btn-cancelar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const oc = porId[Number(btn.dataset.id)];
+      if(!confirm('¿Cancelar la OC ' + oc.serie + ' ' + oc.folio + '? El proveedor ya no podrá subir factura con ese enlace y sus piezas quedan libres para otra OC. Avísale al proveedor.')) return;
+      btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ btn.disabled = false; alert((r && r.error) || 'No se pudo cancelar.'); return; } if(alCambiar) alCambiar(); })
+        .withFailureHandler(function(){ btn.disabled = false; alert('No se pudo cancelar. Intenta de nuevo.'); })
+        .cancelarOcProveedor(ACCESS_CODE, PANEL_USUARIO, oc.id);
+    });
+  });
+}
+
+function ocResumenHtml_(oc){
+  return '<b>OC ' + escapeHtml(oc.serie + ' ' + oc.folio) + '</b> · ' + escapeHtml(oc.proveedor) + ' · ' + escapeHtml(oc.empresaSiglas || oc.empresa) +
+    ' · ' + dineroOc_(oc.total) + ' · ' + oc.partidas + ' partida(s) <span class="ocp-estado ' + oc.estado + '">' + escapeHtml(OCP_ESTADOS_[oc.estado] || oc.estado) + '</span>' +
+    '<div class="mnt-subtext">' + escapeHtml(fechaOcCorta_(oc.fecha)) + (oc.generadoPor ? ' · generó ' + escapeHtml(oc.generadoPor) : '') +
+    ' · Cuenta ' + escapeHtml(oc.cuentaNombre + ' ' + oc.cuentaNumero) + ' · Huerta ' + escapeHtml(oc.huerta) + ' · Firma ' + escapeHtml(oc.firma) +
+    (oc.facturaEn ? ' · factura ' + escapeHtml(new Date(oc.facturaEn).toLocaleString('es-MX')) + (oc.facturaNombre ? ' (' + escapeHtml(oc.facturaNombre) + ')' : '') : '') + '</div>';
+}
+
+// Sección "Órdenes de compra" dentro de la ventana de la solicitud.
+function cargarOcpDeOrden_(orden){
+  OCP_ORDEN_ACTUAL = orden;
+  google.script.run
+    .withSuccessHandler(function(r){
+      const cont = document.getElementById('cot-ver-ocp');
+      if(!cont || OCP_ORDEN_ACTUAL !== orden) return;
+      if(!r || !r.success){ cont.innerHTML = '<div class="mnt-subtext">No se pudieron cargar las órdenes de compra.</div>'; return; }
+      const pend = (r.pendientes || []).map(function(p){
+        return '<div class="ocp-pend"><span><b>' + escapeHtml(p.proveedor) + '</b>: ' + p.partidas + ' pieza(s) autorizada(s) sin OC</span>' +
+          '<button type="button" class="maq-save-btn ocp-btn-generar" data-proveedor-id="' + p.proveedorId + '" style="padding:5px 12px;font-size:12.5px;width:auto;flex:0 0 auto;">📤 Generar OC</button></div>';
+      }).join('');
+      const ocs = (r.ocs || []).map(function(oc){ return '<div class="ocp-oc">' + ocResumenHtml_(oc) + accionesOcHtml_(oc) + '</div>'; }).join('');
+      cont.innerHTML = '<div class="maq-field" style="margin-bottom:4px;"><label>Órdenes de compra al proveedor — ' + escapeHtml(orden) + '</label></div>' +
+        (pend || (ocs ? '' : '<div class="mnt-subtext">Cuando autorices ("Aut") las piezas de un proveedor, aquí sale el botón para generarle su orden de compra.</div>')) + ocs;
+      cont.querySelectorAll('.ocp-btn-generar').forEach(function(btn){
+        btn.addEventListener('click', function(){ abrirModalOcp_(orden, Number(btn.dataset.proveedorId)); });
+      });
+      enlazarAccionesOc_(cont, r.ocs || [], function(){ cargarOcpDeOrden_(orden); });
+      ocultarControlesSoloLectura();
+    })
+    .withFailureHandler(function(){
+      const cont = document.getElementById('cot-ver-ocp');
+      if(cont) cont.innerHTML = '<div class="mnt-subtext">No se pudieron cargar las órdenes de compra (¿sin internet?).</div>';
+    })
+    .getOcsProveedorDeOrden(ACCESS_CODE, PANEL_USUARIO, orden);
+}
+
+// Ventanita "Generar OC": todo viene propuesto y se puede corregir.
+function abrirModalOcp_(orden, proveedorId){
+  const cont = document.getElementById('ocp-contenido');
+  const st = document.getElementById('ocp-status');
+  document.getElementById('ocp-titulo').textContent = 'Generar orden de compra — ' + orden;
+  cont.innerHTML = '<div class="mnt-subtext">Cargando...</div>';
+  st.textContent = ''; st.className = 'maq-modal-status';
+  ocpOverlay.classList.add('open');
+  google.script.run
+    .withSuccessHandler(function(d){
+      if(!d || !d.success){ cont.innerHTML = ''; st.textContent = (d && d.error) || 'No se pudo preparar la OC.'; st.className = 'maq-modal-status show err'; return; }
+      pintarModalOcp_(d);
+    })
+    .withFailureHandler(function(e){ cont.innerHTML = ''; st.textContent = (e && e.message) || 'No se pudo preparar la OC (¿sin internet?).'; st.className = 'maq-modal-status show err'; })
+    .prepararOcProveedor(ACCESS_CODE, PANEL_USUARIO, orden, proveedorId);
+}
+
+function pintarModalOcp_(d){
+  const cont = document.getElementById('ocp-contenido');
+  const st = document.getElementById('ocp-status');
+  const opcEmp = d.empresas.map(function(e){ return '<option value="' + e.id + '">' + escapeHtml(e.nombre) + '</option>'; }).join('');
+  const opcCta = d.cuentas.map(function(c){ return '<option value="' + c.Id + '">' + escapeHtml(c.Nombre + ' — ' + c.Numero + (c.Segmento ? ' (seg. ' + c.Segmento + ')' : '')) + '</option>'; }).join('');
+  const filas = d.partidas.map(function(p){
+    return '<tr><td>' + p.cantidad + '</td><td>' + escapeHtml(p.observaciones) + '</td><td style="text-align:right;">' + (p.precio === null ? '<span class="ocx-destino-revisar">sin precio</span>' : dineroOc_(p.precio)) + '</td>' +
+      '<td style="text-align:right;">' + (p.descuentoPct ? p.descuentoPct + '%' : '—') + '</td><td style="text-align:right;">' + (p.ivaPct === null || p.ivaPct === undefined ? '16%' : p.ivaPct + '%') + '</td><td style="text-align:right;">' + dineroOc_(p.importe) + '</td></tr>';
+  }).join('');
+  const prov = d.proveedor;
+  const correos = [prov.correo].concat(prov.contactos.map(function(c){ return c.correo; })).filter(Boolean);
+  cont.innerHTML =
+    '<div class="mnt-subtext" style="margin-bottom:8px;"><b>' + escapeHtml(prov.nombre) + '</b>' + (prov.rfc ? ' · RFC ' + escapeHtml(prov.rfc) : ' · <span class="ocx-destino-revisar">sin RFC</span>') +
+      ' · ' + (correos.length ? escapeHtml(correos.join(', ')) : '<span class="ocx-destino-revisar">sin correo</span>') +
+      '<br>Unidad: ' + escapeHtml(d.unidad || '—') + (d.tipoUnidad ? ' (' + escapeHtml(d.tipoUnidad) + ')' : ' (sin tipo de unidad)') + '</div>' +
+    '<div class="table-wrap" style="max-height:34vh;overflow:auto;"><table class="ocx-tabla"><thead><tr><th>Cant.</th><th>Observaciones (no. de parte y pieza)</th><th>Valor unit.</th><th>Desc.</th><th>IVA</th><th>Importe</th></tr></thead><tbody>' + filas + '</tbody></table></div>' +
+    '<div class="ocp-totales"><span>Subtotal ' + dineroOc_(d.totales.subtotal) + '</span><span>Descuentos ' + dineroOc_(d.totales.descuento) + '</span><span>IVA ' + dineroOc_(d.totales.iva) + '</span><b>Total ' + dineroOc_(d.totales.total) + '</b><span>Piezas ' + d.totales.piezas + '</span></div>' +
+    '<div class="maq-field-row" style="margin-top:10px;">' +
+      '<div class="maq-field"><label>Se factura a (empresa) *</label><select id="ocp-empresa"><option value="">Elige...</option>' + opcEmp + '</select><span class="mnt-subtext" id="ocp-empresa-aviso"></span></div>' +
+      '<div class="maq-field"><label>Cuenta contable *</label><select id="ocp-cuenta"><option value="">Elige...</option>' + opcCta + '</select><span class="mnt-subtext" id="ocp-cuenta-aviso"></span></div>' +
+    '</div>' +
+    '<div class="maq-field-row">' +
+      '<div class="maq-field"><label>Huerta (nota) *</label><input type="text" id="ocp-huerta" list="ocp-huertas"><datalist id="ocp-huertas">' + d.huertas.map(function(h){ return '<option value="' + escapeHtml(h) + '">'; }).join('') + '</datalist>' +
+        '<span class="mnt-subtext">La orden dice: ' + escapeHtml(d.huertaOrden || '—') + '</span></div>' +
+      '<div class="maq-field"><label>Segmento</label><input type="text" id="ocp-segmento" maxlength="20"></div>' +
+      '<div class="maq-field"><label>Observaciones (nota)</label><input type="text" id="ocp-observacion" maxlength="255"></div>' +
+      '<div class="maq-field"><label>Firma (nota) *</label><input type="text" id="ocp-firma" maxlength="150"></div>' +
+    '</div>' +
+    '<div class="maq-field-row">' +
+      '<div class="maq-field"><label>Serie</label><input type="text" id="ocp-serie" maxlength="10"></div>' +
+      '<div class="maq-field"><label>Folio</label><input type="number" id="ocp-folio" min="1" step="1"><span class="mnt-subtext">Consecutivo de la empresa; cámbialo solo si quieres empezar en otro número.</span></div>' +
+      '<div class="maq-field"><label>Fecha</label><input type="date" id="ocp-fecha"></div>' +
+    '</div>' +
+    (d.sinPrecio ? '<div class="ocp-aviso">Hay ' + d.sinPrecio + ' pieza(s) sin precio: corrige la cotización antes de generar la OC.</div>' : '') +
+    '<div class="maq-modal-actions"><button class="maq-save-btn" id="ocp-btn-generar">Generar OC</button></div>';
+
+  const selEmp = document.getElementById('ocp-empresa');
+  const selCta = document.getElementById('ocp-cuenta');
+  selEmp.value = d.empresaId || '';
+  selCta.value = d.cuentaContableId || '';
+  document.getElementById('ocp-huerta').value = d.huerta || '';
+  document.getElementById('ocp-observacion').value = d.observacion || '';
+  document.getElementById('ocp-firma').value = d.firma || '';
+  document.getElementById('ocp-fecha').value = d.fecha;
+  const aplicarEmpresa = function(){
+    const e = d.empresas.find(function(x){ return String(x.id) === selEmp.value; });
+    const cfg = e ? d.seriesPorEmpresa[e.id] : null;
+    document.getElementById('ocp-serie').value = cfg ? cfg.serie : 'mtto';
+    document.getElementById('ocp-folio').value = cfg ? cfg.siguienteFolio : '';
+    const aviso = document.getElementById('ocp-empresa-aviso');
+    if(!d.empresaId) aviso.innerHTML = '<span class="ocx-destino-revisar">La unidad no tiene empresa (Catálogo de maquinaria).</span>';
+    else aviso.textContent = '';
+    if(e && e.faltan.length) aviso.innerHTML += ' <span class="ocx-destino-revisar">Le falta: ' + escapeHtml(e.faltan.join(', ')) + ' (Catálogo → Empresa).</span>';
+  };
+  // Huerta/segmento según cuenta + empresa (Catálogo → Cuentas contables).
+  document.getElementById('ocp-segmento').value = d.segmento || '';
+  const aplicarCuentaEmpresa = function(){
+    const c = d.cuentas.find(function(x){ return String(x.Id) === selCta.value; });
+    const pe = c ? (c.PorEmpresa || []).find(function(x){ return String(x.EmpresaId) === selEmp.value; }) : null;
+    document.getElementById('ocp-huerta').value = (pe && pe.Huerta) || d.huertaPorOrden || '';
+    document.getElementById('ocp-segmento').value = (pe && pe.Segmento) || (c ? c.Segmento : '') || '';
+  };
+  selEmp.addEventListener('change', function(){ aplicarEmpresa(); aplicarCuentaEmpresa(); });
+  selCta.addEventListener('change', aplicarCuentaEmpresa);
+  aplicarEmpresa();
+  if(!d.cuentaContableId) document.getElementById('ocp-cuenta-aviso').innerHTML = '<span class="ocx-destino-revisar">' + (d.tipoUnidad ? 'El tipo "' + escapeHtml(d.tipoUnidad) + '" no tiene cuenta (Catálogo → Tipos de unidad).' : 'La unidad no tiene tipo de unidad.') + '</span>';
+
+  document.getElementById('ocp-btn-generar').addEventListener('click', function(){
+    const btn = this;
+    const datos = {
+      orden: d.orden, proveedorId: prov.id,
+      respuestaItemIds: d.partidas.map(function(p){ return p.respuestaItemId; }),
+      empresaId: Number(selEmp.value) || 0, cuentaContableId: Number(selCta.value) || 0,
+      huerta: document.getElementById('ocp-huerta').value, segmento: document.getElementById('ocp-segmento').value, observacion: document.getElementById('ocp-observacion').value,
+      firma: document.getElementById('ocp-firma').value, serie: document.getElementById('ocp-serie').value,
+      folio: document.getElementById('ocp-folio').value, fecha: document.getElementById('ocp-fecha').value,
+    };
+    btn.disabled = true; btn.textContent = 'Generando...';
+    st.textContent = ''; st.className = 'maq-modal-status';
+    google.script.run
+      .withSuccessHandler(function(r){
+        btn.disabled = false; btn.textContent = 'Generar OC';
+        if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo generar.'; st.className = 'maq-modal-status show err'; return; }
+        mostrarOcGenerada_(r.oc);
+        if(OCP_ORDEN_ACTUAL) cargarOcpDeOrden_(OCP_ORDEN_ACTUAL);
+      })
+      .withFailureHandler(function(e){ btn.disabled = false; btn.textContent = 'Generar OC'; st.textContent = (e && e.message) || 'No se pudo generar. Intenta de nuevo.'; st.className = 'maq-modal-status show err'; })
+      .generarOcProveedor(ACCESS_CODE, PANEL_USUARIO, datos);
+  });
+}
+
+// Después de generar: mandarla.
+function mostrarOcGenerada_(oc){
+  const cont = document.getElementById('ocp-contenido');
+  const st = document.getElementById('ocp-status');
+  document.getElementById('ocp-titulo').textContent = 'OC ' + oc.serie + ' ' + oc.folio + ' generada';
+  st.textContent = '✓ Lista. Ahora mándasela al proveedor: el correo/WhatsApp se abre ya armado con el PDF de la OC y el enlace para subir su factura.';
+  st.className = 'maq-modal-status show ok';
+  cont.innerHTML = '<div class="ocp-oc">' + ocResumenHtml_(oc) + accionesOcHtml_(oc) + '</div>' +
+    (oc.correos.length ? '' : '<div class="ocp-aviso">El proveedor no tiene correo capturado (Refacciones → Proveedores).</div>');
+  enlazarAccionesOc_(cont, [oc], function(){ if(OCP_ORDEN_ACTUAL) cargarOcpDeOrden_(OCP_ORDEN_ACTUAL); });
+}
+
+document.getElementById('ocp-modal-close').addEventListener('click', function(){ ocpOverlay.classList.remove('open'); });
+ocpOverlay.addEventListener('click', function(e){ if(e.target === ocpOverlay) ocpOverlay.classList.remove('open'); });
+
+// Lista de todas las OC a proveedores.
+function cargarListaOcp_(){
+  document.getElementById('ocpl-body').innerHTML = '<tr><td colspan="8"><div class="mnt-subtext">Cargando...</div></td></tr>';
+  google.script.run
+    .withSuccessHandler(function(r){
+      OCPL_DATOS = (r && r.ocs) || [];
+      renderListaOcp_();
+    })
+    .withFailureHandler(function(){ document.getElementById('ocpl-body').innerHTML = '<tr><td colspan="8"><div class="mnt-subtext">No se pudo cargar.</div></td></tr>'; })
+    .getOrdenesCompraProveedor(ACCESS_CODE, PANEL_USUARIO, {});
+}
+function renderListaOcp_(){
+  const estado = document.getElementById('ocpl-estado').value;
+  const q = document.getElementById('ocpl-buscar').value.trim().toLowerCase();
+  const lista = OCPL_DATOS.filter(function(o){
+    if(estado && o.estado !== estado) return false;
+    if(!q) return true;
+    return [o.serie + ' ' + o.folio, o.orden, o.proveedor, o.unidad, o.empresa, o.empresaSiglas].join(' ').toLowerCase().indexOf(q) >= 0;
+  });
+  const cuenta = function(e){ return OCPL_DATOS.filter(function(o){ return o.estado === e; }).length; };
+  document.getElementById('ocpl-resumen').textContent = lista.length + ' OC · ' + cuenta('generada') + ' sin enviar · ' + cuenta('enviada') + ' esperando factura · ' + cuenta('facturada') + ' con factura';
+  const tbody = document.getElementById('ocpl-body');
+  if(!lista.length){ tbody.innerHTML = '<tr><td colspan="8"><div class="mnt-subtext">No hay órdenes de compra' + (estado || q ? ' con ese filtro' : ' todavía') + '.</div></td></tr>'; return; }
+  tbody.innerHTML = lista.map(function(o){
+    return '<tr><td><b>' + escapeHtml(o.serie + ' ' + o.folio) + '</b></td><td>' + escapeHtml(fechaOcCorta_(o.fecha)) + '</td>' +
+      '<td>' + escapeHtml(o.orden || '—') + '<div class="mnt-subtext">' + escapeHtml(o.unidad) + '</div></td><td>' + escapeHtml(o.empresaSiglas || o.empresa) + '</td>' +
+      '<td>' + escapeHtml(o.proveedor) + '</td><td style="text-align:right;">' + dineroOc_(o.total) + '</td>' +
+      '<td><span class="ocp-estado ' + o.estado + '">' + escapeHtml(OCP_ESTADOS_[o.estado] || o.estado) + '</span></td><td>' + accionesOcHtml_(o) + '</td></tr>';
+  }).join('');
+  enlazarAccionesOc_(tbody, lista, cargarListaOcp_);
+  ocultarControlesSoloLectura();
+}
+document.getElementById('ocpl-abrir').addEventListener('click', function(){ ocplOverlay.classList.add('open'); cargarListaOcp_(); });
+document.getElementById('ocpl-modal-close').addEventListener('click', function(){ ocplOverlay.classList.remove('open'); });
+ocplOverlay.addEventListener('click', function(e){ if(e.target === ocplOverlay) ocplOverlay.classList.remove('open'); });
+document.getElementById('ocpl-estado').addEventListener('change', renderListaOcp_);
+document.getElementById('ocpl-buscar').addEventListener('input', renderListaOcp_);
+
 // --- Ver detalle de una solicitud (respuesta del proveedor + aplicar precios) ---
 const cotVerModalOverlay = document.getElementById('cot-ver-modal-overlay');
 
@@ -20897,7 +21379,9 @@ function abrirModalVerCotizacion(sol){
     ${sol.Mensaje ? '<div class="maq-field"><label>Mensaje enviado</label><div class="mnt-subtext">' + escapeHtml(sol.Mensaje) + '</div></div>' : ''}
     <div class="maq-field" style="margin-top:14px;"><label>Comparativo de cotizaciones${respuestas.length > 0 ? ' (' + respuestas.length + ')' : ''}${variosProveedores ? ' — ' + nombresProveedores.length + ' proveedores de la orden' : ''}</label></div>
     ${tablaComparativaHtml}
+    ${sol.Orden ? '<div class="ocp-seccion" id="cot-ver-ocp"><div class="mnt-subtext">Cargando órdenes de compra...</div></div>' : ''}
   `;
+  if(sol.Orden) cargarOcpDeOrden_(sol.Orden);
 
   document.getElementById('cot-ver-contenido').querySelectorAll('.cot-aut-btn').forEach(function(autBtn){
     autBtn.addEventListener('click', function(){

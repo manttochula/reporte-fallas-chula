@@ -70,6 +70,22 @@ app.get('/movimientos', (req, res) => res.sendFile(path.join(__dirname, '..', 'p
 // solicitud de cotización, vía /cotizar?token=... (ver server/handlers.js:
 // getSolicitudCotizacionPublica / responderCotizacion).
 app.get('/cotizar', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Cotizacion.html')));
+// Orden de compra al proveedor (oct-2026): página pública para que suba su
+// factura (PDF + XML) y el PDF de la OC. Ver server/handlers.js:
+// getOcPublica / subirFacturaOc / pdfOcProveedor_.
+app.get('/factura', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Factura.html')));
+app.get('/oc/pdf', async (req, res) => {
+  try {
+    const base = (req.get('x-forwarded-proto') || req.protocol) + '://' + req.get('host');
+    const r = await handlers.pdfOcProveedor_((req.query.token || '').toString(), base);
+    if (!r) return res.status(404).send('Esta orden de compra no existe.');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', (req.query.descargar ? 'attachment' : 'inline') + '; filename="' + r.nombre + '"');
+    res.send(r.buffer);
+  } catch (err) {
+    res.status(500).send('No se pudo generar el PDF: ' + (err.message || err));
+  }
+});
 
 // --- Despachador genérico de "RPC" -----------------------------------
 // El frontend llama, por ejemplo: google.script.run.withSuccessHandler(cb)

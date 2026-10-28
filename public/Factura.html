@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orden de compra · Subir factura</title>
+<!--
+  Página pública (sin clave) para el proveedor (oct-2026): ve su orden de
+  compra, la descarga en PDF y sube su factura (PDF + XML). El servidor le
+  agrega a la factura la nota contable. Ver server/handlers.js:
+  getOcPublica / subirFacturaOc y server/server.js (/factura, /oc/pdf).
+-->
+<style>
+  :root { --azul:#1E88E5; --texto:#1c1e1f; --suave:#6b6b6b; --linea:#d9d9d9; --fondo:#f4f6f8; --ok:#2e7d32; --err:#c62828; --aviso:#ef6c00; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: var(--fondo); color: var(--texto); }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px; }
+  .card { background:#fff; border:1px solid var(--linea); border-radius:10px; padding:16px; margin-bottom:14px; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: var(--azul); }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--suave); font-size: 13px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } .ocultar-movil { display:none; } }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th { background: var(--azul); color:#fff; text-align:left; padding:6px; font-weight:600; }
+  td { border-bottom:1px solid var(--linea); padding:6px; vertical-align: top; }
+  td.num, th.num { text-align:right; white-space:nowrap; }
+  .totales { margin-left:auto; max-width: 280px; font-size: 14px; margin-top: 10px; }
+  .totales div { display:flex; justify-content: space-between; padding: 2px 0; }
+  .totales .total { font-weight:700; border-top:1px solid var(--linea); margin-top:4px; padding-top:6px; }
+  .pre { white-space: pre-line; font-size: 13px; }
+  label { display:block; font-size: 13px; font-weight:600; margin: 10px 0 4px; }
+  input[type=text], input[type=file] { width:100%; padding:9px; border:1px solid var(--linea); border-radius:6px; font-size: 14px; background:#fff; }
+  .btn { display:inline-block; background: var(--azul); color:#fff; border:none; border-radius:6px; padding:10px 16px; font-size: 14px; font-weight:600; cursor:pointer; text-decoration:none; }
+  .btn.sec { background:#fff; color: var(--azul); border:1px solid var(--azul); }
+  .btn:disabled { opacity:.6; cursor: default; }
+  .msg { margin-top: 12px; padding: 10px; border-radius: 6px; font-size: 14px; display:none; }
+  .msg.show { display:block; }
+  .msg.ok { background:#e8f5e9; color: var(--ok); }
+  .msg.err { background:#ffebee; color: var(--err); }
+  .msg.aviso { background:#fff3e0; color: var(--aviso); }
+  .estado { display:inline-block; font-size:12px; padding:2px 8px; border-radius:10px; background:#e3f2fd; color: var(--azul); font-weight:600; }
+  .estado.cancelada { background:#ffebee; color: var(--err); }
+  .estado.facturada { background:#e8f5e9; color: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="cargando" class="card">Cargando orden de compra...</div>
+  <div id="contenido" style="display:none;">
+    <div class="card">
+      <h1 id="titulo">Orden de compra</h1>
+      <div class="sub" id="subtitulo"></div>
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn sec" id="btn-ver-pdf" target="_blank" rel="noopener">📄 Ver orden de compra (PDF)</a>
+        <a class="btn sec" id="btn-descargar-pdf">⬇ Descargar PDF</a>
+      </div>
+    </div>
+    <div class="card grid">
+      <div>
+        <h2>Datos de facturación</h2>
+        <div class="pre" id="datos-facturacion"></div>
+      </div>
+      <div>
+        <h2>Importante</h2>
+        <div class="sub">Facture a nombre de estos datos e indique en su factura la <b>Serie y Folio</b> de esta orden de compra. Después suba aquí el <b>PDF</b> y el <b>XML</b> de su factura.</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Partidas</h2>
+      <table>
+        <thead><tr><th class="num">Cant.</th><th>Descripción</th><th class="num ocultar-movil">Valor unitario</th><th class="num">Importe</th></tr></thead>
+        <tbody id="partidas"></tbody>
+      </table>
+      <div class="totales" id="totales"></div>
+    </div>
+    <div class="card" id="card-subir">
+      <h2>Subir factura</h2>
+      <div class="sub" id="ya-subida" style="display:none;"></div>
+      <label for="f-nombre">Su nombre *</label>
+      <input type="text" id="f-nombre" maxlength="255" placeholder="Quién sube la factura">
+      <label for="f-pdf">PDF de la factura *</label>
+      <input type="file" id="f-pdf" accept="application/pdf,.pdf">
+      <label for="f-xml">XML de la factura *</label>
+      <input type="file" id="f-xml" accept=".xml,text/xml,application/xml">
+      <div style="margin-top:14px;"><button class="btn" id="btn-enviar">Enviar factura</button></div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function api(fn, args){
+    return fetch('/api/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ args: args }) })
+      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error((j && j.error) || 'Error'); return j; }); });
+  }
+  function esc(t){ return String(t === null || t === undefined ? '' : t).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+  function dinero(n){ return Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fecha(iso){ if(!iso) return ''; var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); return m ? m[3] + '/' + m[2] + '/' + m[1] : iso; }
+  function msg(texto, clase){ var el = document.getElementById('msg'); el.innerHTML = texto; el.className = 'msg show ' + clase; }
+  function leer(file){
+    return new Promise(function(res, rej){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.onerror = function(){ rej(new Error('No se pudo leer el archivo.')); }; fr.readAsDataURL(file); });
+  }
+
+  function pintar(oc){
+    document.getElementById('cargando').style.display = 'none';
+    document.getElementById('contenido').style.display = '';
+    document.getElementById('titulo').textContent = 'Orden de compra ' + oc.serie + ' ' + oc.folio;
+    var estado = oc.estado === 'cancelada' ? '<span class="estado cancelada">Cancelada</span>' : (oc.estado === 'facturada' ? '<span class="estado facturada">Factura recibida</span>' : '<span class="estado">Pendiente de factura</span>');
+    document.getElementById('subtitulo').innerHTML = esc(oc.proveedor) + ' · Fecha ' + esc(fecha(oc.fecha)) + ' · ' + estado;
+    var urlPdf = '/oc/pdf?token=' + encodeURIComponent(token);
+    document.getElementById('btn-ver-pdf').href = urlPdf;
+    document.getElementById('btn-descargar-pdf').href = urlPdf + '&descargar=1';
+    var e = oc.empresa || {};
+    document.getElementById('datos-facturacion').textContent = [e.razonSocial, e.domicilio, e.rfc ? 'RFC: ' + e.rfc : '', e.usoCfdi ? 'Uso del CFDI: ' + e.usoCfdi : ''].filter(Boolean).join('\n');
+    document.getElementById('partidas').innerHTML = (oc.partidas || []).map(function(p){
+      return '<tr><td class="num">' + esc(p.cantidad) + '</td><td>' + esc(p.observaciones) + '</td><td class="num ocultar-movil">$' + dinero(p.precio) + '</td><td class="num">$' + dinero(p.importe) + '</td></tr>';
+    }).join('');
+    document.getElementById('totales').innerHTML =
+      '<div><span>Subtotal</span><span>$' + dinero(oc.subtotal) + '</span></div>' +
+      '<div><span>Descuentos</span><span>$' + dinero(oc.descuento) + '</span></div>' +
+      '<div><span>I.V.A.</span><span>$' + dinero(oc.iva) + '</span></div>' +
+      '<div class="total"><span>Total</span><span>$' + dinero(oc.total) + '</span></div>';
+    if(oc.estado === 'cancelada'){
+      document.getElementById('card-subir').innerHTML = '<h2>Subir factura</h2><div class="msg show err">Esta orden de compra fue cancelada. Comuníquese con Chula Brand.</div>';
+      return;
+    }
+    if(oc.facturaEn){
+      var ya = document.getElementById('ya-subida');
+      ya.style.display = '';
+      ya.innerHTML = 'Ya recibimos su factura el ' + esc(new Date(oc.facturaEn).toLocaleString('es-MX')) + (oc.facturaNombre ? ' (' + esc(oc.facturaNombre) + ')' : '') + '. Si hubo un error, puede volver a subirla y reemplazará a la anterior.';
+    }
+  }
+
+  document.getElementById('btn-enviar').addEventListener('click', function(){
+    var btn = this;
+    var nombre = document.getElementById('f-nombre').value.trim();
+    var pdf = document.getElementById('f-pdf').files[0];
+    var xml = document.getElementById('f-xml').files[0];
+    if(!nombre){ msg('Escriba su nombre.', 'err'); return; }
+    if(!pdf){ msg('Adjunte el PDF de la factura.', 'err'); return; }
+    if(!xml){ msg('Adjunte el XML de la factura.', 'err'); return; }
+    if(!/\.pdf$/i.test(pdf.name)){ msg('El primer archivo debe ser el PDF de la factura.', 'err'); return; }
+    if(!/\.xml$/i.test(xml.name)){ msg('El segundo archivo debe ser el XML de la factura.', 'err'); return; }
+    if(pdf.size > 15 * 1024 * 1024 || xml.size > 15 * 1024 * 1024){ msg('El archivo es demasiado grande (máximo 15 MB).', 'err'); return; }
+    btn.disabled = true; btn.textContent = 'Enviando...';
+    Promise.all([leer(pdf), leer(xml)])
+      .then(function(r){ return api('subirFacturaOc', [token, { nombre: nombre, pdf: r[0], xml: r[1] }]); })
+      .then(function(r){
+        btn.disabled = false; btn.textContent = 'Enviar factura';
+        if(!r || !r.success){ msg(esc((r && r.error) || 'No se pudo enviar.'), 'err'); return; }
+        var texto = '✔ Recibimos su factura. ¡Gracias!';
+        if(r.avisos && r.avisos.length) msg(texto + '<br><br><b>Por favor revise:</b><br>' + r.avisos.map(esc).join('<br>'), 'aviso');
+        else msg(texto, 'ok');
+        document.getElementById('f-pdf').value = ''; document.getElementById('f-xml').value = '';
+      })
+      .catch(function(err){ btn.disabled = false; btn.textContent = 'Enviar factura'; msg(esc(err.message || 'No se pudo enviar. Intente de nuevo.'), 'err'); });
+  });
+
+  if(!token){ document.getElementById('cargando').textContent = 'Falta el enlace completo de la orden de compra.'; return; }
+  api('getOcPublica', [token]).then(function(r){
+    if(!r || !r.success){ document.getElementById('cargando').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+    pintar(r);
+  }).catch(function(){ document.getElementById('cargando').textContent = 'No se pudo cargar la orden de compra. Intente más tarde.'; });
+})();
+</script>
+</body>
+</html>

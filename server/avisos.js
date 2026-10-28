@@ -285,6 +285,24 @@ function avisarRecorrido_(tipo, avanceId) {
   return p;
 }
 
+// Aviso genérico (oct-2026: "llegó la factura de la OC ..."). lineas = [[etiqueta, valor], ...].
+// No lanza errores y no hay que esperarla.
+function avisarTexto_(titulo, lineas, url, tag) {
+  const p = (async () => {
+    try {
+      const telegram = '🧾 <b>' + escHtml_(titulo) + '</b>\n' + (lineas || []).map(([k, v]) => k + ': <b>' + escHtml_(v) + '</b>').join('\n');
+      const push = { titulo: '🧾 ' + titulo, cuerpo: (lineas || []).map(([k, v]) => k + ': ' + v).join('\n'), url: url || '/panel', tag: tag || ('aviso-' + Date.now()) };
+      return await enviarATodos_({ telegram, push });
+    } catch (err) {
+      console.error('[avisos] No se pudo avisar "' + titulo + '":', err.message);
+      return null;
+    }
+  })();
+  enCurso_.add(p);
+  p.finally(() => enCurso_.delete(p));
+  return p;
+}
+
 // ---------- acciones del Panel (los permisos los revisa handlers.js) ----------
 async function getConfigAvisos_(nombreUsuario) {
   const claves = await clavesVapid_();
@@ -410,6 +428,7 @@ async function quitarTelegram_() {
 
 module.exports = {
   avisarRecorrido_,
+  avisarTexto_,
   esperarAvisos_,
   configurarUtilRecorrido_,
   armarAviso_,

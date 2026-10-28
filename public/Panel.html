@@ -20645,10 +20645,13 @@ function renderResultadoCot_(solicitudes){
   // El mailto se arma hasta este momento (no al generar la solicitud) para
   // respetar cualquier corrección que se haya hecho al enlace (por ejemplo,
   // cambiar "localhost" por la dirección de Tailscale antes de compartirlo).
-  // Se manda a la cuenta interna (COT_CORREO_PARA) con copia oculta a los
+  // (oct-2026, Carlos) Ya NO se manda a una cuenta fija con copia oculta:
+  // los correos del proveedor van directo en "Para". El remitente es la
+  // cuenta de correo configurada en la computadora donde se abre el Panel
+  // (un mailto: no puede elegir remitente).
+  // Antes: se mandaba a la cuenta interna con copia oculta a los
   // correos del proveedor que estén marcados, para no exponer entre ellos
   // las direcciones de los demás destinatarios.
-  const COT_CORREO_PARA = 'carlos.contreras@chulabrand.com';
   cont.querySelectorAll('.cot-res-btn-correo').forEach(function(btn){
     btn.addEventListener('click', function(){
       const idx = btn.dataset.idx;
@@ -20674,11 +20677,11 @@ function renderResultadoCot_(solicitudes){
       // "(No hay sugerencias)". Los navegadores/clientes de correo web (Gmail,
       // etc.) también aceptan punto y coma sin problema, así que usamos ese
       // separador para que funcione en ambos casos.
-      const bcc = correos.map(encodeURIComponent).join(';');
-      window.location.href = 'mailto:' + encodeURIComponent(COT_CORREO_PARA) + '?bcc=' + bcc + '&subject=' + asunto + '&body=' + cuerpo;
+      const para = correos.map(encodeURIComponent).join(';');
+      abrirMailto_('mailto:' + para + '?subject=' + asunto + '&body=' + cuerpo);
 
       if(statusEl){
-        statusEl.textContent = '✓ Se envió a tu programa de correo (' + COT_CORREO_PARA + ', con copia oculta a ' + correos.length + ' correo(s) del proveedor). Termina de enviarlo desde ahí.';
+        statusEl.textContent = '✓ Se abrió tu programa de correo con ' + correos.length + ' correo(s) del proveedor en "Para". Sale de la cuenta de correo de esta computadora; termina de enviarlo desde ahí.';
         statusEl.className = 'maq-modal-status cot-res-correo-status show ok';
       }
     });
@@ -20961,6 +20964,8 @@ const ocplOverlay = document.getElementById('ocpl-modal-overlay');
 let OCP_ORDEN_ACTUAL = null;
 let OCPL_DATOS = [];
 
+// Abre el programa de correo de ESTA computadora (aparte para poder probarlo).
+function abrirMailto_(url){ window.location.href = url; }
 function baseUrlPublica_(){ return PUBLIC_BASE_URL_CONFIG || window.location.origin; }
 function enlaceFacturaOc_(oc){ return baseUrlPublica_() + '/factura?token=' + oc.token; }
 function enlacePdfOc_(oc){ return baseUrlPublica_() + '/oc/pdf?token=' + oc.token; }
@@ -21013,9 +21018,10 @@ function enlazarAccionesOc_(cont, lista, alCambiar){
       const oc = porId[Number(btn.dataset.id)];
       // Outlook pide ";" entre direcciones (ver el correo de cotizaciones).
       const para = oc.correos.map(encodeURIComponent).join(';');
-      window.location.href = 'mailto:' + para + '?cc=' + encodeURIComponent('carlos.contreras@chulabrand.com') +
-        '&subject=' + encodeURIComponent('Orden de compra ' + oc.serie + ' ' + oc.folio + ' — ' + oc.empresa) +
-        '&body=' + encodeURIComponent(textoCorreoOc_(oc));
+      // Sin copia fija: sale de la cuenta de correo de esta computadora.
+      abrirMailto_('mailto:' + para +
+        '?subject=' + encodeURIComponent('Orden de compra ' + oc.serie + ' ' + oc.folio + ' — ' + oc.empresa) +
+        '&body=' + encodeURIComponent(textoCorreoOc_(oc)));
       marcarEnviada(oc);
     });
   });

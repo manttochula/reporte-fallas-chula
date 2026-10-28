@@ -1080,6 +1080,17 @@
   .refnec-item.refnec-pendiente{ border-color: rgba(232,135,30,0.5); background: rgba(232,135,30,0.08); }
   .refnec-item-texto{ flex:1 1 160px; min-width:0; overflow-wrap:anywhere; }
   .refnec-item{ flex-wrap:wrap; }
+  .ocx-tabla{ min-width:0 !important; }
+  #ocx-modal-overlay .table-wrap{ background:#fff; border:1px solid #e3e3e3; }
+  #ocx-modal-overlay .ocx-tabla thead th{ background:#f6f6f6; color:#555; position:sticky; top:0; z-index:1; }
+  #ocx-modal-overlay .ocx-tabla tbody td{ color:#222; background:#fff; border-bottom:1px solid #eee; opacity:1; }
+  #ocx-modal-overlay .ocx-tabla tbody tr:hover td{ background:#f7faff; }
+  .ocx-tabla td, .ocx-tabla th{ font-size:12px; padding:6px 8px; }
+  .ocx-destino-oc{ color:#2f6f3a; font-weight:600; }
+  .ocx-destino-gasto{ color:#7a4a17; font-weight:600; }
+  .ocx-destino-revisar{ color:#b3261e; font-weight:600; }
+  .ocx-ya{ color:#888; font-size:11.5px; }
+  .refnec-item-oc{ font-size:10.5px; padding:2px 6px; border-radius:3px; background: rgba(60,110,200,0.15); color:#2b5bb5; white-space:nowrap; }
   /* Varias fotos por orden (modal "Ver"): miniaturas + "Agregar más fotos" */
   .modal-fotos-extra{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
   .modal-fotos-extra:empty{ display:none; }
@@ -3139,6 +3150,7 @@
           <thead>
             <tr>
               <th>Nombre</th>
+              <th>Código en Comercial</th>
               <th>Correo</th>
               <th>Teléfono</th>
               <th>Contacto</th>
@@ -3153,6 +3165,7 @@
       <h3 class="ref-reporte-titulo">Solicitudes de cotización</h3>
       <div class="toolbar">
         <button class="export-btn" id="cot-add">+ Nueva solicitud</button>
+        <button class="export-btn" id="ocx-abrir" title="Arma el Excel (hoja Lote) para la carga masiva de Órdenes de Compra en CONTPAQi Comercial con las refacciones de precio autorizado">Exportar OC para CONTPAQi</button>
         <div class="cot-filtro-estatus" id="cot-filtro-estatus">
           <span class="cot-filtro-label">Estatus:</span>
           <button type="button" class="cot-filtro-chip active" data-estatus="pendiente">Pendiente</button>
@@ -3293,6 +3306,8 @@
         <h3 id="prov-modal-title">Agregar proveedor</h3>
         <input type="hidden" id="prov-f-id">
         <div class="maq-field"><label>Nombre *</label><input type="text" id="prov-f-nombre"></div>
+        <div class="maq-field"><label>Código en Comercial (CONTPAQi)</label><input type="text" id="prov-f-codigo-comercial" placeholder="Ej. 0283" maxlength="20">
+          <span class="mnt-subtext">El código de este proveedor en CONTPAQi Comercial (con sus ceros). Sin él, sus refacciones no se pueden exportar como OC.</span></div>
         <div class="maq-field-row">
           <div class="maq-field"><label>Correo</label><input type="text" id="prov-f-correo" placeholder="ejemplo@proveedor.com"></div>
           <div class="maq-field"><label>Teléfono</label><input type="text" id="prov-f-telefono"></div>
@@ -3316,6 +3331,43 @@
           <button class="maq-save-btn" id="prov-btn-save">Guardar</button>
         </div>
         <div class="maq-modal-status" id="prov-modal-status"></div>
+      </div>
+    </div>
+
+
+    <div class="maq-modal-overlay" id="ocx-modal-overlay">
+      <div class="maq-modal" style="max-width:1150px;width:96vw;">
+        <button class="maq-modal-close" id="ocx-modal-close">&times;</button>
+        <h3>Exportar OC para CONTPAQi</h3>
+        <div class="mnt-subtext" style="margin-bottom:10px;">Toma las refacciones con precio <b>autorizado</b> ("Aut" en las cotizaciones) y arma el Excel con la hoja <b>Lote</b> para tu macro. Una OC por proveedor y por orden. Precio sin IVA (con el descuento del proveedor ya aplicado). Las refacciones sin folio comercial van a la hoja <b>Gasto directo</b>; las de proveedores sin código en Comercial, a <b>Revisar</b> (esas no se marcan y vuelven a salir).</div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Serie</label><input type="text" id="ocx-serie" maxlength="10"></div>
+          <div class="maq-field"><label>Folio inicial *</label><input type="number" id="ocx-folio" min="1" step="1" placeholder="Ej. 101"></div>
+          <div class="maq-field"><label>Fecha de la OC *</label><input type="date" id="ocx-fecha"></div>
+          <div class="maq-field"><label>Fecha de entrega (opcional)</label><input type="date" id="ocx-fecha-entrega"></div>
+        </div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Concepto</label><input type="text" id="ocx-concepto"></div>
+          <div class="maq-field"><label>Almacén</label><input type="text" id="ocx-almacen"></div>
+        </div>
+        <div class="mnt-subtext" id="ocx-folio-ayuda" style="margin:-4px 0 8px;"></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:8px;"><input type="checkbox" id="ocx-incluir-exportadas" style="width:auto;"> Mostrar también las que ya se exportaron (para volver a mandarlas a propósito)</label>
+        <div class="summary" id="ocx-resumen"></div>
+        <div class="table-wrap" style="max-height:46vh;overflow:auto;">
+          <table class="ocx-tabla">
+            <thead><tr>
+              <th><input type="checkbox" id="ocx-todas" checked style="width:auto;" title="Todas"></th>
+              <th>Orden</th><th>Proveedor (código)</th><th>Refacción</th><th>Folio comercial</th>
+              <th>Cant.</th><th>Precio s/IVA</th><th>Total s/IVA</th><th>Va a</th><th>Ya exportada</th>
+            </tr></thead>
+            <tbody id="ocx-body"></tbody>
+          </table>
+        </div>
+        <div class="maq-modal-actions">
+          <button class="maq-save-btn" id="ocx-btn-generar">Generar Excel</button>
+        </div>
+        <div class="maq-modal-status" id="ocx-status"></div>
+        <div id="ocx-resultado"></div>
       </div>
     </div>
 
@@ -4200,7 +4252,7 @@ var PANEL_SOLO_EN_LINEA = {
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
-  agregarFotosOrden: true,
+  agregarFotosOrden: true, exportarOCContpaqi: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -4765,7 +4817,7 @@ function ocultarControlesSoloLectura(){
       '#ref-add', '.ref-btn-editar', '#ref-btn-save', '#ref-btn-delete',
       '#refcat-add', '.refcat-btn-editar', '#refcat-btn-save', '#refcat-btn-delete',
       '#marca-add', '.marca-btn-editar', '#marca-btn-save', '#marca-btn-delete', '#modelo-agregar', '.modelo-quitar',
-      '#manpar-subir', '.manpar-btn-eliminar',
+      '#manpar-subir', '.manpar-btn-eliminar', '#ocx-abrir',
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn',
@@ -12405,7 +12457,7 @@ function abrirModalRefaccionesNecesarias(orden){
       if(!result) return;
       if((result.items || []).length > 0){
         REFNEC_LISTA_TRABAJO = result.items.map(function(it){
-          return { id: it.id, texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, origen: it.origen,
+          return { id: it.id, texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, origen: it.origen, oc: it.oc || null,
             entregado: !!it.entregado, entregadoPor: it.entregadoPor || '', entregadoEn: it.entregadoEn || null };
         });
       } else if((result.sugeridas || []).length > 0){
@@ -12469,6 +12521,7 @@ function renderRefnecLista(){
       <span class="refnec-item-texto">${escapeHtml(it.texto)}</span>
       <span class="refnec-item-cantidad">×<input type="number" class="refnec-item-cantidad-input" min="0.01" step="0.01" value="${cantidadValor}" onclick="event.stopPropagation()" oninput="actualizarCantidadRefnec(${idx}, this.value)"></span>
       <span class="refnec-item-badge">${badge}</span>
+      ${it.oc ? '<span class="refnec-item-oc" title="Exportada a CONTPAQi ' + escapeHtml((it.oc.fecha || '') + ' por ' + (it.oc.por || '')) + '">' + (it.oc.tipo === 'oc' ? 'OC ' + escapeHtml(it.oc.serie + ' ' + it.oc.folio) : 'Gasto directo') + '</span>' : ''}
       ${entregadoHtml}
       ${btnAgregar}
       <button type="button" class="refnec-item-btn refnec-item-quitar" onclick="quitarItemRefnec(${idx})">Quitar</button>
@@ -19763,7 +19816,7 @@ let ALL_PROVEEDORES = [];
 
 function cargarProveedores(callback){
   const tbody = document.getElementById('prov-table-body');
-  tbody.innerHTML = '<tr><td colspan="6"><div class="empty">Cargando...</div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
     .withSuccessHandler(function(records){
       PROVEEDORES_CARGADOS = true;
@@ -19773,7 +19826,7 @@ function cargarProveedores(callback){
       if(typeof callback === 'function') callback();
     })
     .withFailureHandler(function(){
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty">No se pudo cargar el catálogo de proveedores.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No se pudo cargar el catálogo de proveedores.</div></td></tr>';
     })
     .getProveedores(ACCESS_CODE, PANEL_USUARIO);
 }
@@ -19782,7 +19835,7 @@ function getProveedoresFiltrados(){
   const q = (document.getElementById('prov-search').value || '').trim().toUpperCase();
   if(!q) return ALL_PROVEEDORES;
   return ALL_PROVEEDORES.filter(function(p){
-    const haystack = [p.Nombre, p.Correo, p.Marcas].join(' ').toUpperCase();
+    const haystack = [p.Nombre, p.CodigoComercial, p.Correo, p.Marcas].join(' ').toUpperCase();
     return haystack.indexOf(q) !== -1;
   });
 }
@@ -19792,7 +19845,7 @@ function renderProveedores(){
   const records = getProveedoresFiltrados();
   document.getElementById('prov-summary').textContent = records.length + ' de ' + ALL_PROVEEDORES.length + ' proveedores';
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">No hay proveedores que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No hay proveedores que coincidan.</div></td></tr>';
     return;
   }
   tbody.innerHTML = records.map(function(p){
@@ -19800,6 +19853,7 @@ function renderProveedores(){
     return `
     <tr>
       <td>${escapeHtml(p.Nombre)}</td>
+      <td>${p.CodigoComercial ? escapeHtml(p.CodigoComercial) : '<span class="mnt-subtext" style="display:inline;">— falta</span>'}</td>
       <td>${escapeHtml(p.Correo || '—')}</td>
       <td>${escapeHtml(p.Telefono || '—')}</td>
       <td>${escapeHtml(p.Contacto || '—')}</td>
@@ -19863,6 +19917,7 @@ document.getElementById('prov-cont-agregar').addEventListener('click', function(
 function limpiarModalProveedor(){
   document.getElementById('prov-f-id').value = '';
   document.getElementById('prov-f-nombre').value = '';
+  document.getElementById('prov-f-codigo-comercial').value = '';
   document.getElementById('prov-f-correo').value = '';
   document.getElementById('prov-f-telefono').value = '';
   document.getElementById('prov-f-contacto').value = '';
@@ -19881,6 +19936,7 @@ function abrirModalProveedor(prov){
     document.getElementById('prov-modal-title').textContent = 'Editar proveedor';
     document.getElementById('prov-f-id').value = prov.Id;
     document.getElementById('prov-f-nombre').value = prov.Nombre || '';
+    document.getElementById('prov-f-codigo-comercial').value = prov.CodigoComercial || '';
     document.getElementById('prov-f-correo').value = prov.Correo || '';
     document.getElementById('prov-f-telefono').value = prov.Telefono || '';
     document.getElementById('prov-f-contacto').value = prov.Contacto || '';
@@ -19927,6 +19983,7 @@ document.getElementById('prov-btn-save').addEventListener('click', function(){
     contacto: document.getElementById('prov-f-contacto').value.trim(),
     marcas: document.getElementById('prov-f-marcas').value.trim(),
     notas: document.getElementById('prov-f-notas').value.trim(),
+    codigoComercial: document.getElementById('prov-f-codigo-comercial').value.trim(),
     contactos: provFormContactos
   };
 
@@ -20482,6 +20539,173 @@ document.getElementById('cot-btn-generar').addEventListener('click', function(){
       statusEl.className = 'maq-modal-status show err';
     })
     .crearSolicitudesCotizacion(ACCESS_CODE, PANEL_USUARIO, datos);
+});
+
+
+// ---------------------------------------------------------------
+// Exportar OC para CONTPAQi (oct-2026): ver exportarOCContpaqi en el
+// servidor. Lista para palomear las partidas autorizadas pendientes; arma el
+// .xlsx (hojas Lote / Gasto directo / Revisar) y lo descarga.
+// ---------------------------------------------------------------
+let OCX_PARTIDAS = [];
+let OCX_SELECCION = {}; // respuestaItemId -> true
+const ocxOverlay = document.getElementById('ocx-modal-overlay');
+
+function ocxHoy_(){
+  const d = new Date();
+  const pad = function(n){ return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+function ocxDinero_(n){ return n === null || n === undefined || isNaN(n) ? '—' : '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+function abrirModalOcx(){
+  document.getElementById('ocx-status').textContent = '';
+  document.getElementById('ocx-status').className = 'maq-modal-status';
+  document.getElementById('ocx-resultado').innerHTML = '';
+  document.getElementById('ocx-fecha').value = ocxHoy_();
+  document.getElementById('ocx-fecha-entrega').value = '';
+  document.getElementById('ocx-incluir-exportadas').checked = false;
+  ocxOverlay.classList.add('open');
+  cargarPartidasOcx_(true);
+}
+
+function cargarPartidasOcx_(conConfig){
+  const body = document.getElementById('ocx-body');
+  body.innerHTML = '<tr><td colspan="10"><div class="empty">Cargando...</div></td></tr>';
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ body.innerHTML = '<tr><td colspan="10"><div class="empty">' + escapeHtml((r && r.error) || 'No se pudo cargar.') + '</div></td></tr>'; return; }
+      OCX_PARTIDAS = r.partidas || [];
+      OCX_SELECCION = {};
+      // Palomeadas: las pendientes; las ya exportadas (o exportadas con otra
+      // cotización) quedan sin palomear para no mandarlas dos veces.
+      OCX_PARTIDAS.forEach(function(p){ if(!p.exportada && !p.exportadaOtra) OCX_SELECCION[p.respuestaItemId] = true; });
+      if(conConfig){
+        const c = r.config || {};
+        document.getElementById('ocx-serie').value = c.serie || 'VER';
+        document.getElementById('ocx-concepto').value = c.concepto || 'ORDEN DE COMPRA VRZ';
+        document.getElementById('ocx-almacen').value = c.almacen || 'ALMMTTO';
+        document.getElementById('ocx-folio').value = c.siguienteFolio || '';
+        document.getElementById('ocx-folio-ayuda').textContent = c.ultimoFolio
+          ? 'El último folio que se exportó fue ' + (c.serie || 'VER') + ' ' + c.ultimoFolio + '. Revisa en Comercial que el folio inicial no exista.'
+          : 'Escribe el primer folio libre en Comercial; después el sistema propone el siguiente.';
+      }
+      renderPartidasOcx_();
+    })
+    .withFailureHandler(function(){ body.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudo cargar. Revisa tu conexión.</div></td></tr>'; })
+    .getPartidasParaOC(ACCESS_CODE, PANEL_USUARIO, document.getElementById('ocx-incluir-exportadas').checked);
+}
+
+function renderPartidasOcx_(){
+  const body = document.getElementById('ocx-body');
+  if(!OCX_PARTIDAS.length){
+    body.innerHTML = '<tr><td colspan="10"><div class="empty">No hay refacciones con precio autorizado pendientes de exportar. Autoriza precios en las cotizaciones ("Aut").</div></td></tr>';
+    renderResumenOcx_();
+    return;
+  }
+  body.innerHTML = OCX_PARTIDAS.map(function(p){
+    const destino = p.destino === 'oc' ? '<span class="ocx-destino-oc">OC</span>'
+      : p.destino === 'gasto' ? '<span class="ocx-destino-gasto">Gasto directo</span>'
+      : '<span class="ocx-destino-revisar">Revisar</span><div class="mnt-subtext">' + escapeHtml(p.motivo) + '</div>';
+    let ya = '';
+    if(p.exportada) ya = '<span class="ocx-ya">' + (p.exportada.tipo === 'oc' ? 'OC ' + escapeHtml(p.exportada.serie + ' ' + p.exportada.folio) : 'Gasto directo') + '<br>' + escapeHtml((p.exportada.fecha || '') + ' · ' + (p.exportada.por || '')) + '</span>';
+    else if(p.exportadaOtra) ya = '<span class="ocx-ya">Esta pieza de la orden ya salió con otra cotización' + (p.exportadaOtra.tipo === 'oc' ? ' (OC ' + escapeHtml(p.exportadaOtra.serie + ' ' + p.exportadaOtra.folio) + ')' : '') + '</span>';
+    return '<tr>' +
+      '<td><input type="checkbox" class="ocx-chk" data-id="' + p.respuestaItemId + '"' + (OCX_SELECCION[p.respuestaItemId] ? ' checked' : '') + ' style="width:auto;"></td>' +
+      '<td>' + escapeHtml(p.orden || '—') + (p.ordenUnidad ? '<div class="mnt-subtext">' + escapeHtml(p.ordenUnidad) + '</div>' : '') + '</td>' +
+      '<td>' + escapeHtml(p.proveedor) + ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(p.codigoComercial || 'sin código') + ')</span></td>' +
+      '<td>' + escapeHtml(p.descripcion) + '<div class="mnt-subtext">' + escapeHtml([p.refaccionCodigo, p.noParte].filter(Boolean).join(' · ')) + '</div></td>' +
+      '<td>' + escapeHtml(p.folioComercial || '—') + '</td>' +
+      '<td>' + p.cantidad + '</td>' +
+      '<td>' + ocxDinero_(p.precio) + '</td>' +
+      '<td>' + ocxDinero_(p.precio === null ? null : p.precio * p.cantidad) + '</td>' +
+      '<td>' + destino + '</td>' +
+      '<td>' + ya + '</td></tr>';
+  }).join('');
+  body.querySelectorAll('.ocx-chk').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      if(cb.checked) OCX_SELECCION[cb.dataset.id] = true; else delete OCX_SELECCION[cb.dataset.id];
+      renderResumenOcx_();
+    });
+  });
+  renderResumenOcx_();
+}
+
+function renderResumenOcx_(){
+  const sel = OCX_PARTIDAS.filter(function(p){ return OCX_SELECCION[p.respuestaItemId]; });
+  const grupos = {};
+  sel.filter(function(p){ return p.destino === 'oc'; }).forEach(function(p){ grupos[p.proveedorId + '|' + p.orden] = true; });
+  const nOc = Object.keys(grupos).length;
+  const folio = Number(document.getElementById('ocx-folio').value);
+  const serie = document.getElementById('ocx-serie').value.trim().toUpperCase();
+  const rango = nOc && folio ? ' (folios ' + serie + ' ' + folio + (nOc > 1 ? '–' + (folio + nOc - 1) : '') + ')' : '';
+  const nGasto = sel.filter(function(p){ return p.destino === 'gasto'; }).length;
+  const nRev = sel.filter(function(p){ return p.destino === 'revisar'; }).length;
+  document.getElementById('ocx-resumen').textContent = sel.length + ' de ' + OCX_PARTIDAS.length + ' partidas palomeadas → ' +
+    nOc + ' OC' + rango + ', ' + nGasto + ' a gasto directo, ' + nRev + ' a revisar.';
+  document.getElementById('ocx-todas').checked = sel.length === OCX_PARTIDAS.length && OCX_PARTIDAS.length > 0;
+}
+
+document.getElementById('ocx-abrir').addEventListener('click', abrirModalOcx);
+document.getElementById('ocx-modal-close').addEventListener('click', function(){ ocxOverlay.classList.remove('open'); });
+ocxOverlay.addEventListener('click', function(e){ if(e.target === ocxOverlay) ocxOverlay.classList.remove('open'); });
+document.getElementById('ocx-incluir-exportadas').addEventListener('change', function(){ cargarPartidasOcx_(false); });
+document.getElementById('ocx-folio').addEventListener('input', renderResumenOcx_);
+document.getElementById('ocx-serie').addEventListener('input', renderResumenOcx_);
+document.getElementById('ocx-todas').addEventListener('change', function(){
+  const marcar = this.checked;
+  OCX_SELECCION = {};
+  if(marcar) OCX_PARTIDAS.forEach(function(p){ OCX_SELECCION[p.respuestaItemId] = true; });
+  renderPartidasOcx_();
+});
+
+function descargarBase64Ocx_(base64, nombre){
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+document.getElementById('ocx-btn-generar').addEventListener('click', function(){
+  const st = document.getElementById('ocx-status');
+  const ids = Object.keys(OCX_SELECCION).map(Number);
+  const yaExportadas = OCX_PARTIDAS.filter(function(p){ return OCX_SELECCION[p.respuestaItemId] && (p.exportada || p.exportadaOtra); }).length;
+  if(!ids.length){ st.textContent = 'Palomea al menos una partida.'; st.className = 'maq-modal-status show err'; return; }
+  if(yaExportadas && !confirm('Palomeaste ' + yaExportadas + ' partida(s) que YA se habían exportado. Si sigues, se vuelven a mandar con el folio nuevo. ¿Continuar?')) return;
+  const datos = {
+    respuestaItemIds: ids,
+    serie: document.getElementById('ocx-serie').value,
+    folioInicial: Number(document.getElementById('ocx-folio').value),
+    fecha: document.getElementById('ocx-fecha').value,
+    fechaEntrega: document.getElementById('ocx-fecha-entrega').value,
+    concepto: document.getElementById('ocx-concepto').value,
+    almacen: document.getElementById('ocx-almacen').value
+  };
+  const btn = this;
+  btn.disabled = true; btn.textContent = 'Generando...';
+  st.textContent = ''; st.className = 'maq-modal-status';
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false; btn.textContent = 'Generar Excel';
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo generar.'; st.className = 'maq-modal-status show err'; return; }
+      descargarBase64Ocx_(r.archivoBase64, r.nombreArchivo);
+      st.textContent = 'Listo: se descargó ' + r.nombreArchivo + '.';
+      st.className = 'maq-modal-status show ok';
+      document.getElementById('ocx-resultado').innerHTML =
+        '<div class="mnt-subtext" style="margin-top:8px;"><b>' + r.ocs.length + ' OC:</b> ' +
+        (r.ocs.map(function(o){ return escapeHtml(o.serie + ' ' + o.folio + ' — ' + o.proveedor + ' (' + o.codigoProveedor + '), orden ' + (o.orden || '—') + ', ' + o.partidas + ' partida(s)'); }).join('<br>') || '—') +
+        '<br><b>Gasto directo:</b> ' + r.gasto + ' partida(s).' +
+        (r.revisar.length ? '<br><b>Revisar (no se exportaron):</b> ' + r.revisar.map(function(x){ return escapeHtml((x.orden || '') + ' ' + x.descripcion + ' — ' + x.motivo); }).join('<br>') : '') + '</div>';
+      cargarPartidasOcx_(true);
+    })
+    .withFailureHandler(function(e){ btn.disabled = false; btn.textContent = 'Generar Excel'; st.textContent = (e && e.message) || 'No se pudo generar. Intenta de nuevo.'; st.className = 'maq-modal-status show err'; })
+    .exportarOCContpaqi(ACCESS_CODE, PANEL_USUARIO, datos);
 });
 
 // --- Ver detalle de una solicitud (respuesta del proveedor + aplicar precios) ---

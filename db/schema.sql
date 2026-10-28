@@ -2964,3 +2964,40 @@ CREATE TABLE IF NOT EXISTS reportes_fotos (
   creado_en   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_reportes_fotos_orden (orden)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Exportar OC para CONTPAQi Comercial (oct-2026).
+-- proveedores.codigo_comercial: código del proveedor EN COMERCIAL (ej. 0283 =
+-- SAMEI). Texto, conserva ceros a la izquierda.
+-- oc_exportaciones: qué partidas autorizadas (una por respuesta de cotización
+-- autorizada) ya se mandaron, para no exportarlas dos veces. tipo = 'oc'
+-- (con serie/folio de la OC) o 'gasto_directo' (refacción sin folio comercial).
+-- ------------------------------------------------------------
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'proveedores' AND column_name = 'codigo_comercial'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE proveedores ADD COLUMN codigo_comercial VARCHAR(20) DEFAULT NULL',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;
+
+CREATE TABLE IF NOT EXISTS oc_exportaciones (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  respuesta_item_id INT NOT NULL,
+  orden             VARCHAR(20)  DEFAULT NULL,
+  refaccion_id      INT          DEFAULT NULL,
+  proveedor_id      INT          DEFAULT NULL,
+  tipo              VARCHAR(20)  NOT NULL,        -- 'oc' | 'gasto_directo'
+  serie             VARCHAR(10)  DEFAULT NULL,
+  folio             INT          DEFAULT NULL,
+  fecha_oc          DATE         DEFAULT NULL,
+  cantidad          DECIMAL(10,2) DEFAULT NULL,
+  precio            DECIMAL(12,4) DEFAULT NULL,
+  exportado_por     VARCHAR(255) DEFAULT NULL,
+  exportado_en      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_oc_export_respuesta_item (respuesta_item_id),
+  INDEX idx_oc_export_orden_ref (orden, refaccion_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

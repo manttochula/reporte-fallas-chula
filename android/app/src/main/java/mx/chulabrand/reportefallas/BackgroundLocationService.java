@@ -105,6 +105,8 @@ public class BackgroundLocationService extends Service implements LocationListen
     private boolean reintentoProgramado = false;
     /** Hora de la última lectura buena del GPS (ver FiltroUbicacion). */
     private volatile long ultimoGpsMs = 0L;
+    /** Hora del último punto guardado (para el latido, ver FiltroUbicacion.LATIDO_MS). */
+    private volatile long ultimoPuntoMs = 0L;
 
     @Override
     public void onCreate() {
@@ -136,12 +138,15 @@ public class BackgroundLocationService extends Service implements LocationListen
         if (idAnterior != null && !idAnterior.equals(idLocal)) creadoEnServidor = false;
 
         startForeground(NOTIF_ID, construirNotificacion_());
+        if (ultimoPuntoMs == 0L) ultimoPuntoMs = System.currentTimeMillis();
         iniciarCapturaGps_();
         // Reintento periódico: si el tractor se queda parado (sin puntos
         // nuevos) igual se manda lo pendiente cuando regrese la señal.
         if (!reintentoProgramado) {
             reintentoProgramado = true;
             envioEjecutor.scheduleWithFixedDelay(this::enviarPendientes_, 5, 60, TimeUnit.SECONDS);
+            // Latido: revisa cada minuto si ya pasaron 5 min sin punto.
+            envioEjecutor.scheduleWithFixedDelay(this::revisarLatido_, 60, 60, TimeUnit.SECONDS);
         }
         return START_STICKY;
     }
@@ -202,6 +207,33 @@ public class BackgroundLocationService extends Service implements LocationListen
         procesarUbicacion_(location);
     }
 
+    /** Latido: si el tractor lleva 5 min sin moverse, guarda un punto con la
+     *  posición ACTUAL (lectura reciente del GPS). Si el GPS no da una
+     *  lectura nueva no se guarda nada: en el Panel eso sale "sin datos". */
+    private void revisarLatido_() {
+        try {
+            if (idLocal == null || !FiltroUbicacion.tocaLatido(System.currentTimeMillis(), ultimoPuntoMs)) return;
+            if (fusedCliente != null) {
+                fusedCliente.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener(loc -> procesarLatido_(loc));
+            } else if (locationManager != null) {
+                Location loc = null;
+                try { loc = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER); } catch (SecurityException ignored) { }
+                procesarLatido_(loc);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "No se pudo revisar el latido.", e);
+        }
+    }
+
+    private void procesarLatido_(Location loc) {
+        if (loc == null) return;
+        long ahora = System.currentTimeMillis();
+        if (!FiltroUbicacion.tocaLatido(ahora, ultimoPuntoMs)) return; // ya llegó un punto normal
+        if (!FiltroUbicacion.lecturaSirveParaLatido(ahora, loc.getTime())) return;
+        procesarUbicacion_(loc);
+    }
+
     private void procesarUbicacion_(Location location) {
         if (location == null || idLocal == null) return;
         final long ahora = System.currentTimeMillis();
@@ -214,6 +246,7 @@ public class BackgroundLocationService extends Service implements LocationListen
         final long t = System.currentTimeMillis();
         final long s = AlmacenAvance.agregarPunto(this, idLocal, lat, lng, t);
         if (s <= 0) return;
+        ultimoPuntoMs = t;
         Listener l = listenerActivo;
         if (l != null) {
             l.onNuevoPunto(idLocal, s, lat, lng, t);

@@ -19,6 +19,23 @@ public final class FiltroUbicacion {
 
     private FiltroUbicacion() {}
 
+    /** Latido (oct-2026): si el tractor está parado no llegan lecturas
+     *  (no se movió 2 m) y el Panel no distinguía "parado" de "el celular
+     *  dejó de mandar". Cada LATIDO_MS sin punto se guarda uno con la
+     *  posición actual, aunque no se haya movido. */
+    public static final long LATIDO_MS = 5 * 60 * 1000L;
+    /** La lectura para el latido debe ser reciente (si el GPS no da una
+     *  posición nueva, mejor no mandar nada: eso es "sin datos"). */
+    public static final long LATIDO_LECTURA_MAX_EDAD_MS = 2 * 60 * 1000L;
+
+    public static boolean tocaLatido(long ahoraMs, long ultimoPuntoMs) {
+        return ultimoPuntoMs > 0 && ahoraMs - ultimoPuntoMs >= LATIDO_MS;
+    }
+
+    public static boolean lecturaSirveParaLatido(long ahoraMs, long horaLecturaMs) {
+        return horaLecturaMs > 0 && ahoraMs - horaLecturaMs <= LATIDO_LECTURA_MAX_EDAD_MS && horaLecturaMs <= ahoraMs + 60000L;
+    }
+
     public static boolean aceptar(String proveedor, boolean tienePrecision, float precisionMetros,
                                   long ahoraMs, long ultimoGpsMs) {
         if (tienePrecision && precisionMetros > PRECISION_MAX_METROS) return false;

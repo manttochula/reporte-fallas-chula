@@ -7429,7 +7429,7 @@ function ahHtmlResumenRango_(resp, titulo, colorDe, varios){
   if(grupos.length === 0) return html + '<div class="avance-aviso" style="padding:0;">Sin movimientos en ese horario.</div>';
   var minRal = resp.minutosRalenti || AH_RALENTI_MIN_DEFAULT;
   html += '<div class="table-wrap"><table><thead><tr>'
-    + '<th>Equipo / operador</th><th>Km</th><th>En movimiento</th><th>Ralentí (≥ ' + minRal + ' min)</th><th>Sin señal</th><th>Avance por cuadro</th>'
+    + '<th>Equipo / operador</th><th>Km</th><th>En movimiento</th><th>Ralentí (≥ ' + minRal + ' min)</th><th title="Tiempo en que no llegaron puntos del celular: sin señal, o más de 20 min sin ningún dato (GPS apagado, app cerrada). No cuenta como ralentí.">Sin señal / sin datos</th><th>Avance por cuadro</th>'
     + '</tr></thead><tbody>';
   html += grupos.map(function(g){
     var color = colorDe ? colorDe(g) : '#9A9D9E';

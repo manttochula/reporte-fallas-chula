@@ -2986,6 +2986,15 @@ var AVANCE_SESION_ID = null;
 var AVANCE_WATCH_ID = null;
 var AVANCE_WAKE_LOCK = null; // ver avanceSolicitarWakeLock_ -- mantiene la pantalla encendida mientras se registra avance
 var AVANCE_ULTIMO_PUNTO = null;
+// Latido (oct-2026): con el tractor parado no se guardan puntos (no se movió
+// 2 m), y en el Panel no se distinguía "parado" de "el celular dejó de
+// mandar". Ahora, si pasan AVANCE_LATIDO_MS sin punto, se guarda uno aunque
+// no se haya movido; así una parada real sale como ralentí y un hueco de
+// más de 20 min sin nada es "sin datos". Mismo criterio que el servicio
+// nativo (BackgroundLocationService.LATIDO_MS).
+var AVANCE_LATIDO_MS = 5 * 60 * 1000;
+var AVANCE_ULTIMO_PUNTO_MS = 0;
+var AVANCE_LATIDO_TIMER = null;
 var AVANCE_PUNTOS_SESION = [];
 
 // Instancia del mapa de Google (una sola vez, se reutiliza) + lo que se
@@ -3260,13 +3269,15 @@ function avanceRegistrarPunto_(lat, lng, s, t){
   if(!sesion) return Promise.resolve(); // ya se terminó -- se descarta cualquier punto tardío
   var nuevo = { lat: lat, lng: lng };
   if(s == null){
-    if(AVANCE_ULTIMO_PUNTO && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return Promise.resolve();
+    var esLatido = AVANCE_ULTIMO_PUNTO_MS > 0 && Date.now() - AVANCE_ULTIMO_PUNTO_MS >= AVANCE_LATIDO_MS;
+    if(AVANCE_ULTIMO_PUNTO && !esLatido && avanceDistanciaMetros_(AVANCE_ULTIMO_PUNTO, nuevo) < AVANCE_DISTANCIA_MINIMA_METROS) return Promise.resolve();
     s = AVANCE_SIGUIENTE_SEQ;
     t = Date.now();
   }
   if(s >= AVANCE_SIGUIENTE_SEQ) AVANCE_SIGUIENTE_SEQ = s + 1;
   AVANCE_PUNTOS_SESION.push(nuevo);
   AVANCE_ULTIMO_PUNTO = nuevo;
+  AVANCE_ULTIMO_PUNTO_MS = t || Date.now();
   avanceActualizarPolylineActual_();
   var chip = document.getElementById('avance-chip-estado');
   if(chip) chip.textContent = 'Registrando avance... (' + AVANCE_PUNTOS_SESION.length + ' puntos)';
@@ -3287,6 +3298,7 @@ function avanceRecargarTrazoActual_(){
   return avanceLeerPuntosLocales_(sesion.idLocal, 0).then(function(puntos){
     AVANCE_PUNTOS_SESION = puntos.map(function(p){ return { lat: p.lat, lng: p.lng }; });
     AVANCE_ULTIMO_PUNTO = AVANCE_PUNTOS_SESION.length ? AVANCE_PUNTOS_SESION[AVANCE_PUNTOS_SESION.length - 1] : null;
+    if(puntos.length && puntos[puntos.length - 1].t) AVANCE_ULTIMO_PUNTO_MS = Math.max(AVANCE_ULTIMO_PUNTO_MS, puntos[puntos.length - 1].t);
     if(puntos.length && puntos[puntos.length - 1].s >= AVANCE_SIGUIENTE_SEQ) AVANCE_SIGUIENTE_SEQ = puntos[puntos.length - 1].s + 1;
     avanceActualizarPolylineActual_();
     var chip = document.getElementById('avance-chip-estado');
@@ -3930,6 +3942,16 @@ function avanceArrancarGps_(sesion){
     if(AVANCE_WATCH_ID === null){
       AVANCE_WATCH_ID = navigator.geolocation.watchPosition(avanceNuevaPosicion_, avanceErrorPosicion_, { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
     }
+    // Latido: algunos navegadores no avisan nada si el celular no se mueve;
+    // cada minuto se revisa y, si ya toca, se pide la posición actual.
+    if(!AVANCE_ULTIMO_PUNTO_MS) AVANCE_ULTIMO_PUNTO_MS = Date.now();
+    if(AVANCE_LATIDO_TIMER === null){
+      AVANCE_LATIDO_TIMER = setInterval(function(){
+        if(!AVANCE_SESION_ACTUAL || AVANCE_WATCH_ID === null) return;
+        if(Date.now() - AVANCE_ULTIMO_PUNTO_MS < AVANCE_LATIDO_MS) return;
+        navigator.geolocation.getCurrentPosition(avanceNuevaPosicion_, function(){}, { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 });
+      }, 60000);
+    }
     avanceSolicitarWakeLock_();
   }
   if(avanceEsAppNativa_()){
@@ -4269,6 +4291,8 @@ function avanceDetenerRastreoSiActivo_(){
     navigator.geolocation.clearWatch(AVANCE_WATCH_ID);
     AVANCE_WATCH_ID = null;
   }
+  if(AVANCE_LATIDO_TIMER !== null){ clearInterval(AVANCE_LATIDO_TIMER); AVANCE_LATIDO_TIMER = null; }
+  AVANCE_ULTIMO_PUNTO_MS = 0;
   if(!sesion) return paro;
   AVANCE_SESION_ACTUAL = null;
   AVANCE_SESION_ID = null;
@@ -4398,6 +4422,7 @@ function avanceIniciarSesion_(datos){
     AVANCE_SESION_ID = sesion.idLocal;
     AVANCE_SIGUIENTE_SEQ = 1;
     AVANCE_ULTIMO_PUNTO = null;
+    AVANCE_ULTIMO_PUNTO_MS = 0;
     AVANCE_PUNTOS_SESION = [];
     if(AVANCE_POLYLINE_ACTUAL) AVANCE_POLYLINE_ACTUAL.setPath([]);
     if(AVANCE_MARCADOR_ACTUAL){ AVANCE_MARCADOR_ACTUAL.setMap(null); AVANCE_MARCADOR_ACTUAL = null; }

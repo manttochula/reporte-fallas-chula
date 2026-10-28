@@ -6515,6 +6515,13 @@ const RALENTI_RADIO_METROS = 25;
 const RALENTI_VELOCIDAD_MAX = 0.3; // m/s -- por debajo de esto, entre 2 puntos, "no avanzó"
 const RALENTI_MINUTOS_DEFAULT = 2;
 const HUECO_SIN_SENAL_MS = 10 * 60 * 1000; // un hueco > 10 min moviéndose = sin señal, no "en movimiento"
+// Oct-2026 (Carlos vio 3 h 22 min de ralentí con un celular que dejó de
+// mandar puntos a las 7:55): la app nueva manda un "latido" cada 5 min
+// aunque el tractor esté parado, así que un hueco de más de 20 min SIN
+// NINGÚN punto ya no se toma como ralentí sino como "sin datos" (columna
+// Sin señal), aunque el tractor aparezca en el mismo lugar. Aplica también
+// al final de un recorrido abierto (o cerrado) sin puntos recientes.
+const HUECO_SIN_DATOS_MS = 20 * 60 * 1000;
 
 function validarVentanasRango_(ventanas) {
   if (!Array.isArray(ventanas) || ventanas.length === 0) return null;
@@ -6621,6 +6628,11 @@ function calcularResumenRango_(sesiones, cuadros, ventanas, minutosRalenti, ahor
         const b = serie[k];
         const dt = b.t - a.t;
         if (dt <= 0) continue;
+        if (dt > HUECO_SIN_DATOS_MS) {
+          cerrarRacha();
+          g.sinSenalMs += dt;
+          continue;
+        }
         const d = distanciaMetros_(a, b);
         const parado = d <= RALENTI_RADIO_METROS && d / (dt / 1000) < RALENTI_VELOCIDAD_MAX
           && (!racha || distanciaMetros_(serie[racha.inicioIdx], b) <= RALENTI_RADIO_METROS);
@@ -9948,6 +9960,7 @@ async function quitarTelegram(code, nombreUsuario) {
 avisos.configurarUtilRecorrido_({ filtrarSaltosGps_, tramosDeRecorrido_, distanciaMetros_ });
 
 module.exports = {
+  HUECO_SIN_DATOS_MS,
   getIndicadorPreparacion,
   calcularIndicadorPreparacion_,
   marcarReporteClaro,

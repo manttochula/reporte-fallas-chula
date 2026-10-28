@@ -8188,7 +8188,7 @@ async function partidasOc_(ids) {
      LEFT JOIN maquinaria mq ON mq.codigo_unidad = rep.codigo_unidad
      LEFT JOIN empresas emp ON emp.id = mq.empresa_id
      LEFT JOIN oc_exportaciones x ON x.respuesta_item_id = ri.id
-     WHERE ri.autorizado = 1${filtroIds}
+     WHERE ri.autorizado = 1 AND s.estado <> 'cancelada'${filtroIds}
      ORDER BY s.orden, p.nombre, ref.descripcion`,
     filtroIds ? [ids.map(Number)] : []
   );

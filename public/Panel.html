@@ -346,6 +346,9 @@
   .ah-avance-act-pct{ font-size:24px; font-weight:700; margin:2px 0; }
   .ah-avance-act-sub{ font-size:11.5px; color:var(--text-dim); line-height:1.4; }
   .ah-avance-act .ah-prog-bar-track{ margin:6px 0 4px; }
+  .ah-avance-operadores td.ah-op-nombre{ font-weight:700; vertical-align:top; border-right:1px solid var(--line); }
+  .ah-avance-operadores tr.ah-op-total td{ font-weight:700; border-bottom:2px solid var(--line); }
+  .ah-avance-operadores td.num{ text-align:right; white-space:nowrap; }
   .ah-avance-act-ops{ border-top:1px solid var(--line); margin-top:8px; padding-top:6px; }
   .ah-avance-act-ops-tit{ font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); margin-bottom:4px; }
   .ah-avance-act-op{ display:flex; flex-wrap:wrap; justify-content:space-between; gap:0 8px; font-size:12px; padding:2px 0; }
@@ -3972,6 +3975,16 @@
           </div>
           <!-- Avance total por actividad (oct-2026): hectáreas de cuadros completados / hectáreas de la huerta, y abajo el mapa de esa actividad. -->
           <div id="ah-avance-actividades" class="ah-avance-actividades"></div>
+          <!-- Avance por operador (oct-2026): tabla aparte, por operador y debajo cada actividad con sus hectáreas. -->
+          <div id="ah-avance-operadores-wrap" style="display:none;">
+            <div class="avance-paso" style="margin:6px 0 6px;">Avance por operador</div>
+            <div class="table-wrap">
+              <table class="ah-avance-operadores">
+                <thead><tr><th>Operador</th><th>Actividad</th><th>Hectáreas</th><th>% de la huerta</th><th>Pasadas</th><th>Cuadros</th><th>Equipo(s)</th></tr></thead>
+                <tbody id="ah-avance-operadores-body"></tbody>
+              </table>
+            </div>
+          </div>
           <div id="ah-actividad-mapa-wrap" style="display:none;">
             <div class="ah-actividad-mapa-leyenda" id="ah-actividad-mapa-leyenda"></div>
             <div id="ah-actividad-mapa-google"></div>
@@ -8720,10 +8733,52 @@ function ahResumenPorActividad_(actividades, cuadros){
   }).sort(function(a, b){ return a.trabajo.localeCompare(b.trabajo, 'es'); }) };
 }
 
+// Por operador -> por actividad (suma todos sus equipos). Respeta el filtro
+// de actividad si hay uno elegido.
+function ahResumenPorOperador_(lista, filtroTrabajo){
+  var ops = {};
+  (lista || []).forEach(function(r){
+    if(filtroTrabajo && r.trabajo !== filtroTrabajo) return;
+    (r.porOperador || []).forEach(function(o){
+      var op = ops[o.operador] || (ops[o.operador] = { operador: o.operador, ha: 0, pct: 0, actividades: {} });
+      var act = op.actividades[r.trabajo] || (op.actividades[r.trabajo] = { trabajo: r.trabajo, ha: 0, pct: 0, pasadas: 0, cuadros: 0, equipos: [] });
+      act.ha += o.ha; act.pct += o.pct; act.pasadas += o.pasadas; act.cuadros = Math.max(act.cuadros, o.cuadros);
+      if(o.equipo && act.equipos.indexOf(o.equipo) === -1) act.equipos.push(o.equipo);
+      op.ha += o.ha; op.pct += o.pct;
+    });
+  });
+  return Object.keys(ops).map(function(k){
+    var op = ops[k];
+    op.actividades = Object.keys(op.actividades).map(function(t){ return op.actividades[t]; }).sort(function(a, b){ return b.ha - a.ha || a.trabajo.localeCompare(b.trabajo, 'es'); });
+    return op;
+  }).sort(function(a, b){ return a.operador.localeCompare(b.operador, 'es'); });
+}
+
+function ahRenderAvancePorOperador_(lista){
+  var wrap = document.getElementById('ah-avance-operadores-wrap');
+  var tbody = document.getElementById('ah-avance-operadores-body');
+  if(!wrap || !tbody) return;
+  var ops = ahResumenPorOperador_(lista, AH_ACTIVIDADES_FILTRO_TRABAJO);
+  if(!ops.length){ wrap.style.display = 'none'; tbody.innerHTML = ''; return; }
+  wrap.style.display = '';
+  var num = function(n, d){ return Number(n || 0).toFixed(d); };
+  tbody.innerHTML = ops.map(function(op){
+    var filas = op.actividades.map(function(a, i){
+      return '<tr>' + (i === 0 ? '<td class="ah-op-nombre" rowspan="' + (op.actividades.length + (op.actividades.length > 1 ? 1 : 0)) + '">👤 ' + escapeHtml(op.operador) + '</td>' : '')
+        + '<td>' + escapeHtml(a.trabajo) + '</td><td class="num">' + num(a.ha, 2) + ' ha</td><td class="num">' + num(a.pct, 1) + '%</td>'
+        + '<td class="num">' + num(a.pasadas, 1) + '</td><td class="num">' + a.cuadros + '</td><td>' + escapeHtml(a.equipos.join(', ')) + '</td></tr>';
+    });
+    if(op.actividades.length > 1) filas.push('<tr class="ah-op-total"><td>Total</td><td class="num">' + num(op.ha, 2) + ' ha</td><td class="num">' + num(op.pct, 1) + '%</td><td></td><td></td><td></td></tr>');
+    else filas[0] = filas[0].replace('<tr>', '<tr class="ah-op-total">');
+    return filas.join('');
+  }).join('');
+}
+
 function ahRenderAvancePorActividad_(){
   var cont = document.getElementById('ah-avance-actividades');
   if(!cont) return;
   var res = ahResumenPorActividad_(AH_ACTIVIDADES, AH_CUADROS);
+  ahRenderAvancePorOperador_(res.lista);
   if(!res.lista.length){ cont.innerHTML = ''; ahRenderMapaActividad_(); return; }
   cont.innerHTML = res.lista.map(function(r){
     var activa = AH_ACTIVIDADES_FILTRO_TRABAJO === r.trabajo;
@@ -8734,11 +8789,6 @@ function ahRenderAvancePorActividad_(){
       + '<div class="ah-avance-act-sub">' + ahTextoHectareas_(r.haCompletadas) + ' completadas de ' + ahTextoHectareas_(res.totalHa) + ' de la huerta<br>'
       + r.completados + ' de ' + r.cuadros + ' cuadro(s) completos' + (r.enAvance ? ' · ' + r.enAvance + ' en avance' : '')
       + '<br>Contando lo parcial: ' + r.pctConParcial + '%</div>'
-      + (r.porOperador.length ? '<div class="ah-avance-act-ops"><div class="ah-avance-act-ops-tit">Avance por operador</div>' + r.porOperador.map(function(o){
-          return '<div class="ah-avance-act-op"><span>👤 ' + escapeHtml(o.operador) + (o.equipo ? ' <span class="ah-avance-act-eq">🚜 ' + escapeHtml(o.equipo) + '</span>' : '') + '</span>'
-            + '<b>' + ahTextoHectareas_(o.ha) + ' · ' + o.pct + '%</b>'
-            + '<span class="ah-avance-act-eq">' + o.pasadas + ' pasadas en ' + o.cuadros + ' cuadro(s)</span></div>';
-        }).join('') + '</div>' : '')
       + '</button>';
   }).join('');
   ahRenderMapaActividad_();

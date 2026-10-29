@@ -9619,7 +9619,10 @@ async function responderCotizacion(token, data) {
       // IVA (%): este sí lo captura el proveedor pieza por pieza.
       let ivaPct = null;
       if (it.ivaPct !== '' && it.ivaPct !== undefined && it.ivaPct !== null) {
-        const iv = Number(it.ivaPct);
+        let iv = Number(it.ivaPct);
+        // Oct-2026: un proveedor puso 0.16 queriendo decir 16 %. Un IVA
+        // mayor a 0 y de 1 o menos se toma como fracción (0.16 -> 16).
+        if (!isNaN(iv) && iv > 0 && iv <= 1) iv = Math.round(iv * 10000) / 100;
         if (!isNaN(iv) && iv >= 0 && iv <= 100) ivaPct = iv;
       }
       await pool.query(
@@ -9638,6 +9641,55 @@ async function responderCotizacion(token, data) {
   } catch (err) {
     return { success: false, error: err.toString() };
   }
+}
+
+// Staff (oct-2026, Carlos): corregir lo que capturó el proveedor en una
+// pieza de su cotización -- precio unitario (sin IVA), IVA (%) y fecha de
+// entrega -- p.ej. cuando puso el IVA como 0.16 o el precio de las 2 piezas
+// en vez del unitario. Queda en auditoría y en las observaciones de la
+// orden. No se deja si esa pieza ya va en una OC al proveedor (cancélala
+// primero). Si la pieza estaba autorizada, se actualiza el precio de
+// referencia del catálogo.
+async function corregirRespuestaItem(code, nombreUsuario, respuestaItemId, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  data = data || {};
+  const id = Number(respuestaItemId) || 0;
+  const [rows] = await pool.query(
+    `SELECT ri.id, ri.precio_cotizado, ri.iva_pct, ri.fecha_entrega, ri.autorizado, r.descuento_pct, r.nombre_responde,
+            sci.refaccion_id, ref.descripcion, s.folio, s.orden
+     FROM solicitud_cotizacion_respuesta_items ri
+     JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+     JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+     JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+     JOIN refacciones ref ON ref.id = sci.refaccion_id
+     WHERE ri.id = ?`,
+    [id]
+  );
+  if (!rows.length) return { success: false, error: 'No se encontró esa cotización.' };
+  const x = rows[0];
+  const [enOc] = await pool.query(
+    "SELECT o.serie, o.folio FROM ordenes_compra_items oi JOIN ordenes_compra o ON o.id = oi.oc_id WHERE oi.respuesta_item_id = ? AND o.estado <> 'cancelada' LIMIT 1",
+    [id]
+  );
+  if (enOc.length) return { success: false, error: 'Esta pieza ya va en la OC ' + enOc[0].serie + ' ' + enOc[0].folio + '. Cancela esa OC para poder corregir el precio.' };
+  const precio = data.precio === '' || data.precio === null || data.precio === undefined ? null : Number(data.precio);
+  if (precio === null || !Number.isFinite(precio) || precio < 0) return { success: false, error: 'Escribe el precio unitario (sin IVA).' };
+  let iva = data.ivaPct === '' || data.ivaPct === null || data.ivaPct === undefined ? null : Number(data.ivaPct);
+  if (iva !== null && Number.isFinite(iva) && iva > 0 && iva <= 1) iva = Math.round(iva * 10000) / 100;
+  if (iva !== null && (!Number.isFinite(iva) || iva < 0 || iva > 100)) return { success: false, error: 'El IVA es un porcentaje entre 0 y 100 (ej. 16).' };
+  let fecha = data.fechaEntrega === undefined ? (x.fecha_entrega ? fechaSoloOrNull(x.fecha_entrega) : null) : ((data.fechaEntrega || '').toString().slice(0, 10) || null);
+  if (fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { success: false, error: 'La fecha de entrega no es válida.' };
+  await pool.query('UPDATE solicitud_cotizacion_respuesta_items SET precio_cotizado = ?, iva_pct = ?, fecha_entrega = ? WHERE id = ?', [precio, iva, fecha, id]);
+  if (x.autorizado) {
+    const { PrecioConDescuento } = calcularPreciosCotizados(precio, x.descuento_pct, null);
+    await pool.query('UPDATE refacciones SET precio = ? WHERE id = ?', [PrecioConDescuento, x.refaccion_id]);
+  }
+  const antes = '$' + (x.precio_cotizado === null ? '—' : Number(x.precio_cotizado).toFixed(2)) + ' IVA ' + (x.iva_pct === null ? '—' : Number(x.iva_pct)) + '%';
+  const despues = '$' + precio.toFixed(2) + ' IVA ' + (iva === null ? '—' : iva) + '%';
+  await registrarAuditoria_('solicitud_cotizacion_respuesta_items', String(id), 'corregir', nombreUsuario,
+    x.folio + ' · ' + x.descripcion + ' (' + x.nombre_responde + '): ' + antes + ' -> ' + despues);
+  if (x.orden) await agregarObservacionOrden_(x.orden, (nombreUsuario || 'Alguien') + ' corrigió la cotización ' + x.folio + ' de ' + x.descripcion + ': ' + antes + ' → ' + despues + '.');
+  return { success: true, precio, ivaPct: iva, fechaEntrega: fecha };
 }
 
 // Staff: copia los precios de UNA respuesta específica (una de posiblemente
@@ -10289,6 +10341,7 @@ module.exports = {
   guardarTipoUnidad,
   eliminarTipoUnidad,
   getEmpresasCatalogo,
+  corregirRespuestaItem,
   getUmbralesPreventivo,
   guardarUmbralesPreventivo,
   leerUmbralesPreventivo_,

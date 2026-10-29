@@ -234,7 +234,7 @@ function renderSolicitud(){
           <tr>
             <th>Refacción</th>
             <th>Cantidad</th>
-            <th>Precio unitario</th>
+            <th>Precio unitario<br><span style="text-transform:none;font-weight:400;">(de UNA pieza, sin IVA)</span></th>
             <th>IVA (%)</th>
             <th>Fecha de entrega</th>
             <th>Comentario</th>
@@ -397,6 +397,14 @@ function enviarCotizacion(){
     return;
   }
 
+  // Oct-2026: el IVA va en porcentaje (16), no en fracción (0.16).
+  const ivaMal = Array.from(document.querySelectorAll('.cot-iva')).find(function(i){ const v = Number(i.value); return i.value.trim() !== '' && v > 0 && v < 1; });
+  if(ivaMal){
+    statusEl.textContent = 'El IVA va en porcentaje: escriba 16 (no 0.16).';
+    statusEl.className = 'status show err';
+    ivaMal.focus();
+    return;
+  }
   const items = Array.from(document.querySelectorAll('.cot-precio')).map(function(input){
     const itemId = Number(input.dataset.itemId);
     const ivaInput = document.querySelector('.cot-iva[data-item-id="' + itemId + '"]');

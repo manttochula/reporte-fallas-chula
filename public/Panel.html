@@ -1118,6 +1118,8 @@
   /* Se abre encima de la ventana de la solicitud de cotización. */
   #ocp-modal-overlay{ z-index:210; }
   .cce-tabla td input{ width:100%; }
+  .cot-corregir-btn{ background:none; border:none; cursor:pointer; padding:0 2px; font-size:12px; opacity:.75; }
+  .cot-corregir-btn:hover{ opacity:1; }
   .prev-umbral-caja{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12.5px; margin:0 0 10px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
   .prev-umbral-caja input{ width:90px !important; min-width:0; background:transparent; color:inherit; border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
   .prev-umbral-status.ok{ color:#5fa36a; } .prev-umbral-status.err{ color:var(--danger); }
@@ -4402,7 +4404,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true,
-  prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
+  corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -4972,7 +4974,7 @@ function ocultarControlesSoloLectura(){
       '#manpar-subir', '.manpar-btn-eliminar', '#ocx-abrir',
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
-      '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn',
+      '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
       '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
     ]);
   }
@@ -21622,10 +21624,10 @@ function abrirModalVerCotizacion(sol){
     const encabezadoProveedores = respuestas.map(function(r){
       const desc = (r.DescuentoPct !== null && r.DescuentoPct > 0) ? (' — Desc. ' + formatoPct_(r.DescuentoPct) + '%') : '';
       const quien = variosProveedores ? (r.ProveedorNombre + ' — ' + r.NombreResponde) : r.NombreResponde;
-      return '<th colspan="5" style="text-align:center;border-left:2px solid var(--maq-line, #ddd);">' + escapeHtml(quien) + desc + (r.EsOtra ? '<div class="mnt-subtext" style="text-transform:none;">' + escapeHtml(r.Folio) + '</div>' : '') + '</th>';
+      return '<th colspan="6" style="text-align:center;border-left:2px solid var(--maq-line, #ddd);">' + escapeHtml(quien) + desc + (r.EsOtra ? '<div class="mnt-subtext" style="text-transform:none;">' + escapeHtml(r.Folio) + '</div>' : '') + '</th>';
     }).join('');
     const encabezadoSub = respuestas.map(function(){
-      return '<th style="border-left:2px solid var(--maq-line, #ddd);">Precio unit.</th><th>IVA</th><th>Precio total</th><th>Entrega</th><th style="text-align:center;">Aut</th>';
+      return '<th style="border-left:2px solid var(--maq-line, #ddd);">Precio unit.</th><th>IVA</th><th title="Precio de UNA pieza ya con descuento e IVA">Unit. c/IVA</th><th title="Unitario con IVA × cantidad">Importe</th><th>Entrega</th><th style="text-align:center;">Aut</th>';
     }).join('');
 
     const filas = sol.Items.map(function(it){
@@ -21634,16 +21636,19 @@ function abrirModalVerCotizacion(sol){
       const celdas = respuestas.map(function(r){
         const ri = respuestaItemPorClave[r.RespuestaId + '_' + it.RefaccionId];
         if(!ri || ri.PrecioCotizado === null){
-          return '<td class="cot-cmp-vacio" style="border-left:2px solid var(--maq-line, #ddd);">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio" style="text-align:center;">—</td>';
+          return '<td class="cot-cmp-vacio" style="border-left:2px solid var(--maq-line, #ddd);">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio">—</td><td class="cot-cmp-vacio" style="text-align:center;">—</td>';
         }
         const esMejorPrecio = hayComparacion && mejores.mejorPrecio !== null && ri.PrecioTotal !== null && ri.PrecioTotal === mejores.mejorPrecio;
         const esMejorFecha = hayComparacion && mejores.mejorFecha !== null && ri.FechaEntrega === mejores.mejorFecha;
         const comentarioTag = ri.Comentario ? ' <span class="cot-cmt-tag" title="' + escapeHtml(ri.Comentario) + '">💬</span>' : '';
         const fechaTexto = ri.FechaEntrega ? new Date(ri.FechaEntrega + 'T00:00:00').toLocaleDateString('es-MX') : '—';
         return (
-          '<td style="border-left:2px solid var(--maq-line, #ddd);">$' + Number(ri.PrecioCotizado).toFixed(2) + '</td>' +
-          '<td>' + (ri.IvaPct !== null ? formatoPct_(ri.IvaPct) + '%' : '—') + '</td>' +
+          '<td style="border-left:2px solid var(--maq-line, #ddd);white-space:nowrap;">$' + Number(ri.PrecioCotizado).toFixed(2)
+            + ' <button type="button" class="cot-corregir-btn" data-respuesta-item-id="' + ri.RespuestaItemId + '" data-precio="' + ri.PrecioCotizado + '" data-iva="' + (ri.IvaPct === null ? '' : ri.IvaPct) + '" data-desc="' + escapeHtml(it.Descripcion) + '" title="Corregir precio unitario / IVA que capturó el proveedor">✏️</button></td>' +
+          '<td>' + (ri.IvaPct !== null ? formatoPct_(ri.IvaPct) + '%' : '—') + (ri.IvaPct !== null && ri.IvaPct > 0 && ri.IvaPct < 1 ? ' <span class="cot-cmt-tag" title="¿El proveedor quiso poner 16%? Corrígelo con ✏️">⚠️</span>' : '') + '</td>' +
           '<td class="' + (esMejorPrecio ? 'cot-cmp-mejor' : '') + '">' + (ri.PrecioTotal !== null ? '$' + Number(ri.PrecioTotal).toFixed(2) : '—') + comentarioTag + '</td>' +
+          // Importe como lo calcula el proveedor/CONTPAQi: (precio c/desc × cantidad) + IVA sobre ese subtotal.
+          '<td>' + (ri.PrecioConDescuento !== null && ri.PrecioConDescuento !== undefined ? '$' + (function(){ const sub = Math.round(Number(ri.PrecioConDescuento) * Number(it.Cantidad) * 100) / 100; return (Math.round(sub * (1 + (Number(ri.IvaPct) || 0) / 100) * 100) / 100).toFixed(2); })() : '—') + '</td>' +
           '<td class="' + (esMejorFecha ? 'cot-cmp-mejor' : '') + '">' + escapeHtml(fechaTexto) + '</td>' +
           '<td style="text-align:center;"><button type="button" class="cot-aut-btn' + (ri.Autorizado ? ' on' : '') + '" data-respuesta-item-id="' + ri.RespuestaItemId + '" title="' + (ri.Autorizado ? 'Autorizada — este es el precio que se aplicó al catálogo. Da clic para quitar la marca.' : 'Marcar esta cotización como la ganadora de esta pieza y aplicar su precio (con descuento) al catálogo') + '"></button></td>'
         );
@@ -21697,6 +21702,27 @@ function abrirModalVerCotizacion(sol){
     ${sol.Orden ? '<div class="ocp-seccion" id="cot-ver-ocp"><div class="mnt-subtext">Cargando órdenes de compra...</div></div>' : ''}
   `;
   if(sol.Orden) cargarOcpDeOrden_(sol.Orden);
+
+  // Corregir lo que capturó el proveedor (oct-2026): precio unitario sin IVA e IVA %.
+  document.getElementById('cot-ver-contenido').querySelectorAll('.cot-corregir-btn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const precio = prompt('Precio UNITARIO (de una pieza, sin IVA) para ' + b.dataset.desc + ':', b.dataset.precio);
+      if(precio === null) return;
+      const iva = prompt('IVA en % (ej. 16):', b.dataset.iva && Number(b.dataset.iva) > 0 && Number(b.dataset.iva) < 1 ? String(Math.round(Number(b.dataset.iva) * 10000) / 100) : b.dataset.iva);
+      if(iva === null) return;
+      b.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){
+          if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo corregir.'); return; }
+          cargarSolicitudesCotizacion(function(){
+            const actualizada = ALL_SOLICITUDES_COTIZACION.find(function(s){ return s.Id === sol.Id; });
+            if(actualizada) abrirModalVerCotizacion(actualizada);
+          });
+        })
+        .withFailureHandler(function(e){ b.disabled = false; alert((e && e.message) || 'No se pudo corregir. Intenta de nuevo.'); })
+        .corregirRespuestaItem(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.respuestaItemId), { precio: precio.replace(/[$,\s]/g, ''), ivaPct: iva.replace(/[%\s]/g, '') });
+    });
+  });
 
   document.getElementById('cot-ver-contenido').querySelectorAll('.cot-aut-btn').forEach(function(autBtn){
     autBtn.addEventListener('click', function(){

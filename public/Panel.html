@@ -346,6 +346,12 @@
   .ah-avance-act-pct{ font-size:24px; font-weight:700; margin:2px 0; }
   .ah-avance-act-sub{ font-size:11.5px; color:var(--text-dim); line-height:1.4; }
   .ah-avance-act .ah-prog-bar-track{ margin:6px 0 4px; }
+  .ah-avance-act-ops{ border-top:1px solid var(--line); margin-top:8px; padding-top:6px; }
+  .ah-avance-act-ops-tit{ font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); margin-bottom:4px; }
+  .ah-avance-act-op{ display:flex; flex-wrap:wrap; justify-content:space-between; gap:0 8px; font-size:12px; padding:2px 0; }
+  .ah-avance-act-op b{ white-space:nowrap; }
+  .ah-avance-act-eq{ color:var(--text-dim); font-size:11px; }
+  .ah-avance-act-op .ah-avance-act-eq:last-child{ flex-basis:100%; }
   #ah-actividad-mapa-google{ width:100%; height:380px; border-radius:6px; border:1.5px solid var(--line); overflow:hidden; margin-bottom:14px; }
   .ah-actividad-mapa-leyenda{ display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--text-dim); margin:4px 0 6px; align-items:center; }
   .ah-actividad-mapa-leyenda i{ display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:5px; vertical-align:-2px; }
@@ -8677,7 +8683,7 @@ function ahResumenPorActividad_(actividades, cuadros){
   var orden = [];
   (actividades || []).forEach(function(a){
     var t = a.trabajo || '';
-    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0 }; orden.push(t); }
+    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {} }; orden.push(t); }
     var r = porTrabajo[t];
     var ha = haCuadro[a.cuadroId] || 0;
     var completado = a.estado === 'completado';
@@ -8687,11 +8693,29 @@ function ahResumenPorActividad_(actividades, cuadros){
     r.haPonderadas += ha * pct / 100;
     if(completado){ r.completados++; r.haCompletadas += ha; }
     else if(pct > 0) r.enAvance++;
+    // Avance de cada operador (oct-2026): sus pasadas en el cuadro (ver
+    // huerta_actividades_aportes) convertidas a hectáreas: ha del cuadro ×
+    // pasadas / pasadas necesarias (sin pasar de la ha del cuadro).
+    var nec = Number(a.pasadasNecesarias) || 0;
+    (a.aportes || []).forEach(function(x){
+      var clave = (x.operador || 'Sin nombre') + '|' + (x.equipo || '');
+      var o = r.operadores[clave] || (r.operadores[clave] = { operador: x.operador || 'Sin nombre', equipo: x.equipo || '', pasadas: 0, ha: 0, cuadros: {} });
+      var p = Number(x.pasadas) || 0;
+      o.pasadas += p;
+      if(nec > 0) o.ha += ha * Math.min(1, p / nec);
+      if(p >= 0.05) o.cuadros[a.cuadroId] = true; // un roce de orilla no cuenta como cuadro trabajado
+    });
   });
   return { totalHa: totalHa, lista: orden.map(function(t){
     var r = porTrabajo[t];
     r.pctCompletado = totalHa > 0 ? Math.round((r.haCompletadas / totalHa) * 1000) / 10 : 0;
     r.pctConParcial = totalHa > 0 ? Math.round((r.haPonderadas / totalHa) * 1000) / 10 : 0;
+    r.porOperador = Object.keys(r.operadores).map(function(k){
+      var o = r.operadores[k];
+      return { operador: o.operador, equipo: o.equipo, pasadas: Math.round(o.pasadas * 10) / 10, ha: Math.round(o.ha * 100) / 100,
+        pct: totalHa > 0 ? Math.round((o.ha / totalHa) * 1000) / 10 : 0, cuadros: Object.keys(o.cuadros).length };
+    }).filter(function(o){ return o.pasadas >= 0.05; }).sort(function(a, b){ return b.ha - a.ha || b.pasadas - a.pasadas; });
+    delete r.operadores;
     return r;
   }).sort(function(a, b){ return a.trabajo.localeCompare(b.trabajo, 'es'); }) };
 }
@@ -8710,6 +8734,11 @@ function ahRenderAvancePorActividad_(){
       + '<div class="ah-avance-act-sub">' + ahTextoHectareas_(r.haCompletadas) + ' completadas de ' + ahTextoHectareas_(res.totalHa) + ' de la huerta<br>'
       + r.completados + ' de ' + r.cuadros + ' cuadro(s) completos' + (r.enAvance ? ' · ' + r.enAvance + ' en avance' : '')
       + '<br>Contando lo parcial: ' + r.pctConParcial + '%</div>'
+      + (r.porOperador.length ? '<div class="ah-avance-act-ops"><div class="ah-avance-act-ops-tit">Avance por operador</div>' + r.porOperador.map(function(o){
+          return '<div class="ah-avance-act-op"><span>👤 ' + escapeHtml(o.operador) + (o.equipo ? ' <span class="ah-avance-act-eq">🚜 ' + escapeHtml(o.equipo) + '</span>' : '') + '</span>'
+            + '<b>' + ahTextoHectareas_(o.ha) + ' · ' + o.pct + '%</b>'
+            + '<span class="ah-avance-act-eq">' + o.pasadas + ' pasadas en ' + o.cuadros + ' cuadro(s)</span></div>';
+        }).join('') + '</div>' : '')
       + '</button>';
   }).join('');
   ahRenderMapaActividad_();

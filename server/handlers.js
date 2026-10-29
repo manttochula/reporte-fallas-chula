@@ -7320,6 +7320,7 @@ async function eliminarCuadroHuerta(code, nombreUsuario, cuadroId) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const id = Number(cuadroId);
   if (!id) return { success: false, error: 'Falta indicar qué cuadro borrar.' };
+  await pool.query('DELETE x FROM huerta_actividades_aportes x JOIN huerta_actividades a ON a.id = x.actividad_id WHERE a.cuadro_id = ?', [id]);
   await pool.query('DELETE FROM huerta_actividades WHERE cuadro_id = ?', [id]);
   await pool.query('DELETE FROM huerta_cuadros WHERE id = ?', [id]);
   return { success: true };
@@ -7660,6 +7661,7 @@ async function eliminarActividadHuerta(code, nombreUsuario, actividadId) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const id = Number(actividadId);
   if (!id) return { success: false, error: 'Falta indicar qué actividad borrar.' };
+  await pool.query('DELETE FROM huerta_actividades_aportes WHERE actividad_id = ?', [id]);
   await pool.query('DELETE FROM huerta_actividades WHERE id = ?', [id]);
   return { success: true };
 }
@@ -7676,7 +7678,7 @@ async function getActividadesHuerta(huerta) {
   if (!nombreHuerta) return [];
   const [rows] = await pool.query(
     `SELECT a.id, a.cuadro_id, c.nombre AS cuadroNombre, c.poligono AS cuadroPoligono, c.surcos AS cuadroSurcos,
-            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.avance_pasadas, a.creado_en, a.completado_en, a.actividad_catalogo_id,
+            a.trabajo, a.estado, a.intervalo_surcos, a.avance_metros, a.avance_pasadas, a.creado_en, a.completado_en, a.actividad_catalogo_id, a.avance_id,
             a.equipo_codigo, me.unidad AS equipoUnidad,
             a.implemento_codigo, mi.unidad AS implementoUnidad,
             a.operador_nombre
@@ -7688,6 +7690,34 @@ async function getActividadesHuerta(huerta) {
      ORDER BY c.nombre, a.creado_en`,
     [nombreHuerta]
   );
+  // Quién trabajó cada actividad (por equipo/operador) y qué recorrido la completó.
+  const aportesPorAct = {};
+  const completoPorAct = {};
+  if (rows.length) {
+    const ids = rows.map((r) => r.id);
+    const [aps] = await pool.query(
+      `SELECT x.actividad_id, x.pasadas, ah.nombre, ah.codigo_unidad, m.unidad
+       FROM huerta_actividades_aportes x JOIN avance_huerta ah ON ah.id = x.avance_id
+       LEFT JOIN maquinaria m ON m.codigo_unidad = ah.codigo_unidad
+       WHERE x.actividad_id IN (?) ORDER BY x.primera_en`,
+      [ids]
+    );
+    aps.forEach((x) => {
+      const lista = aportesPorAct[x.actividad_id] || (aportesPorAct[x.actividad_id] = []);
+      const clave = (x.codigo_unidad || '') + '|' + (x.nombre || '');
+      let e = lista.find((y) => y.clave === clave);
+      if (!e) { e = { clave, equipo: x.unidad || x.codigo_unidad || '', operador: x.nombre || '', pasadas: 0 }; lista.push(e); }
+      e.pasadas += Number(x.pasadas) || 0;
+    });
+    const avIds = Array.from(new Set(rows.map((r) => r.avance_id).filter(Boolean)));
+    if (avIds.length) {
+      const [avs] = await pool.query(
+        'SELECT ah.id, ah.nombre, ah.codigo_unidad, m.unidad FROM avance_huerta ah LEFT JOIN maquinaria m ON m.codigo_unidad = ah.codigo_unidad WHERE ah.id IN (?)',
+        [avIds]
+      );
+      avs.forEach((x) => { completoPorAct[x.id] = { equipo: x.unidad || x.codigo_unidad || '', operador: x.nombre || '' }; });
+    }
+  }
   return rows.map((r) => {
     const poligono = parsearPoligono_(r.cuadroPoligono);
     const esperado = calcularDistanciaTotalEsperadaMetros_(poligono, r.cuadroSurcos, r.intervalo_surcos);
@@ -7724,6 +7754,8 @@ async function getActividadesHuerta(huerta) {
       implementoCodigo: r.implemento_codigo,
       implementoUnidad: r.implementoUnidad,
       operadorNombre: r.operador_nombre,
+      aportes: (aportesPorAct[r.id] || []).map((e) => ({ equipo: e.equipo, operador: e.operador, pasadas: Math.round(e.pasadas * 100) / 100 })),
+      completadoPor: r.avance_id ? (completoPorAct[r.avance_id] || null) : null,
     };
   });
 }
@@ -7824,6 +7856,11 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
       if (!mismoTrabajoAvance_(avanceTrabajo, act.trabajo)) continue; // solo la actividad de ESTE recorrido
       if (!coincideConAsignado_(act.equipo_codigo, avanceEquipo) || !coincideConAsignado_(act.operador_nombre, avanceNombre)) continue;
       const necesarias = pasadasNecesarias_(c.surcos, act.intervalo_surcos);
+      await pool.query(
+        `INSERT INTO huerta_actividades_aportes (actividad_id, avance_id, pasadas, metros, primera_en, ultima_en) VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE pasadas = pasadas + VALUES(pasadas), metros = metros + VALUES(metros), ultima_en = VALUES(ultima_en)`,
+        [act.id, avanceId, Math.round(tramo.pasadas * 10000) / 10000, Math.round(tramo.metros * 100) / 100, tPunto, tPunto]
+      );
       const nuevasPasadas = (Number(act.avance_pasadas) || 0) + tramo.pasadas;
       const nuevosMetros = (Number(act.avance_metros) || 0) + tramo.metros;
       // Cuadro SIN surcos capturados (necesarias === null): ya NO se
@@ -7868,11 +7905,24 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
 // opciones.cuadroId (opcional): solo las actividades de ese cuadro (lo usa
 // guardarDireccionSurcosCuadro para recalcular en cuanto cambia la
 // dirección de sus surcos).
+// Oct-2026 (Carlos: "en completado no viene cuántas pasadas hizo ni con qué
+// equipos"): cuántas pasadas aportó cada recorrido (equipo + operador) a
+// cada actividad. La llena el avance en vivo y el recálculo.
+async function guardarAportesActividad_(actividadId, aportes) {
+  await pool.query('DELETE FROM huerta_actividades_aportes WHERE actividad_id = ?', [actividadId]);
+  for (const [avanceId, ap] of Object.entries(aportes || {})) {
+    await pool.query(
+      'INSERT INTO huerta_actividades_aportes (actividad_id, avance_id, pasadas, metros, primera_en, ultima_en) VALUES (?, ?, ?, ?, ?, ?)',
+      [actividadId, Number(avanceId), Math.round(ap.pasadas * 10000) / 10000, Math.round(ap.metros * 100) / 100, ap.primera, ap.ultima]
+    );
+  }
+}
+
 async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
   const soloCuadro = opciones && Number(opciones.cuadroId) ? Number(opciones.cuadroId) : null;
   const [acts] = await pool.query(
     `SELECT a.id, a.huerta, a.trabajo, a.estado, a.creado_en, a.completado_en, a.intervalo_surcos, a.avance_metros, a.avance_pasadas,
-            a.equipo_codigo, a.operador_nombre, c.nombre AS cuadroNombre, c.poligono, c.surcos, c.direccion_surcos
+            a.avance_id, a.equipo_codigo, a.operador_nombre, c.nombre AS cuadroNombre, c.poligono, c.surcos, c.direccion_surcos
      FROM huerta_actividades a JOIN huerta_cuadros c ON c.id = a.cuadro_id
      ${soloCuadro ? 'WHERE c.id = ?' : ''}
      ORDER BY a.huerta, c.nombre, a.id`,
@@ -7912,6 +7962,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     let metros = 0;
     let completadoEn = null;
     let avanceIdCompleto = null;
+    const aportes = {}; // avance_id -> {pasadas, metros, primera, ultima} (oct-2026: quién aportó)
     for (const ses of sesiones) {
       if (completadoEn) break;
       if (!mismoTrabajoAvance_(ses.trabajo, a.trabajo)) continue; // solo recorridos de ESTA actividad
@@ -7922,6 +7973,8 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
         if (tramo.pasadas <= 0) continue;
         pasadas += tramo.pasadas;
         metros += tramo.metros;
+        const ap = aportes[ses.id] || (aportes[ses.id] = { pasadas: 0, metros: 0, primera: pb.t, ultima: pb.t });
+        ap.pasadas += tramo.pasadas; ap.metros += tramo.metros; ap.ultima = pb.t;
         if (necesarias !== null && pasadas >= necesarias - margenCompletado_(necesarias)) {
           completadoEn = pb.t;
           avanceIdCompleto = ses.id;
@@ -7933,6 +7986,9 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     const nuevasPasadas = Math.round((completadoEn ? Math.min(pasadas, necesarias) : pasadas) * 10000) / 10000;
     const nuevosMetros = Math.round(metros * 100) / 100;
     const pasadasAntes = Number(a.avance_pasadas) || 0;
+    // Quién aportó (equipo/operador de cada recorrido): se reescribe siempre
+    // al aplicar, aunque el estado no cambie.
+    if (aplicar) await guardarAportesActividad_(a.id, aportes);
     // Una actividad que YA estaba completada y lo sigue estando se deja
     // tal cual (no se le mueve la fecha de completado).
     if (a.estado === 'completado' && nuevoEstado === 'completado') continue;
@@ -7940,7 +7996,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     const pct = necesarias ? Math.round(Math.max(0, Math.min(100, (nuevasPasadas / necesarias) * 100)) * 100) / 100 : null;
     cambios.push({
       id: a.id, huerta: a.huerta, cuadro: a.cuadroNombre, trabajo: a.trabajo,
-      estadoAntes: a.estado, estadoDespues: nuevoEstado,
+      estadoAntes: a.estado, estadoDespues: nuevoEstado, avanceIdAntes: a.avance_id || null, completadoEnAntes: a.completado_en || null,
       pasadasDespues: Math.round(nuevasPasadas * 100) / 100, pasadasNecesarias: necesarias,
       porcentajeDespues: pct, sinSurcos: necesarias === null,
     });

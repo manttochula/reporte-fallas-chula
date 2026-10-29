@@ -8682,19 +8682,31 @@ function ahRenderActividadesTabla_(){
     // surcos se muestra lo que ya se lleva, aunque no se pueda dar un %.
     var pasadasHechas = Number(a.pasadas) || 0;
     var pasadasTxt = String(Number(pasadasHechas.toFixed(1)));
-    if(!completado && tieneSurcos && a.pasadasNecesarias) subTrabajo += ' · ' + pasadasTxt + ' de ' + a.pasadasNecesarias + ' pasadas';
+    // Oct-2026: también en Completado se ve cuántas pasadas lleva.
+    if(tieneSurcos && a.pasadasNecesarias) subTrabajo += ' · ' + pasadasTxt + ' de ' + a.pasadasNecesarias + ' pasadas';
     else if(!completado && !tieneSurcos && pasadasHechas > 0) subTrabajo += ' · ' + pasadasTxt + ' pasadas';
     // Equipo/operador asignados en "2. Detalle de trabajo" (si se eligieron
     // -- son opcionales): se muestran como referencia debajo del cuadro,
     // igual que la actividad.
     if(a.equipoCodigo) subTrabajo += ' · 🚜 ' + (a.equipoUnidad || a.equipoCodigo);
     if(a.operadorNombre) subTrabajo += ' · 👤 ' + a.operadorNombre;
+    // Quién la trabajó de verdad (pasadas por equipo/operador, oct-2026) y
+    // con qué recorrido se completó.
+    var trabajaron = (a.aportes || []).filter(function(x){ return x.pasadas >= 0.05; }).map(function(x){
+      return (x.equipo ? '🚜 ' + x.equipo : '') + (x.operador ? ' 👤 ' + x.operador : '') + ': ' + Number(Number(x.pasadas).toFixed(1)) + ' pasadas';
+    });
+    var lineaQuien = trabajaron.length ? 'Trabajaron: ' + trabajaron.join(' · ') : '';
+    if(completado){
+      var cp = a.completadoPor;
+      var txtCp = cp ? ('Lo completó: ' + [cp.equipo ? '🚜 ' + cp.equipo : '', cp.operador ? '👤 ' + cp.operador : ''].filter(Boolean).join(' ')) : 'Sin recorrido registrado que lo completara (se completó al cambiar surcos o con la regla anterior)';
+      lineaQuien = [lineaQuien, txtCp].filter(Boolean).join(' · ');
+    }
     // "Prioridad" es nada más el orden en el que se ven en esta lista (de
     // arriba hacia abajo), al estilo del planificador de trabajo que
     // mandó Carlos -- no se guarda ni se puede reordenar arrastrando.
     return '<tr>'
       + '<td><span class="ah-prioridad-num">' + (idx + 1) + '</span></td>'
-      + '<td><div class="ah-campo-nombre">' + escapeHtml(a.cuadroNombre || '') + '</div>' + (subTrabajo ? '<div class="ah-campo-sub">' + escapeHtml(subTrabajo) + '</div>' : '') + '</td>'
+      + '<td><div class="ah-campo-nombre">' + escapeHtml(a.cuadroNombre || '') + '</div>' + (subTrabajo ? '<div class="ah-campo-sub">' + escapeHtml(subTrabajo) + '</div>' : '') + (lineaQuien ? '<div class="ah-campo-sub ah-campo-quien">' + escapeHtml(lineaQuien) + '</div>' : '') + '</td>'
       + '<td><div class="ah-prog-wrap"><div class="ah-prog-bar-track"><div class="ah-prog-bar-fill' + (completado ? ' ah-prog-completado' : '') + '" style="width:' + pct + '%"></div></div><span class="ah-prog-pct">' + pctTexto + '</span></div></td>'
       + '<td><span class="ah-badge ' + (completado ? 'ah-badge-completado' : 'ah-badge-pendiente') + '">' + (completado ? 'Completado' : 'Pendiente') + '</span></td>'
       + '<td>' + (a.completadoEn ? new Date(a.completadoEn).toLocaleString('es-MX') : '—') + '</td>'

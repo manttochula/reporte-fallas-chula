@@ -3269,3 +3269,21 @@ INSERT IGNORE INTO cuentas_contables_empresas (cuenta_id, empresa_id, huerta, se
   SELECT c.id, e.id, 'PRORRATEABLES', '29' FROM cuentas_contables c JOIN empresas e
   WHERE @carga_cce_hecha = 0 AND c.nombre = 'MTTO TRACTORES' AND e.nombre = 'CHULA BRAND MEXICO, S. DE P.R. DE R.L. DE C.V.';
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_cuentas_empresas_2026_10', 'hecha');
+
+-- ------------------------------------------------------------
+-- Quién aportó a cada actividad de cuadro (oct-2026, Carlos: "en
+-- completado no viene cuántas pasadas hizo ni con qué equipos"): pasadas
+-- por recorrido (avance_huerta = equipo + operador). La llena el avance en
+-- vivo (marcarCuadrosCompletadosPorPunto_) y el recálculo
+-- (recalcularAvanceActividadesHuerta_, recalcular_avance_cuadros_nube.bat).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS huerta_actividades_aportes (
+  actividad_id INT NOT NULL,
+  avance_id    INT NOT NULL,
+  pasadas      DECIMAL(10,4) NOT NULL DEFAULT 0,
+  metros       DECIMAL(12,2) NOT NULL DEFAULT 0,
+  primera_en   DATETIME DEFAULT NULL,
+  ultima_en    DATETIME DEFAULT NULL,
+  PRIMARY KEY (actividad_id, avance_id),
+  INDEX idx_haa_avance (avance_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

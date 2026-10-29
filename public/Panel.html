@@ -3861,23 +3861,7 @@
           <div style="display:flex; align-items:center; justify-content:flex-end; margin-bottom:10px;">
             <button type="button" class="ah-btn-marcar" id="ah-btn-ver-recorrido">📍 Ver recorrido por fecha</button>
           </div>
-          <div class="summary" id="ah-resumen"></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Operador</th>
-                  <th>Equipo</th>
-                  <th>Trabajo</th>
-                  <th>%</th>
-                  <th>Inicio</th>
-                  <th>Fin</th>
-                  <th>Puntos</th>
-                </tr>
-              </thead>
-              <tbody id="ah-table-body"></tbody>
-            </table>
-          </div>
+          <!-- Oct-2026 (Carlos): se quitó la tabla de "registros de avance" (operador/equipo/trabajo/inicio/fin/puntos): no le era útil y quitaba espacio. Para consultar un día: "Ver recorrido por fecha". -->
         </div>
         <div id="ah-cuadros-panel">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:18px;">
@@ -7924,6 +7908,7 @@ document.getElementById('ah-link-borrar-historico').addEventListener('click', fu
 function ahRenderTabla_(historico){
   var tbody = document.getElementById('ah-table-body');
   var resumen = document.getElementById('ah-resumen');
+  if(!tbody || !resumen) return; // la tabla ya no está en el Panel (oct-2026)
   if(!historico || historico.length === 0){
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);">Todavía no hay avance registrado en esta huerta.</td></tr>';
     resumen.textContent = '';

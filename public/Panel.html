@@ -338,6 +338,17 @@
   .ah-prog-bar-fill{ height:100%; border-radius:5px; background:#8a5a00; transition:width .2s; }
   .ah-prog-bar-fill.ah-prog-completado{ background:#1e7a44; }
   .ah-prog-pct{ font-size:12px; font-weight:700; color:var(--text-dim); white-space:nowrap; }
+  .ah-avance-actividades{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; margin:12px 0; }
+  .ah-avance-act{ border:1px solid var(--line); border-radius:8px; padding:10px 12px; background:var(--panel-2); cursor:pointer; text-align:left; color:var(--text); font:inherit; }
+  .ah-avance-act:hover{ border-color:var(--amber); }
+  .ah-avance-act.activa{ border-color:var(--amber); box-shadow:0 0 0 1px var(--amber) inset; }
+  .ah-avance-act-nombre{ font-weight:700; font-size:13px; }
+  .ah-avance-act-pct{ font-size:24px; font-weight:700; margin:2px 0; }
+  .ah-avance-act-sub{ font-size:11.5px; color:var(--text-dim); line-height:1.4; }
+  .ah-avance-act .ah-prog-bar-track{ margin:6px 0 4px; }
+  #ah-actividad-mapa-google{ width:100%; height:380px; border-radius:6px; border:1.5px solid var(--line); overflow:hidden; margin-bottom:14px; }
+  .ah-actividad-mapa-leyenda{ display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--text-dim); margin:4px 0 6px; align-items:center; }
+  .ah-actividad-mapa-leyenda i{ display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:5px; vertical-align:-2px; }
   #ah-recorrido-mapa-google{ width:100%; height:360px; border-radius:6px; border:1.5px solid var(--line); overflow:hidden; }
   #ah-mapa-google-avance{ width:100%; aspect-ratio:1/1; max-height:680px; border-radius:6px; border:1.5px solid var(--line); overflow:hidden; margin-bottom:14px; }
   .ah-recorrido-sesiones{
@@ -3952,6 +3963,12 @@
               <label for="ah-f-actividades-filtro-trabajo">Filtrar por actividad</label>
               <select id="ah-f-actividades-filtro-trabajo"><option value="">Todas las actividades</option></select>
             </div>
+          </div>
+          <!-- Avance total por actividad (oct-2026): hectáreas de cuadros completados / hectáreas de la huerta, y abajo el mapa de esa actividad. -->
+          <div id="ah-avance-actividades" class="ah-avance-actividades"></div>
+          <div id="ah-actividad-mapa-wrap" style="display:none;">
+            <div class="ah-actividad-mapa-leyenda" id="ah-actividad-mapa-leyenda"></div>
+            <div id="ah-actividad-mapa-google"></div>
           </div>
           <div id="ah-actividades-vacio" class="avance-aviso" style="display:none;">Todavía no has asignado ninguna actividad.</div>
           <div id="ah-actividades-filtro-vacio" class="avance-aviso" style="display:none;">Ninguna actividad asignada coincide con el filtro.</div>
@@ -8639,12 +8656,127 @@ function ahPoblarFiltroActividadesTrabajo_(){
   sel.value = AH_ACTIVIDADES_FILTRO_TRABAJO;
 }
 
+// ---------------------------------------------------------------
+// Avance TOTAL por actividad (oct-2026, Carlos): "si los cuadros 1, 2 y 3
+// miden 2 ha cada uno y ya están completados, en una huerta de 10 ha, que
+// diga que llevas 60% de esa actividad", y abajo el mapa con los cuadros
+// completados de esa actividad. % completado = ha de cuadros con la
+// actividad COMPLETADA / ha de TODA la huerta (todos los cuadros
+// dibujados). Aparte se muestra el avance contando lo parcial
+// (ha × % de cada cuadro).
+// ---------------------------------------------------------------
+var AH_GOOGLE_MAP_ACTIVIDAD = null;
+var AH_GOOGLE_POLIGONOS_ACTIVIDAD = [];
+var AH_GOOGLE_ETIQUETAS_ACTIVIDAD = [];
+
+function ahResumenPorActividad_(actividades, cuadros){
+  var haCuadro = {};
+  var totalHa = 0;
+  (cuadros || []).forEach(function(c){ var ha = ahAreaHectareas_(c.poligono); haCuadro[c.id] = ha; totalHa += ha; });
+  var porTrabajo = {};
+  var orden = [];
+  (actividades || []).forEach(function(a){
+    var t = a.trabajo || '';
+    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0 }; orden.push(t); }
+    var r = porTrabajo[t];
+    var ha = haCuadro[a.cuadroId] || 0;
+    var completado = a.estado === 'completado';
+    var pct = completado ? 100 : Math.max(0, Math.min(100, Number(a.porcentaje) || 0));
+    r.cuadros++;
+    r.haAsignadas += ha;
+    r.haPonderadas += ha * pct / 100;
+    if(completado){ r.completados++; r.haCompletadas += ha; }
+    else if(pct > 0) r.enAvance++;
+  });
+  return { totalHa: totalHa, lista: orden.map(function(t){
+    var r = porTrabajo[t];
+    r.pctCompletado = totalHa > 0 ? Math.round((r.haCompletadas / totalHa) * 1000) / 10 : 0;
+    r.pctConParcial = totalHa > 0 ? Math.round((r.haPonderadas / totalHa) * 1000) / 10 : 0;
+    return r;
+  }).sort(function(a, b){ return a.trabajo.localeCompare(b.trabajo, 'es'); }) };
+}
+
+function ahRenderAvancePorActividad_(){
+  var cont = document.getElementById('ah-avance-actividades');
+  if(!cont) return;
+  var res = ahResumenPorActividad_(AH_ACTIVIDADES, AH_CUADROS);
+  if(!res.lista.length){ cont.innerHTML = ''; ahRenderMapaActividad_(); return; }
+  cont.innerHTML = res.lista.map(function(r){
+    var activa = AH_ACTIVIDADES_FILTRO_TRABAJO === r.trabajo;
+    return '<button type="button" class="ah-avance-act' + (activa ? ' activa' : '') + '" data-trabajo="' + escapeHtml(r.trabajo) + '" title="Ver esta actividad en la tabla y en el mapa">'
+      + '<div class="ah-avance-act-nombre">' + escapeHtml(r.trabajo) + '</div>'
+      + '<div class="ah-avance-act-pct">' + r.pctCompletado + '%</div>'
+      + '<div class="ah-prog-bar-track"><div class="ah-prog-bar-fill' + (r.pctCompletado >= 100 ? ' ah-prog-completado' : '') + '" style="width:' + Math.min(100, r.pctCompletado) + '%"></div></div>'
+      + '<div class="ah-avance-act-sub">' + ahTextoHectareas_(r.haCompletadas) + ' completadas de ' + ahTextoHectareas_(res.totalHa) + ' de la huerta<br>'
+      + r.completados + ' de ' + r.cuadros + ' cuadro(s) completos' + (r.enAvance ? ' · ' + r.enAvance + ' en avance' : '')
+      + '<br>Contando lo parcial: ' + r.pctConParcial + '%</div>'
+      + '</button>';
+  }).join('');
+  ahRenderMapaActividad_();
+}
+
+function ahRenderMapaActividad_(){
+  var wrap = document.getElementById('ah-actividad-mapa-wrap');
+  if(!wrap) return;
+  var trabajo = AH_ACTIVIDADES_FILTRO_TRABAJO;
+  if(!trabajo || typeof google === 'undefined' || !google.maps || !(AH_CUADROS || []).length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  if(!AH_GOOGLE_MAP_ACTIVIDAD){
+    AH_GOOGLE_MAP_ACTIVIDAD = new google.maps.Map(document.getElementById('ah-actividad-mapa-google'), {
+      center: ahCentroInicialMapaGoogle_(), zoom: ahZoomInicialMapaGoogle_(), mapTypeId: 'satellite', streetViewControl: false, fullscreenControl: true,
+    });
+  }
+  (AH_GOOGLE_POLIGONOS_ACTIVIDAD || []).forEach(function(p){ p.setMap(null); });
+  var porCuadro = {};
+  (AH_ACTIVIDADES || []).forEach(function(a){ if(a.trabajo === trabajo) porCuadro[a.cuadroId] = a; });
+  var bounds = new google.maps.LatLngBounds();
+  var cuadros = (AH_CUADROS || []).filter(function(c){ return c.poligono && c.poligono.length >= 3; });
+  AH_GOOGLE_POLIGONOS_ACTIVIDAD = cuadros.map(function(c){
+    var a = porCuadro[c.id];
+    var color, op;
+    if(!a){ color = '#9A9D9E'; op = 0.05; }
+    else if(a.estado === 'completado'){ color = '#2ecc71'; op = 0.45; }
+    else if((Number(a.porcentaje) || 0) > 0){ color = '#E8871E'; op = 0.35; }
+    else { color = '#ffffff'; op = 0.12; }
+    c.poligono.forEach(function(v){ bounds.extend(v); });
+    var poly = new google.maps.Polygon({ paths: c.poligono, strokeColor: color, fillColor: color, fillOpacity: op, strokeWeight: a ? 2 : 1, strokeOpacity: a ? 1 : 0.4, clickable: false });
+    poly.setMap(AH_GOOGLE_MAP_ACTIVIDAD);
+    return poly;
+  });
+  // Etiqueta: número de cuadro y % de ESTA actividad.
+  (AH_GOOGLE_ETIQUETAS_ACTIVIDAD || []).forEach(function(m){ m.setMap(null); });
+  AH_GOOGLE_ETIQUETAS_ACTIVIDAD = cuadros.filter(function(c){ return porCuadro[c.id]; }).map(function(c){
+    var a = porCuadro[c.id];
+    var pct = a.estado === 'completado' ? 100 : Math.round(Number(a.porcentaje) || 0);
+    return new google.maps.Marker({
+      position: ahCentroCuadro_(c.poligono), map: AH_GOOGLE_MAP_ACTIVIDAD, clickable: false, zIndex: 3,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0, fillOpacity: 0, strokeOpacity: 0 },
+      label: { text: ahNumeroCuadro_(c.nombre) + ' · ' + pct + '%', color: '#ffffff', fontSize: '12px', fontWeight: '700', className: 'ah-etiqueta-cuadro' },
+    });
+  });
+  if(!bounds.isEmpty()) AH_GOOGLE_MAP_ACTIVIDAD.fitBounds(bounds);
+  var res = ahResumenPorActividad_(AH_ACTIVIDADES, AH_CUADROS).lista.find(function(r){ return r.trabajo === trabajo; });
+  document.getElementById('ah-actividad-mapa-leyenda').innerHTML = '<b style="color:var(--text);">' + escapeHtml(trabajo) + (res ? ': ' + res.pctCompletado + '% de la huerta completado' : '') + '</b>'
+    + '<span><i style="background:#2ecc71"></i>Completado</span><span><i style="background:#E8871E"></i>En avance</span><span><i style="background:#ffffff;opacity:.5"></i>Pendiente</span><span><i style="background:#9A9D9E;opacity:.4"></i>Sin esta actividad</span>';
+}
+
+document.getElementById('ah-avance-actividades').addEventListener('click', function(ev){
+  var b = ev.target.closest ? ev.target.closest('.ah-avance-act') : null;
+  if(!b) return;
+  var t = b.dataset.trabajo;
+  AH_ACTIVIDADES_FILTRO_TRABAJO = AH_ACTIVIDADES_FILTRO_TRABAJO === t ? '' : t; // otro clic = ver todas
+  var sel = document.getElementById('ah-f-actividades-filtro-trabajo');
+  if(sel) sel.value = AH_ACTIVIDADES_FILTRO_TRABAJO;
+  ahRenderActividadesTabla_();
+});
+
 function ahRenderActividadesTabla_(){
   var tbody = document.getElementById('ah-actividades-table-body');
   var vacio = document.getElementById('ah-actividades-vacio');
   var filtroVacio = document.getElementById('ah-actividades-filtro-vacio');
   var tablaWrap = document.getElementById('ah-actividades-tabla-wrap');
   ahPoblarFiltroActividadesTrabajo_();
+  if(typeof ahRenderAvancePorActividad_ === 'function') ahRenderAvancePorActividad_();
   if(!AH_ACTIVIDADES || AH_ACTIVIDADES.length === 0){
     tbody.innerHTML = '';
     vacio.style.display = '';

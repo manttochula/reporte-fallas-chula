@@ -1118,6 +1118,12 @@
   /* Se abre encima de la ventana de la solicitud de cotización. */
   #ocp-modal-overlay{ z-index:210; }
   .cce-tabla td input{ width:100%; }
+  .ocx-auto-caja{ border:1px solid rgba(60,110,200,0.4); background:rgba(60,110,200,0.05); border-radius:8px; padding:10px 12px; margin:0 0 12px; font-size:12.5px; }
+  .ocx-auto-caja .ocx-auto-emp{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:3px 0; }
+  .ocx-auto-caja .ocx-auto-aviso{ color:#a55d0e; font-size:11.5px; flex-basis:100%; }
+  .ocx-auto-caja table{ min-width:0 !important; margin-top:6px; }
+  .ocx-auto-caja td, .ocx-auto-caja th{ font-size:11.5px; padding:4px 6px; color:#222; background:#fff; }
+  .ocx-agente-ok{ color:#2f6f3a; font-weight:600; } .ocx-agente-mal{ color:#b3261e; font-weight:600; }
   .ocx-gasto-caja{ border:1px dashed var(--line); border-radius:8px; padding:8px 10px; margin:0 0 10px; }
   .cot-corregir-btn{ background:none; border:none; cursor:pointer; padding:0 2px; font-size:12px; opacity:.75; }
   .cot-corregir-btn:hover{ opacity:1; }
@@ -3488,6 +3494,8 @@
       <div class="maq-modal" style="max-width:1150px;width:96vw;">
         <button class="maq-modal-close" id="ocx-modal-close">&times;</button>
         <h3>Exportar OC para CONTPAQi</h3>
+        <!-- Carga automática con el agente de la PC de Comercial (oct-2026) -->
+        <div class="ocx-auto-caja" id="ocx-auto-caja"><div class="mnt-subtext">Cargando estado de la carga automática...</div></div>
         <div class="mnt-subtext" style="margin-bottom:10px;">Toma las refacciones con precio <b>autorizado</b> ("Aut" en las cotizaciones) y arma el Excel con la hoja <b>Lote</b> para tu macro. Una OC por proveedor y por orden. Precio sin IVA (con el descuento del proveedor ya aplicado). Las refacciones sin folio comercial (gastos) van también como OC con el código genérico de la cuenta contable del equipo (ej. <b>GTS30</b>, Catálogo → Cuentas contables); si la cuenta no lo tiene, a la hoja <b>Gasto directo</b>; las de proveedores sin código en Comercial, a <b>Revisar</b> (esas no se marcan y vuelven a salir).</div>
         <div class="maq-field">
           <label>Empresa en Comercial *</label>
@@ -4415,7 +4423,7 @@ var PANEL_SOLO_EN_LINEA = {
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
-  agregarFotosOrden: true, exportarOCContpaqi: true,
+  agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -4987,7 +4995,7 @@ function ocultarControlesSoloLectura(){
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
-      '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
+      '.ocx-auto-chk', '.ocx-auto-acc', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
     ]);
   }
   if(!puedeCapturarPestana('insumos')){
@@ -12877,7 +12885,7 @@ function renderRefnecLista(){
       <span class="refnec-item-texto">${escapeHtml(it.texto)}</span>
       <span class="refnec-item-cantidad">×<input type="number" class="refnec-item-cantidad-input" min="0.01" step="0.01" value="${cantidadValor}" onclick="event.stopPropagation()" oninput="actualizarCantidadRefnec(${idx}, this.value)"></span>
       <span class="refnec-item-badge">${badge}</span>
-      ${it.oc ? '<span class="refnec-item-oc" title="Exportada a CONTPAQi ' + escapeHtml((it.oc.empresa ? '(' + it.oc.empresa + ') ' : '') + (it.oc.fecha || '') + ' por ' + (it.oc.por || '')) + '">' + (it.oc.tipo === 'oc' ? 'OC ' + escapeHtml(it.oc.serie + ' ' + it.oc.folio) : 'Gasto directo') + '</span>' : ''}
+      ${it.oc ? '<span class="refnec-item-oc" title="Exportada a CONTPAQi ' + escapeHtml((it.oc.empresa ? '(' + it.oc.empresa + ') ' : '') + (it.oc.fecha || '') + ' por ' + (it.oc.por || '')) + '">' + (it.oc.tipo === 'oc' ? 'OC ' + escapeHtml(it.oc.serie + ' ' + it.oc.folio) + (it.oc.agente === 'cargada' ? ' ✓ en Comercial' : it.oc.agente === 'pendiente' ? ' · cargando a Comercial' : it.oc.agente === 'error' ? ' ⚠ error al cargar' : '') : 'Gasto directo') + '</span>' : ''}
       ${entregadoHtml}
       ${btnAgregar}
       <button type="button" class="refnec-item-btn refnec-item-quitar" onclick="quitarItemRefnec(${idx})">Quitar</button>
@@ -21192,6 +21200,61 @@ function renderResumenOcx_(){
 }
 
 document.getElementById('ocx-abrir').addEventListener('click', abrirModalOcx);
+document.getElementById('ocx-abrir').addEventListener('click', cargarCargaComercial_);
+
+// --- Carga automática a Comercial (agente en la PC de Comercial) ---
+const OCX_EST_AGENTE_ = { pendiente: 'Esperando al agente', cargada: '✓ Cargada en Comercial', error: '⚠ Error' };
+function cargarCargaComercial_(){
+  const caja = document.getElementById('ocx-auto-caja');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ caja.innerHTML = '<div class="mnt-subtext">No se pudo leer la carga automática.</div>'; return; }
+      const ag = r.agente;
+      const est = !r.tokenConfigurado
+        ? '<span class="ocx-agente-mal">Apagada: falta la clave OC_AGENTE_TOKEN en Render.</span>'
+        : !ag ? '<span class="ocx-agente-mal">El agente todavía no se ha conectado (instálalo en la PC de Comercial).</span>'
+        : ag.conectado ? '<span class="ocx-agente-ok">Agente conectado</span> <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(ag.equipo || '') + ', última vez ' + escapeHtml(new Date(ag.en).toLocaleString('es-MX')) + ')</span>'
+        : '<span class="ocx-agente-mal">El agente no se conecta desde ' + escapeHtml(new Date(ag.en).toLocaleString('es-MX')) + ' (¿PC de Comercial apagada?)</span>';
+      const errAg = ag && ag.error ? '<div class="ocx-auto-aviso">Último problema del agente: ' + escapeHtml(ag.error) + '</div>' : '';
+      const emps = r.empresas.map(function(e){
+        return '<div class="ocx-auto-emp"><label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="ocx-auto-chk" data-id="' + e.id + '"' + (e.automatico ? ' checked' : '') + ' style="width:auto;"> ' + escapeHtml(e.nombre.split(',')[0]) + '</label>'
+          + '<span class="mnt-subtext" style="display:inline;">' + (e.automatico ? 'carga automática prendida' : 'pausada') + '</span>'
+          + (e.aviso ? '<div class="ocx-auto-aviso">' + escapeHtml(e.aviso) + '</div>' : '') + '</div>';
+      }).join('');
+      const nombreEmp = {}; r.empresas.forEach(function(e){ nombreEmp[e.id] = e.nombre.split(',')[0]; });
+      const filas = r.cola.map(function(c){
+        const acc = c.estado === 'error'
+          ? '<button type="button" class="row-view ocx-auto-acc" data-acc="reintentar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Reintentar</button> <button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '" title="Quita la OC de la cola; sus partidas vuelven a quedar pendientes y tomarán un folio nuevo">Liberar</button>'
+          : c.estado === 'pendiente' ? '<button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Quitar de la cola</button>' : '';
+        return '<tr><td>' + escapeHtml(nombreEmp[c.empresaId] || '') + '</td><td><b>' + escapeHtml(c.serie + ' ' + c.folio) + '</b></td><td>' + escapeHtml(c.proveedor) + '</td><td>' + escapeHtml(c.ordenes) + '</td><td>' + c.partidas + '</td>'
+          + '<td>' + escapeHtml(OCX_EST_AGENTE_[c.estado] || c.estado) + (c.total !== null ? ' · $' + Number(c.total).toFixed(2) : '') + (c.mensaje ? '<div class="ocx-auto-aviso">' + escapeHtml(c.mensaje) + '</div>' : '') + '</td><td>' + acc + '</td></tr>';
+      }).join('');
+      caja.innerHTML = '<div style="margin-bottom:4px;"><b>Carga automática a Comercial</b> · ' + est + '</div>' + errAg
+        + '<div class="mnt-subtext" style="margin-bottom:4px;">Con la empresa prendida, todo lo autorizado ("Aut") se carga solo en Comercial con el siguiente folio de su serie (refacciones y gastos aparte). Lo que no tiene código de producto se queda en "Gasto directo".</div>'
+        + emps + (filas ? '<div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Empresa</th><th>OC</th><th>Proveedor</th><th>Orden</th><th>Partidas</th><th>Estado</th><th></th></tr></thead><tbody>' + filas + '</tbody></table></div>' : '');
+      caja.querySelectorAll('.ocx-auto-chk').forEach(function(chk){
+        chk.addEventListener('change', function(){
+          if(chk.checked && !confirm('Desde ahora, todo lo autorizado de esta empresa se cargará SOLO en CONTPAQi Comercial con el siguiente folio. ¿Prender la carga automática?')){ chk.checked = false; return; }
+          chk.disabled = true;
+          google.script.run.withSuccessHandler(function(x){ if(!x || !x.success) alert((x && x.error) || 'No se pudo cambiar.'); cargarCargaComercial_(); })
+            .withFailureHandler(function(){ alert('No se pudo cambiar.'); cargarCargaComercial_(); })
+            .guardarCargaAutomatica(ACCESS_CODE, PANEL_USUARIO, Number(chk.dataset.id), chk.checked);
+        });
+      });
+      caja.querySelectorAll('.ocx-auto-acc').forEach(function(b){
+        b.addEventListener('click', function(){
+          if(b.dataset.acc === 'liberar' && !confirm('¿Quitar la OC ' + b.dataset.serie + ' ' + b.dataset.folio + ' de la cola? Sus partidas vuelven a quedar pendientes y tomarán otro folio. Revisa antes en Comercial que NO se haya creado.')) return;
+          b.disabled = true;
+          google.script.run.withSuccessHandler(function(x){ if(!x || !x.success) alert((x && x.error) || 'No se pudo.'); cargarCargaComercial_(); cargarPartidasOcx_(false); })
+            .withFailureHandler(function(){ alert('No se pudo.'); cargarCargaComercial_(); })
+            .accionOcComercial(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.emp), b.dataset.serie, Number(b.dataset.folio), b.dataset.acc);
+        });
+      });
+      ocultarControlesSoloLectura();
+    })
+    .withFailureHandler(function(){ caja.innerHTML = '<div class="mnt-subtext">No se pudo leer la carga automática.</div>'; })
+    .getCargaComercial(ACCESS_CODE, PANEL_USUARIO);
+}
 document.getElementById('ocx-modal-close').addEventListener('click', function(){ ocxOverlay.classList.remove('open'); });
 ocxOverlay.addEventListener('click', function(e){ if(e.target === ocxOverlay) ocxOverlay.classList.remove('open'); });
 document.getElementById('ocx-incluir-exportadas').addEventListener('change', function(){ cargarPartidasOcx_(false); });

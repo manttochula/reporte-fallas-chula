@@ -3301,3 +3301,16 @@ SET @carga_gts_hecha = (SELECT COUNT(*) FROM configuracion WHERE clave = 'carga_
 UPDATE cuentas_contables SET codigo_comercial = 'GTS30'
   WHERE @carga_gts_hecha = 0 AND nombre = 'MTTO TRACTORES' AND (codigo_comercial IS NULL OR codigo_comercial = '');
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_codigo_gasto_2026_10', 'hecha');
+
+-- ------------------------------------------------------------
+-- Carga AUTOMÁTICA de OC a CONTPAQi con el agente de la PC de Comercial
+-- (oct-2026, Carlos: "sin generar el Excel ni pegarlo a la macro"). Ver
+-- agente_oc_comercial/ y agenteOcTrabajo / agenteOcResultado en handlers.js.
+-- Lo que se manda (código de producto, concepto, almacén, proveedor) queda
+-- guardado al encolar; agente_estado: NULL = exportada con Excel (manual),
+-- 'pendiente' = esperando al agente, 'cargada' = ya está en Comercial,
+-- 'error' = el agente no la pudo crear (agente_mensaje dice por qué).
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'oc_exportaciones' AND column_name = 'agente_estado');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE oc_exportaciones ADD COLUMN codigo_producto VARCHAR(30) DEFAULT NULL, ADD COLUMN concepto VARCHAR(120) DEFAULT NULL, ADD COLUMN almacen VARCHAR(30) DEFAULT NULL, ADD COLUMN codigo_proveedor VARCHAR(20) DEFAULT NULL, ADD COLUMN fecha_entrega DATE DEFAULT NULL, ADD COLUMN agente_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN agente_mensaje TEXT DEFAULT NULL, ADD COLUMN agente_en DATETIME DEFAULT NULL, ADD COLUMN agente_total DECIMAL(14,2) DEFAULT NULL, ADD INDEX idx_oc_export_agente (agente_estado, empresa_id)', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

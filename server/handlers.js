@@ -8505,6 +8505,15 @@ async function getPartidasParaOC(code, nombreUsuario, incluirExportadas) {
 
 async function exportarOCContpaqi(code, nombreUsuario, data) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  return exportarOcInterno_(nombreUsuario, data, {});
+}
+
+// Núcleo de la exportación (lo usa el botón "Generar Excel" y la carga
+// automática del agente de Comercial). opciones.agente = true: las OC quedan
+// "pendientes de cargar en Comercial" (oc_exportaciones.agente_estado) para
+// que el agente las cree; no hace falta el Excel.
+async function exportarOcInterno_(nombreUsuario, data, opciones) {
+  opciones = opciones || {};
   data = data || {};
   const ids = (Array.isArray(data.respuestaItemIds) ? data.respuestaItemIds : []).map(Number).filter((n) => n > 0);
   if (!ids.length) return { success: false, error: 'Palomea al menos una partida.' };
@@ -8562,21 +8571,27 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
   if (!plan.ocs.length && !plan.gasto.length) {
     return { success: false, error: 'Ninguna partida se puede exportar todavía: ' + plan.revisar.map((r) => r.motivo).filter((m, i, a) => a.indexOf(m) === i).join(' ') };
   }
-  const buffer = await exportarOc.escribirExcel(plan, { fecha, fechaEntrega, concepto, almacen, empresa: empresaNombre });
+  const buffer = opciones.agente ? null : await exportarOc.escribirExcel(plan, { fecha, fechaEntrega, concepto, almacen, empresa: empresaNombre });
 
-  // Se marca lo exportado (OC y gasto directo); lo de "Revisar" no.
+  // Se marca lo exportado (OC y gasto directo); lo de "Revisar" no. Se
+  // guarda también lo que va a Comercial (código de producto, concepto,
+  // almacén, proveedor) para que el agente lo cargue tal cual.
   const por = (nombreUsuario || '').toString().trim() || null;
-  const marcar = async (p, tipo, s, f) => {
+  const marcar = async (p, tipo, s, f, oc) => {
     await pool.query(
-      `INSERT INTO oc_exportaciones (respuesta_item_id, orden, refaccion_id, proveedor_id, tipo, serie, folio, fecha_oc, cantidad, precio, exportado_por, empresa_id, exportado_en)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      `INSERT INTO oc_exportaciones (respuesta_item_id, orden, refaccion_id, proveedor_id, tipo, serie, folio, fecha_oc, cantidad, precio, exportado_por, empresa_id, exportado_en,
+         codigo_producto, concepto, almacen, codigo_proveedor, fecha_entrega, agente_estado, agente_mensaje, agente_en, agente_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
        ON DUPLICATE KEY UPDATE orden = VALUES(orden), refaccion_id = VALUES(refaccion_id), proveedor_id = VALUES(proveedor_id), tipo = VALUES(tipo), empresa_id = VALUES(empresa_id),
          serie = VALUES(serie), folio = VALUES(folio), fecha_oc = VALUES(fecha_oc), cantidad = VALUES(cantidad), precio = VALUES(precio),
-         exportado_por = VALUES(exportado_por), exportado_en = NOW()`,
-      [p.respuestaItemId, p.orden || null, p.refaccionId, p.proveedorId, tipo, s, f, fecha, p.cantidad, p.precio, por, p.empresaId || empresaId]
+         exportado_por = VALUES(exportado_por), exportado_en = NOW(), codigo_producto = VALUES(codigo_producto), concepto = VALUES(concepto), almacen = VALUES(almacen),
+         codigo_proveedor = VALUES(codigo_proveedor), fecha_entrega = VALUES(fecha_entrega), agente_estado = VALUES(agente_estado), agente_mensaje = NULL, agente_en = NULL, agente_total = NULL`,
+      [p.respuestaItemId, p.orden || null, p.refaccionId, p.proveedorId, tipo, s, f, fecha, p.cantidad, p.precio, por, p.empresaId || empresaId,
+        oc ? (p.folioComercial || null) : null, oc ? oc.concepto : null, oc ? almacen : null, oc ? oc.codigoProveedor : null, oc && fechaEntrega ? fechaEntrega : null,
+        oc && opciones.agente ? 'pendiente' : null]
     );
   };
-  for (const oc of plan.ocs) for (const p of oc.partidas) await marcar(p, 'oc', oc.serie, oc.folio);
+  for (const oc of plan.ocs) for (const p of oc.partidas) await marcar(p, 'oc', oc.serie, oc.folio, oc);
   for (const p of plan.gasto) await marcar(p, 'gasto_directo', null, null);
   const suf = '_e' + empresaId;
   await guardarConfigOc_('oc_serie' + suf, serie);
@@ -8598,9 +8613,11 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
   const ordenesOc = Array.from(new Set(plan.ocs.map((o) => o.orden).filter(Boolean)));
   for (const o of ordenesOc) {
     const suyas = plan.ocs.filter((x) => x.orden === o).map((x) => x.serie + ' ' + x.folio + ' (' + x.proveedor + ')');
-    await agregarObservacionOrden_(o, (por || 'Alguien') + ' exportó a CONTPAQi (' + empresaNombre + '): OC ' + suyas.join(', ') + '.');
+    await agregarObservacionOrden_(o, opciones.agente
+      ? 'Se mandó a cargar en CONTPAQi automáticamente (' + empresaNombre + '): OC ' + suyas.join(', ') + '.'
+      : (por || 'Alguien') + ' exportó a CONTPAQi (' + empresaNombre + '): OC ' + suyas.join(', ') + '.');
   }
-  await registrarAuditoria_('oc_exportaciones', serie + '-' + folioInicial, 'exportar', nombreUsuario,
+  await registrarAuditoria_('oc_exportaciones', serie + '-' + folioInicial, opciones.agente ? 'encolar_agente' : 'exportar', nombreUsuario,
     empresaNombre + ': ' + plan.ocs.length + ' OC, ' + plan.gasto.length + ' gasto directo, ' + plan.revisar.length + ' a revisar');
 
   const empresaCorta = empresaNombre.split(',')[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
@@ -8611,22 +8628,222 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
     success: true,
     nombreArchivo: nombre,
     empresa: empresaNombre,
-    archivoBase64: buffer.toString('base64'),
+    archivoBase64: buffer ? buffer.toString('base64') : null,
     ocs: plan.ocs.map((o) => ({ serie: o.serie, folio: o.folio, orden: o.orden, proveedor: o.proveedor, codigoProveedor: o.codigoProveedor, partidas: o.partidas.length, tipo: o.tipo, concepto: o.concepto })),
     gasto: plan.gasto.length,
     revisar: plan.revisar.map((r) => ({ orden: r.partida.orden, descripcion: r.partida.descripcion, proveedor: r.partida.proveedor, motivo: r.motivo })),
   };
 }
 
+// ---------------------------------------------------------------
+// Carga AUTOMÁTICA de OC a CONTPAQi (oct-2026, Carlos: "sin estar
+// generando el Excel ni pegarlo a la macro o abrir la hoja electrónica").
+// Un agente en la PC de Comercial (carpeta agente_oc_comercial/) pregunta
+// cada pocos minutos agenteOcTrabajo, abre HojaComercial.xls, crea cada OC
+// con el mismo Inserta_Documento que usa la macro, confirma en Comercial
+// que existe (Importe_Documento) y reporta con agenteOcResultado.
+//  - Se autentica con OC_AGENTE_TOKEN (variable de entorno en Render; la
+//    misma clave se captura al instalar el agente). Sin ella, apagado.
+//  - Por empresa se prende/pausa en el Panel (configuracion oc_auto_e<ID>,
+//    apagado por omisión). Usa la serie/concepto/folio guardados de esa
+//    empresa (refacciones y gastos aparte); si falta el folio inicial de un
+//    tipo, ese tipo no se carga y el Panel avisa.
+// ---------------------------------------------------------------
+const AGENTE_OC_FUERA_MS_ = 20 * 60 * 1000;
+
+function tokenAgenteOcValido_(token) {
+  const esperado = (process.env.OC_AGENTE_TOKEN || '').toString();
+  const dado = (token || '').toString();
+  if (esperado.length < 16 || dado.length !== esperado.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(dado), Buffer.from(esperado));
+}
+
+function fechaMexico_() {
+  // Fecha de hoy en México (Render corre en UTC).
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  return p.slice(0, 10);
+}
+
+async function leerConfigAgente_() {
+  const [rows] = await pool.query("SELECT clave, valor FROM configuracion WHERE clave LIKE 'oc\\_auto\\_e%' OR clave LIKE 'agente\\_oc\\_%'");
+  const v = {};
+  rows.forEach((r) => { v[r.clave] = r.valor; });
+  return v;
+}
+
+// Encola (agente_estado = 'pendiente') todo lo autorizado de las empresas
+// con carga automática prendida. Regresa avisos por empresa.
+async function encolarOcAutomaticas_() {
+  const cfgAg = await leerConfigAgente_();
+  const [empresas] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
+  const activas = empresas.filter((e) => cfgAg['oc_auto_e' + e.id] === '1');
+  const avisos = {};
+  if (!activas.length) return avisos;
+  const todas = await partidasOc_(null);
+  for (const e of activas) {
+    const pend = todas.filter((p) => p.empresaId === e.id && p.destino === 'oc' && !p.exportada && !p.exportadaOtra);
+    const cfg = await leerConfigOc_(e.id);
+    const avisosE = [];
+    const refs = pend.filter((p) => !p.codigoPorCuenta);
+    const gastos = pend.filter((p) => p.codigoPorCuenta);
+    let ids = [];
+    if (refs.length) {
+      if (cfg.siguienteFolio) ids = ids.concat(refs.map((p) => p.respuestaItemId));
+      else avisosE.push('Hay ' + refs.length + ' partida(s) de refacciones esperando: exporta una vez desde "Exportar OC" para fijar el folio inicial de ' + cfg.serie + '.');
+    }
+    if (gastos.length) {
+      if (cfg.gasto.siguienteFolio) ids = ids.concat(gastos.map((p) => p.respuestaItemId));
+      else avisosE.push('Hay ' + gastos.length + ' partida(s) de gastos esperando: exporta una vez desde "Exportar OC" para fijar el folio inicial de ' + cfg.gasto.serie + '.');
+    }
+    if (ids.length) {
+      const r = await exportarOcInterno_('Carga automática', {
+        empresaId: e.id, respuestaItemIds: ids, fecha: fechaMexico_(),
+        serie: cfg.serie, folioInicial: cfg.siguienteFolio || 1, concepto: cfg.concepto, almacen: cfg.almacen,
+        serieGasto: cfg.gasto.serie, folioInicialGasto: cfg.gasto.siguienteFolio || 1, conceptoGasto: cfg.gasto.concepto,
+      }, { agente: true });
+      if (!r.success) avisosE.push(r.error);
+    }
+    avisos[e.id] = avisosE;
+    await pool.query('INSERT INTO configuracion (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)', ['agente_oc_aviso_e' + e.id, avisosE.join(' ')]);
+  }
+  return avisos;
+}
+
+// OC pendientes de cargar, agrupadas por empresa y serie+folio.
+async function ocsPendientesAgente_() {
+  const [rows] = await pool.query(
+    `SELECT x.empresa_id, e.nombre AS empresa, x.serie, x.folio, x.fecha_oc, x.fecha_entrega, x.concepto, x.almacen, x.codigo_proveedor,
+            x.codigo_producto, x.cantidad, x.precio, x.respuesta_item_id, x.orden
+     FROM oc_exportaciones x JOIN empresas e ON e.id = x.empresa_id
+     WHERE x.agente_estado = 'pendiente' AND x.tipo = 'oc'
+     ORDER BY e.nombre, x.serie, x.folio, x.id`
+  );
+  const porEmpresa = {};
+  rows.forEach((r) => {
+    const emp = porEmpresa[r.empresa_id] || (porEmpresa[r.empresa_id] = { empresaId: r.empresa_id, empresa: r.empresa, ocs: {} });
+    const clave = r.serie + '|' + r.folio;
+    const oc = emp.ocs[clave] || (emp.ocs[clave] = {
+      serie: r.serie, folio: r.folio, fecha: fechaSoloOrNull(r.fecha_oc), fechaEntrega: r.fecha_entrega ? fechaSoloOrNull(r.fecha_entrega) : null,
+      concepto: r.concepto, almacen: r.almacen, codigoProveedor: r.codigo_proveedor, orden: r.orden || '', partidas: [],
+    });
+    oc.partidas.push({ codigoProducto: r.codigo_producto, cantidad: Number(r.cantidad), precio: Number(r.precio) });
+  });
+  return Object.values(porEmpresa).map((e) => ({ empresaId: e.empresaId, empresa: e.empresa, ocs: Object.values(e.ocs) }));
+}
+
+// Lo usa el instalador del agente para probar la clave (no encola nada).
+async function agenteOcPing(token) {
+  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida (revisa OC_AGENTE_TOKEN en Render).' };
+  const [emp] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
+  return { success: true, empresas: emp.map((e) => ({ id: e.id, nombre: e.nombre })) };
+}
+
+// Lo llama el AGENTE (no el Panel). info: { version, equipo, hojaComercialEmpresas }.
+async function agenteOcTrabajo(token, info) {
+  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  info = info || {};
+  const visto = JSON.stringify({ en: new Date().toISOString(), version: (info.version || '').toString().slice(0, 30), equipo: (info.equipo || '').toString().slice(0, 60),
+    empresasHoja: Array.isArray(info.hojaComercialEmpresas) ? info.hojaComercialEmpresas.slice(0, 30).map((x) => String(x).slice(0, 80)) : [], error: (info.error || '').toString().slice(0, 500) });
+  await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
+  await encolarOcAutomaticas_();
+  return { success: true, empresas: await ocsPendientesAgente_() };
+}
+
+// resultados: [{ empresaId, serie, folio, ok, mensaje, total }]
+async function agenteOcResultado(token, resultados) {
+  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  const lista = Array.isArray(resultados) ? resultados.slice(0, 500) : [];
+  let cargadas = 0, errores = 0;
+  for (const r of lista) {
+    const empresaId = Number(r.empresaId) || 0;
+    const serie = (r.serie || '').toString();
+    const folio = Number(r.folio) || 0;
+    const mensaje = (r.mensaje || '').toString().slice(0, 1000) || null;
+    const total = r.total === null || r.total === undefined || r.total === '' ? null : Number(r.total);
+    const [upd] = await pool.query(
+      `UPDATE oc_exportaciones SET agente_estado = ?, agente_mensaje = ?, agente_total = ?, agente_en = NOW()
+       WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'pendiente'`,
+      [r.ok ? 'cargada' : 'error', mensaje, Number.isFinite(total) ? total : null, empresaId, serie, folio]
+    );
+    if (!upd.affectedRows) continue;
+    const [ords] = await pool.query('SELECT DISTINCT orden FROM oc_exportaciones WHERE empresa_id = ? AND serie = ? AND folio = ? AND orden IS NOT NULL', [empresaId, serie, folio]);
+    for (const o of ords) {
+      await agregarObservacionOrden_(o.orden, r.ok
+        ? 'OC ' + serie + ' ' + folio + ' cargada en CONTPAQi Comercial' + (Number.isFinite(total) ? ' (total $' + total.toFixed(2) + ')' : '') + '.'
+        : 'No se pudo cargar la OC ' + serie + ' ' + folio + ' en CONTPAQi: ' + (mensaje || 'sin detalle') + '.');
+    }
+    if (r.ok) cargadas++;
+    else {
+      errores++;
+      avisos.avisarTexto_('No se pudo cargar la OC ' + serie + ' ' + folio + ' en Comercial', [['Motivo', mensaje || 'sin detalle'], ['Orden', ords.map((o) => o.orden).join(', ') || '—']], '/panel', 'oc-agente-' + serie + '-' + folio);
+    }
+  }
+  return { success: true, cargadas, errores };
+}
+
+// ---- Panel ----
+async function getCargaComercial(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  const v = await leerConfigAgente_();
+  let agente = null;
+  try { agente = v.agente_oc_visto ? JSON.parse(v.agente_oc_visto) : null; } catch (e) { agente = null; }
+  const conectado = !!(agente && Date.now() - new Date(agente.en).getTime() < AGENTE_OC_FUERA_MS_);
+  const [empresas] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
+  const [cola] = await pool.query(
+    `SELECT x.empresa_id, x.serie, x.folio, x.agente_estado, MAX(x.agente_mensaje) AS mensaje, MAX(x.agente_total) AS total, MAX(x.agente_en) AS en,
+            MIN(x.exportado_en) AS encolado, COUNT(*) AS partidas, GROUP_CONCAT(DISTINCT x.orden) AS ordenes, MAX(p.nombre) AS proveedor
+     FROM oc_exportaciones x LEFT JOIN proveedores p ON p.id = x.proveedor_id
+     WHERE x.agente_estado IS NOT NULL AND (x.agente_estado <> 'cargada' OR x.agente_en > NOW() - INTERVAL 7 DAY)
+     GROUP BY x.empresa_id, x.serie, x.folio, x.agente_estado ORDER BY encolado DESC LIMIT 200`
+  );
+  return {
+    success: true,
+    tokenConfigurado: (process.env.OC_AGENTE_TOKEN || '').length >= 16,
+    agente: agente ? { en: agente.en, version: agente.version, equipo: agente.equipo, empresasHoja: agente.empresasHoja || [], error: agente.error || '', conectado } : null,
+    empresas: empresas.map((e) => ({ id: e.id, nombre: e.nombre, automatico: v['oc_auto_e' + e.id] === '1', aviso: v['agente_oc_aviso_e' + e.id] || '' })),
+    cola: cola.map((c) => ({ empresaId: c.empresa_id, serie: c.serie, folio: c.folio, estado: c.agente_estado, mensaje: c.mensaje || '', total: c.total === null ? null : Number(c.total),
+      en: isoOrNull(c.en), encolado: isoOrNull(c.encolado), partidas: Number(c.partidas), ordenes: c.ordenes || '', proveedor: c.proveedor || '' })),
+  };
+}
+
+async function guardarCargaAutomatica(code, nombreUsuario, empresaId, activo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(empresaId) || 0;
+  const [e] = await pool.query('SELECT nombre FROM empresas WHERE id = ?', [id]);
+  if (!e.length) return { success: false, error: 'No se encontró la empresa.' };
+  await pool.query('INSERT INTO configuracion (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)', ['oc_auto_e' + id, activo ? '1' : '0']);
+  await registrarAuditoria_('configuracion', 'oc_auto_e' + id, activo ? 'prender' : 'pausar', nombreUsuario, 'Carga automática a Comercial: ' + e[0].nombre);
+  return { success: true, automatico: !!activo };
+}
+
+// accion: 'reintentar' (error -> pendiente, mismo folio) | 'liberar' (se
+// quita la marca: las partidas vuelven a quedar pendientes y tomarán un
+// folio nuevo; úsalo si el folio ya existe en Comercial).
+async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, accion) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const args = [Number(empresaId) || 0, (serie || '').toString(), Number(folio) || 0];
+  let n = 0;
+  if (accion === 'reintentar') {
+    const [u] = await pool.query("UPDATE oc_exportaciones SET agente_estado = 'pendiente', agente_mensaje = NULL WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'error'", args);
+    n = u.affectedRows;
+  } else if (accion === 'liberar') {
+    const [d] = await pool.query("DELETE FROM oc_exportaciones WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado IN ('error', 'pendiente')", args);
+    n = d.affectedRows;
+  } else return { success: false, error: 'Acción no válida.' };
+  if (!n) return { success: false, error: 'Esa OC ya cambió de estado. Actualiza la lista.' };
+  await registrarAuditoria_('oc_exportaciones', args[1] + '-' + args[2], 'agente_' + accion, nombreUsuario, n + ' partida(s)');
+  return { success: true, partidas: n };
+}
+
 // Para la orden (Refaccionamiento): OC/gasto directo de cada refacción.
 async function ocsDeOrden_(orden) {
   const [rows] = await pool.query(
-    'SELECT x.refaccion_id, x.tipo, x.serie, x.folio, x.fecha_oc, x.exportado_por, e.nombre AS empresa FROM oc_exportaciones x LEFT JOIN empresas e ON e.id = x.empresa_id WHERE x.orden = ? ORDER BY x.exportado_en',
+    'SELECT x.refaccion_id, x.tipo, x.serie, x.folio, x.fecha_oc, x.exportado_por, x.agente_estado, e.nombre AS empresa FROM oc_exportaciones x LEFT JOIN empresas e ON e.id = x.empresa_id WHERE x.orden = ? ORDER BY x.exportado_en',
     [orden]
   );
   const porRef = {};
   rows.forEach((r) => {
-    porRef[r.refaccion_id] = { tipo: r.tipo, serie: r.serie || '', folio: r.folio, fecha: fechaSoloOrNull(r.fecha_oc), por: r.exportado_por || '', empresa: r.empresa || '' };
+    porRef[r.refaccion_id] = { tipo: r.tipo, serie: r.serie || '', folio: r.folio, fecha: fechaSoloOrNull(r.fecha_oc), por: r.exportado_por || '', empresa: r.empresa || '', agente: r.agente_estado || '' };
   });
   return porRef;
 }
@@ -10399,6 +10616,13 @@ module.exports = {
   guardarTipoUnidad,
   eliminarTipoUnidad,
   getEmpresasCatalogo,
+  agenteOcTrabajo,
+  agenteOcPing,
+  agenteOcResultado,
+  getCargaComercial,
+  guardarCargaAutomatica,
+  accionOcComercial,
+  encolarOcAutomaticas_,
   corregirRespuestaItem,
   getUmbralesPreventivo,
   guardarUmbralesPreventivo,

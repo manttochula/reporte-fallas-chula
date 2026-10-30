@@ -1034,7 +1034,7 @@ function rnRenderLista(orden, listaEl){
     if(it.oc){
       var oc = document.createElement('span');
       oc.className = 'rn-item-badge rn-item-oc';
-      oc.textContent = it.oc.tipo === 'oc' ? ('OC ' + it.oc.serie + ' ' + it.oc.folio) : 'Gasto directo';
+      oc.textContent = it.oc.tipo === 'oc' ? ('OC ' + it.oc.serie + ' ' + it.oc.folio + (it.oc.agente === 'cargada' ? ' ✓ en Comercial' : it.oc.agente === 'pendiente' ? ' · cargando a Comercial' : it.oc.agente === 'error' ? ' ⚠ error al cargar' : '')) : 'Gasto directo';
       row.appendChild(oc);
     }
 

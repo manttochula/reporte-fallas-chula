@@ -3287,3 +3287,17 @@ CREATE TABLE IF NOT EXISTS huerta_actividades_aportes (
   PRIMARY KEY (actividad_id, avance_id),
   INDEX idx_haa_avance (avance_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Código de producto GENÉRICO en Comercial por cuenta contable (oct-2026,
+-- Carlos): un gasto (refacción sin folio comercial) se carga en Comercial
+-- como OC con ese código, p.ej. GTS30 = "SERVICIO MTTO. TRACTORES". Ver
+-- partidasOc_ en handlers.js.
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables' AND column_name = 'codigo_comercial');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE cuentas_contables ADD COLUMN codigo_comercial VARCHAR(30) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @carga_gts_hecha = (SELECT COUNT(*) FROM configuracion WHERE clave = 'carga_codigo_gasto_2026_10');
+UPDATE cuentas_contables SET codigo_comercial = 'GTS30'
+  WHERE @carga_gts_hecha = 0 AND nombre = 'MTTO TRACTORES' AND (codigo_comercial IS NULL OR codigo_comercial = '');
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_codigo_gasto_2026_10', 'hecha');

@@ -2974,6 +2974,8 @@
           </div>
           <div class="maq-field"><label>Descripción en la OC</label><input type="text" id="catsimple-f-cuenta-descripcion" maxlength="150" placeholder="Ej. SERVICIO MTTO. TRACTORES">
             <small style="color:var(--text-dim);">Lo que sale en la columna "Descripción" de cada partida de la orden de compra. Si lo dejas vacío sale "SERVICIO " + el nombre de la cuenta.</small></div>
+          <div class="maq-field"><label>Código de producto en Comercial para gastos</label><input type="text" id="catsimple-f-cuenta-codigo" maxlength="30" placeholder="Ej. GTS30">
+            <small style="color:var(--text-dim);">Las refacciones sin folio comercial (gastos) de los equipos con esta cuenta se exportan a la OC de CONTPAQi con este código (ej. GTS30 = SERVICIO MTTO. TRACTORES). Vacío = van a la hoja "Gasto directo".</small></div>
           <div class="maq-field"><label>Huerta y segmento por empresa</label>
             <small style="color:var(--text-dim);">Según la empresa del equipo (Catálogo de maquinaria). Ej. Chula Brand México → PRORRATEABLES, 29. Si dejas una empresa vacía: huerta de la orden y el segmento de arriba.</small>
             <table class="ocx-tabla cce-tabla" style="margin-top:6px;width:100%;"><thead><tr><th>Empresa</th><th>Huerta (nota)</th><th>Segmento</th></tr></thead><tbody id="catsimple-f-cuenta-empresas"></tbody></table>
@@ -3485,7 +3487,7 @@
       <div class="maq-modal" style="max-width:1150px;width:96vw;">
         <button class="maq-modal-close" id="ocx-modal-close">&times;</button>
         <h3>Exportar OC para CONTPAQi</h3>
-        <div class="mnt-subtext" style="margin-bottom:10px;">Toma las refacciones con precio <b>autorizado</b> ("Aut" en las cotizaciones) y arma el Excel con la hoja <b>Lote</b> para tu macro. Una OC por proveedor y por orden. Precio sin IVA (con el descuento del proveedor ya aplicado). Las refacciones sin folio comercial van a la hoja <b>Gasto directo</b>; las de proveedores sin código en Comercial, a <b>Revisar</b> (esas no se marcan y vuelven a salir).</div>
+        <div class="mnt-subtext" style="margin-bottom:10px;">Toma las refacciones con precio <b>autorizado</b> ("Aut" en las cotizaciones) y arma el Excel con la hoja <b>Lote</b> para tu macro. Una OC por proveedor y por orden. Precio sin IVA (con el descuento del proveedor ya aplicado). Las refacciones sin folio comercial (gastos) van también como OC con el código genérico de la cuenta contable del equipo (ej. <b>GTS30</b>, Catálogo → Cuentas contables); si la cuenta no lo tiene, a la hoja <b>Gasto directo</b>; las de proveedores sin código en Comercial, a <b>Revisar</b> (esas no se marcan y vuelven a salir).</div>
         <div class="maq-field">
           <label>Empresa en Comercial *</label>
           <select id="ocx-empresa"></select>
@@ -19603,7 +19605,7 @@ function renderCatalogoSimple(key){
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
     if(cfg.tieneCuentaExtra){
-      const partes = [r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean)
+      const partes = [r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.CodigoComercial ? 'gastos: ' + r.CodigoComercial : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean)
         .concat((r.PorEmpresa || []).map(function(x){ return x.Empresa.split(',')[0] + ': ' + [x.Huerta, x.Segmento ? 'seg. ' + x.Segmento : ''].filter(Boolean).join(' '); }));
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
@@ -19698,6 +19700,7 @@ function abrirModalCatalogoSimple(key, registro){
     document.getElementById('catsimple-f-cuenta-numero').value = (registro && registro.Numero) || '';
     document.getElementById('catsimple-f-cuenta-segmento').value = (registro && registro.Segmento) || '';
     document.getElementById('catsimple-f-cuenta-descripcion').value = (registro && registro.DescripcionOc) || '';
+    document.getElementById('catsimple-f-cuenta-codigo').value = (registro && registro.CodigoComercial) || '';
     const porEmp = (registro && registro.PorEmpresa) || [];
     const empresasCce = (CATALOGO_SIMPLE_DATOS.empresas || []).slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
     document.getElementById('catsimple-f-cuenta-empresas').innerHTML = empresasCce.map(function(e){
@@ -19793,6 +19796,7 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
     data.numero = document.getElementById('catsimple-f-cuenta-numero').value.trim();
     data.segmento = document.getElementById('catsimple-f-cuenta-segmento').value.trim();
     data.descripcionOc = document.getElementById('catsimple-f-cuenta-descripcion').value.trim();
+    data.codigoComercial = document.getElementById('catsimple-f-cuenta-codigo').value.trim();
     data.porEmpresa = Array.from(document.querySelectorAll('#catsimple-f-cuenta-empresas tr[data-empresa-id]')).map(function(tr){
       return { empresaId: Number(tr.dataset.empresaId), huerta: tr.querySelector('.cce-huerta').value.trim(), segmento: tr.querySelector('.cce-segmento').value.trim() };
     });
@@ -21120,7 +21124,7 @@ function renderPartidasOcx_(){
     return;
   }
   body.innerHTML = OCX_PARTIDAS.map(function(p){
-    const destino = p.destino === 'oc' ? '<span class="ocx-destino-oc">OC</span>'
+    const destino = p.destino === 'oc' ? '<span class="ocx-destino-oc">OC</span>' + (p.codigoPorCuenta ? '<div class="mnt-subtext">como gasto (' + escapeHtml(p.codigoPorCuenta) + ')</div>' : '')
       : p.destino === 'gasto' ? '<span class="ocx-destino-gasto">Gasto directo</span>'
       : '<span class="ocx-destino-revisar">Revisar</span><div class="mnt-subtext">' + escapeHtml(p.motivo) + '</div>';
     let ya = '';
@@ -21132,7 +21136,7 @@ function renderPartidasOcx_(){
       '<td>' + (p.empresa ? escapeHtml(p.empresa.split(',')[0]) : '<span class="ocx-destino-revisar">Sin empresa</span>') + '</td>' +
       '<td>' + escapeHtml(p.proveedor) + ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(p.codigoComercial || 'sin código') + ')</span></td>' +
       '<td>' + escapeHtml(p.descripcion) + '<div class="mnt-subtext">' + escapeHtml([p.refaccionCodigo, p.noParte].filter(Boolean).join(' · ')) + '</div></td>' +
-      '<td>' + escapeHtml(p.folioComercial || '—') + '</td>' +
+      '<td>' + escapeHtml(p.folioComercial || '—') + (p.codigoPorCuenta ? '<div class="mnt-subtext">genérico de ' + escapeHtml(p.cuentaNombre || 'la cuenta') + '</div>' : '') + '</td>' +
       '<td>' + p.cantidad + '</td>' +
       '<td>' + ocxDinero_(p.precio) + '</td>' +
       '<td>' + ocxDinero_(p.precio === null ? null : p.precio * p.cantidad) + '</td>' +

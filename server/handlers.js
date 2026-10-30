@@ -8144,13 +8144,13 @@ async function guardarEmpresa(code, nombreUsuario, id, data) {
 async function getCuentasContables(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_.concat(['refacciones']), 'visualizar');
   const [rows] = await pool.query(
-    `SELECT c.id, c.nombre, c.numero, c.segmento, c.descripcion_oc, GROUP_CONCAT(t.nombre ORDER BY t.nombre SEPARATOR ', ') AS tipos
+    `SELECT c.id, c.nombre, c.numero, c.segmento, c.descripcion_oc, c.codigo_comercial, GROUP_CONCAT(t.nombre ORDER BY t.nombre SEPARATOR ', ') AS tipos
      FROM cuentas_contables c LEFT JOIN tipos_unidad t ON t.cuenta_contable_id = c.id GROUP BY c.id ORDER BY c.nombre`
   );
   const [pe] = await pool.query(
     'SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento, e.nombre FROM cuentas_contables_empresas x JOIN empresas e ON e.id = x.empresa_id ORDER BY e.nombre'
   );
-  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', TiposUnidad: r.tipos || '',
+  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', CodigoComercial: r.codigo_comercial || '', TiposUnidad: r.tipos || '',
     PorEmpresa: pe.filter((x) => x.cuenta_id === r.id).map((x) => ({ EmpresaId: x.empresa_id, Empresa: x.nombre, Huerta: x.huerta || '', Segmento: x.segmento || '' })) }));
 }
 
@@ -8166,6 +8166,7 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
   const numero = (data.numero || '').toString().trim();
   const segmento = (data.segmento || '').toString().trim();
   const descripcionOc = (data.descripcionOc || '').toString().trim().toUpperCase();
+  const codigoComercial = (data.codigoComercial || '').toString().trim().toUpperCase().slice(0, 30) || null;
   if (!nombre) return { success: false, error: 'Escribe el nombre de la cuenta (ej. MTTO TRACTORES).' };
   if (!numero) return { success: false, error: 'Escribe el número de cuenta (ej. 59060003000).' };
   if (numero.length > 40 || segmento.length > 20 || descripcionOc.length > 150) return { success: false, error: 'Algún dato es demasiado largo.' };
@@ -8179,9 +8180,10 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
     })).filter((x) => x.empresaId && (x.huerta || x.segmento)) : null;
     let cuentaId = Number(id) || 0;
     if (cuentaId) {
-      await pool.query('UPDATE cuentas_contables SET nombre=?, numero=?, segmento=?, descripcion_oc=? WHERE id=?', [nombre, numero, segmento || null, descripcionOc || null, cuentaId]);
+      await pool.query('UPDATE cuentas_contables SET nombre=?, numero=?, segmento=?, descripcion_oc=?' + ('codigoComercial' in data ? ', codigo_comercial=?' : '') + ' WHERE id=?',
+        [nombre, numero, segmento || null, descripcionOc || null].concat('codigoComercial' in data ? [codigoComercial] : []).concat([cuentaId]));
     } else {
-      const [res] = await pool.query('INSERT INTO cuentas_contables (nombre, numero, segmento, descripcion_oc) VALUES (?, ?, ?, ?)', [nombre, numero, segmento || null, descripcionOc || null]);
+      const [res] = await pool.query('INSERT INTO cuentas_contables (nombre, numero, segmento, descripcion_oc, codigo_comercial) VALUES (?, ?, ?, ?, ?)', [nombre, numero, segmento || null, descripcionOc || null, codigoComercial]);
       cuentaId = res.insertId;
     }
     if (porEmpresa) {
@@ -8411,6 +8413,7 @@ async function partidasOc_(ids) {
             s.folio AS solicitudFolio, s.orden AS orden, s.proveedor_id AS proveedorId, p.nombre AS proveedor, p.codigo_comercial AS codigoComercial,
             ref.id AS refaccionId, ref.codigo AS refaccionCodigo, ref.descripcion AS descripcion, ref.no_parte AS noParte, ref.folio_comercial AS folioComercial,
             rep.unidad AS ordenUnidad, rep.codigo_unidad AS codigoUnidad, mq.empresa_id AS empresaId, emp.nombre AS empresa,
+            cc.codigo_comercial AS codigoGasto, cc.nombre AS cuentaNombre,
             x.tipo AS expTipo, x.serie AS expSerie, x.folio AS expFolio, x.fecha_oc AS expFecha, x.exportado_por AS expPor, x.exportado_en AS expEn
      FROM solicitud_cotizacion_respuesta_items ri
      JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
@@ -8421,6 +8424,8 @@ async function partidasOc_(ids) {
      LEFT JOIN reportes rep ON rep.orden = s.orden
      LEFT JOIN maquinaria mq ON mq.codigo_unidad = rep.codigo_unidad
      LEFT JOIN empresas emp ON emp.id = mq.empresa_id
+     LEFT JOIN tipos_unidad tu ON LOWER(TRIM(tu.nombre)) = LOWER(TRIM(mq.tipo_unidad))
+     LEFT JOIN cuentas_contables cc ON cc.id = tu.cuenta_contable_id
      LEFT JOIN oc_exportaciones x ON x.respuesta_item_id = ri.id
      WHERE ri.autorizado = 1 AND s.estado <> 'cancelada'${filtroIds}
      ORDER BY s.orden, p.nombre, ref.descripcion`,
@@ -8434,7 +8439,16 @@ async function partidasOc_(ids) {
     const otra = otras.find((o) => o.respuesta_item_id !== x.respuestaItemId && o.orden === x.orden && o.refaccion_id === x.refaccionId);
     let destino = 'oc';
     let motivo = '';
-    if (!(x.folioComercial || '').trim()) { destino = 'gasto'; motivo = 'Sin folio comercial: gasto directo.'; }
+    // Oct-2026 (Carlos): un GASTO (refacción sin folio comercial) también se
+    // carga en Comercial como OC, con el código de producto genérico de la
+    // cuenta contable del equipo (ej. GTS30 = SERVICIO MTTO. TRACTORES).
+    // Solo si la cuenta no tiene ese código se va a "Gasto directo".
+    let codigoPorCuenta = '';
+    if (!(x.folioComercial || '').trim() && (x.codigoGasto || '').trim()) {
+      codigoPorCuenta = x.codigoGasto.trim();
+      x.folioComercial = codigoPorCuenta;
+    }
+    if (!(x.folioComercial || '').trim()) { destino = 'gasto'; motivo = 'Sin folio comercial ni código de gasto en la cuenta contable del equipo: gasto directo.'; }
     else if (!(Number(x.cantidad) > 0)) { destino = 'revisar'; motivo = 'Sin cantidad.'; }
     else if (precio === null) { destino = 'revisar'; motivo = 'Sin precio autorizado.'; }
     else if (!(x.codigoComercial || '').trim()) { destino = 'revisar'; motivo = 'El proveedor no tiene "Código en Comercial".'; }
@@ -8454,6 +8468,8 @@ async function partidasOc_(ids) {
       descripcion: x.descripcion || '',
       noParte: x.noParte || '',
       folioComercial: x.folioComercial || '',
+      codigoPorCuenta, // != '' -> es gasto: va con el código genérico de la cuenta
+      cuentaNombre: x.cuentaNombre || '',
       cantidad: Number(x.cantidad),
       precio,
       destino,

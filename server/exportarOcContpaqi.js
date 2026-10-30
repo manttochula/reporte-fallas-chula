@@ -126,7 +126,9 @@ async function escribirExcel(plan, opciones) {
     gasto.addRow({ empresa: p.empresa || opciones.empresa || '', orden: p.orden || '', ref: p.descripcion || '', cod: p.refaccionCodigo || '', prov: p.proveedor || '',
       cant: Number(p.cantidad) || 0, precio: Number(p.precio) || 0, total: Math.round((Number(p.cantidad) || 0) * (Number(p.precio) || 0) * 100) / 100 });
   });
-  ['F', 'G'].forEach((c) => { gasto.getColumn(c).numFmt = '$#,##0.00'; });
+  // Con la columna Empresa al inicio: F = Cantidad (número), G = Precio, H = Total.
+  gasto.getColumn('F').numFmt = '0.##';
+  ['G', 'H'].forEach((c) => { gasto.getColumn(c).numFmt = '$#,##0.00'; });
 
   const rev = wb.addWorksheet('Revisar');
   rev.columns = [
@@ -142,7 +144,8 @@ async function escribirExcel(plan, opciones) {
     rev.addRow({ empresa: p.empresa || '', orden: p.orden || '', ref: p.descripcion || '', folio: p.folioComercial || '', prov: p.proveedor || '',
       cant: p.cantidad, precio: p.precio, motivo: r.motivo });
   });
-  rev.getColumn('F').numFmt = '$#,##0.00';
+  rev.getColumn('F').numFmt = '0.##';
+  rev.getColumn('G').numFmt = '$#,##0.00';
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

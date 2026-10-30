@@ -105,7 +105,7 @@ async function escribirExcel(plan, opciones) {
   plan.ocs.forEach((oc) => {
     oc.partidas.forEach((p) => {
       lote.addRow([
-        oc.serie, oc.folio, fecha, concepto, String(oc.codigoProveedor), null, fechaEntrega, 1, 1,
+        oc.serie, oc.folio, fecha, texto_(oc.concepto) || concepto, String(oc.codigoProveedor), null, fechaEntrega, 1, 1,
         String(texto_(p.folioComercial)), almacen, Number(p.cantidad), Number(p.precio),
         null, null, null, null, null,
       ]);

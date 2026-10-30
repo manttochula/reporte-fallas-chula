@@ -8380,6 +8380,7 @@ async function eliminarModelo(code, nombreUsuario, id) {
 // claude/especificacion-exportar-oc-contpaqi.md.
 // ---------------------------------------------------------------
 const OC_CONFIG_DEFAULT_ = { serie: 'VER', concepto: 'ORDEN DE COMPRA VRZ', almacen: 'ALMMTTO' };
+const OC_CONFIG_GASTO_DEFAULT_ = { serie: 'mtto', concepto: 'ORDEN DE COMPRA GENERALES' };
 
 // Configuración de la exportación. Cada empresa es una base aparte en
 // Comercial, así que serie/concepto/almacén y el último folio se guardan POR
@@ -8397,6 +8398,18 @@ async function leerConfigOc_(empresaId) {
     almacen: v['oc_almacen' + suf] || v.oc_almacen || OC_CONFIG_DEFAULT_.almacen,
     ultimoFolio: ultimo || null,
     siguienteFolio: ultimo ? ultimo + 1 : null,
+    // Oct-2026 (Carlos): los GASTOS (refacciones sin folio, con el código
+    // genérico de la cuenta, ej. GTS30) van en OC aparte, con su propia
+    // serie/concepto/folio: mtto / ORDEN DE COMPRA GENERALES.
+    gasto: (() => {
+      const ug = Number(v['oc_ultimo_folio_gasto' + suf]) || 0;
+      return {
+        serie: v['oc_serie_gasto' + suf] || OC_CONFIG_GASTO_DEFAULT_.serie,
+        concepto: v['oc_concepto_gasto' + suf] || OC_CONFIG_GASTO_DEFAULT_.concepto,
+        ultimoFolio: ug || null,
+        siguienteFolio: ug ? ug + 1 : null,
+      };
+    })(),
   };
 }
 
@@ -8524,7 +8537,27 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
     else if (p.empresaId !== empresaId) otrasRevisar.push({ partida: p, motivo: 'Es de ' + p.empresa + ': expórtala eligiendo esa empresa.' });
     else partidas.push(p);
   });
-  const plan = exportarOc.planearOcs(partidas, { serie, folioInicial, concepto, almacen });
+  // Refacciones (con su folio) y gastos (código genérico de la cuenta) van
+  // en OC separadas, cada tipo con su serie, concepto y folios.
+  const partidasRef = partidas.filter((p) => !p.codigoPorCuenta);
+  const partidasGasto = partidas.filter((p) => p.codigoPorCuenta);
+  const serieGasto = (data.serieGasto || '').toString().trim();
+  const conceptoGasto = (data.conceptoGasto || '').toString().trim();
+  const folioInicialGasto = Number(data.folioInicialGasto);
+  if (partidasGasto.length) {
+    if (!serieGasto || serieGasto.length > 10) return { success: false, error: 'Escribe la serie de las OC de gastos (ej. mtto).' };
+    if (!conceptoGasto) return { success: false, error: 'Escribe el concepto de las OC de gastos (ej. ORDEN DE COMPRA GENERALES).' };
+    if (!Number.isInteger(folioInicialGasto) || folioInicialGasto < 1 || folioInicialGasto > 999999999) return { success: false, error: 'Escribe el folio inicial de las OC de gastos (un número entero; no debe existir todavía en Comercial).' };
+  }
+  const plan = exportarOc.planearOcs(partidasRef, { serie, folioInicial, concepto, almacen });
+  plan.ocs.forEach((o) => { o.concepto = concepto; o.tipo = 'refacciones'; });
+  if (partidasGasto.length) {
+    const planG = exportarOc.planearOcs(partidasGasto, { serie: serieGasto, folioInicial: folioInicialGasto });
+    planG.ocs.forEach((o) => { o.concepto = conceptoGasto; o.tipo = 'gasto'; });
+    plan.ocs = plan.ocs.concat(planG.ocs);
+    plan.gasto = plan.gasto.concat(planG.gasto);
+    plan.revisar = plan.revisar.concat(planG.revisar);
+  }
   plan.revisar = plan.revisar.concat(otrasRevisar);
   if (!plan.ocs.length && !plan.gasto.length) {
     return { success: false, error: 'Ninguna partida se puede exportar todavía: ' + plan.revisar.map((r) => r.motivo).filter((m, i, a) => a.indexOf(m) === i).join(' ') };
@@ -8549,10 +8582,18 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
   await guardarConfigOc_('oc_serie' + suf, serie);
   await guardarConfigOc_('oc_concepto' + suf, concepto);
   await guardarConfigOc_('oc_almacen' + suf, almacen);
-  if (plan.ocs.length) {
-    const ultimo = plan.ocs[plan.ocs.length - 1].folio;
-    const actual = (await leerConfigOc_(empresaId)).ultimoFolio || 0;
-    if (ultimo > actual) await guardarConfigOc_('oc_ultimo_folio' + suf, ultimo);
+  const ocsRef = plan.ocs.filter((o) => o.tipo !== 'gasto');
+  const ocsGasto = plan.ocs.filter((o) => o.tipo === 'gasto');
+  const cfgAntes = await leerConfigOc_(empresaId);
+  if (ocsRef.length) {
+    const ultimo = ocsRef[ocsRef.length - 1].folio;
+    if (ultimo > (cfgAntes.ultimoFolio || 0)) await guardarConfigOc_('oc_ultimo_folio' + suf, ultimo);
+  }
+  if (ocsGasto.length) {
+    await guardarConfigOc_('oc_serie_gasto' + suf, serieGasto);
+    await guardarConfigOc_('oc_concepto_gasto' + suf, conceptoGasto);
+    const ultimoG = ocsGasto[ocsGasto.length - 1].folio;
+    if (ultimoG > (cfgAntes.gasto.ultimoFolio || 0)) await guardarConfigOc_('oc_ultimo_folio_gasto' + suf, ultimoG);
   }
   const ordenesOc = Array.from(new Set(plan.ocs.map((o) => o.orden).filter(Boolean)));
   for (const o of ordenesOc) {
@@ -8562,15 +8603,16 @@ async function exportarOCContpaqi(code, nombreUsuario, data) {
   await registrarAuditoria_('oc_exportaciones', serie + '-' + folioInicial, 'exportar', nombreUsuario,
     empresaNombre + ': ' + plan.ocs.length + ' OC, ' + plan.gasto.length + ' gasto directo, ' + plan.revisar.length + ' a revisar');
 
-  const folios = plan.ocs.map((o) => o.folio);
   const empresaCorta = empresaNombre.split(',')[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
-  const nombre = 'OC_CONTPAQi_' + empresaCorta + '_' + serie + '_' + (folios.length ? folios[0] + (folios.length > 1 ? '-' + folios[folios.length - 1] : '') : 'sin-OC') + '_' + fecha + '.xlsx';
+  const rangoTxt = (lista) => lista.length ? lista[0].serie + '_' + lista[0].folio + (lista.length > 1 ? '-' + lista[lista.length - 1].folio : '') : '';
+  const partesNombre = [rangoTxt(ocsRef), rangoTxt(ocsGasto)].filter(Boolean);
+  const nombre = 'OC_CONTPAQi_' + empresaCorta + '_' + (partesNombre.length ? partesNombre.join('_') : serie + '_sin-OC') + '_' + fecha + '.xlsx';
   return {
     success: true,
     nombreArchivo: nombre,
     empresa: empresaNombre,
     archivoBase64: buffer.toString('base64'),
-    ocs: plan.ocs.map((o) => ({ serie: o.serie, folio: o.folio, orden: o.orden, proveedor: o.proveedor, codigoProveedor: o.codigoProveedor, partidas: o.partidas.length })),
+    ocs: plan.ocs.map((o) => ({ serie: o.serie, folio: o.folio, orden: o.orden, proveedor: o.proveedor, codigoProveedor: o.codigoProveedor, partidas: o.partidas.length, tipo: o.tipo, concepto: o.concepto })),
     gasto: plan.gasto.length,
     revisar: plan.revisar.map((r) => ({ orden: r.partida.orden, descripcion: r.partida.descripcion, proveedor: r.partida.proveedor, motivo: r.motivo })),
   };

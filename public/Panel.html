@@ -21248,13 +21248,13 @@ function cargarCargaComercial_(){
           + '<span class="mnt-subtext" style="display:inline;">' + (e.automatico ? 'carga automática prendida' : 'pausada') + '</span>'
           + (e.aviso ? '<div class="ocx-auto-aviso">' + escapeHtml(e.aviso) + '</div>' : '') + '</div>';
       }).join('');
-      const nombreEmp = {}; r.empresas.forEach(function(e){ nombreEmp[e.id] = e.nombre.split(',')[0]; });
+      const nombreEmp = {}, autoEmp = {}; r.empresas.forEach(function(e){ nombreEmp[e.id] = e.nombre.split(',')[0]; autoEmp[e.id] = e.automatico; });
       const filas = r.cola.map(function(c){
         const acc = c.estado === 'error'
           ? '<button type="button" class="row-view ocx-auto-acc" data-acc="reintentar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Reintentar</button> <button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '" title="Quita la OC de la cola; sus partidas vuelven a quedar pendientes y tomarán un folio nuevo">Liberar</button>'
           : c.estado === 'pendiente' ? '<button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Quitar de la cola</button>' : '';
         return '<tr><td>' + escapeHtml(nombreEmp[c.empresaId] || '') + '</td><td><b>' + escapeHtml(c.serie + ' ' + c.folio) + '</b></td><td>' + escapeHtml(c.proveedor) + '</td><td>' + escapeHtml(c.ordenes) + '</td><td>' + c.partidas + '</td>'
-          + '<td>' + escapeHtml(OCX_EST_AGENTE_[c.estado] || c.estado) + (c.total !== null ? ' · $' + Number(c.total).toFixed(2) : '') + (c.mensaje ? '<div class="ocx-auto-aviso">' + escapeHtml(c.mensaje) + '</div>' : '') + '</td><td>' + acc + '</td></tr>';
+          + '<td>' + escapeHtml(c.estado === 'pendiente' && !autoEmp[c.empresaId] ? 'En pausa (no se carga hasta prender la empresa)' : (OCX_EST_AGENTE_[c.estado] || c.estado)) + (c.total !== null ? ' · $' + Number(c.total).toFixed(2) : '') + (c.mensaje ? '<div class="ocx-auto-aviso">' + escapeHtml(c.mensaje) + '</div>' : '') + '</td><td>' + acc + '</td></tr>';
       }).join('');
       caja.innerHTML = '<div style="margin-bottom:4px;"><b>Carga automática a Comercial</b> · ' + est + '</div>' + errAg
         + '<div class="mnt-subtext" style="margin-bottom:4px;">Con la empresa prendida, todo lo autorizado ("Aut") se carga solo en Comercial (refacciones y gastos aparte). El agente usa el siguiente folio <b>libre en Comercial</b>: si alguien ya capturó a mano ese folio, toma el que sigue y aquí se ve el folio real. Lo que no tiene código de producto se queda en "Gasto directo".</div>'

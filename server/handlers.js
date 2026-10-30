@@ -8710,14 +8710,19 @@ async function encolarOcAutomaticas_() {
 }
 
 // OC pendientes de cargar, agrupadas por empresa y serie+folio.
+// Solo de empresas con la carga prendida: si la pausan, lo que ya estaba en
+// la cola se queda esperando (no se le manda al agente) hasta que la prendan
+// o la quiten de la cola.
 async function ocsPendientesAgente_() {
-  const [rows] = await pool.query(
+  const cfgAg = await leerConfigAgente_();
+  const [rows0] = await pool.query(
     `SELECT x.empresa_id, e.nombre AS empresa, x.serie, x.folio, x.fecha_oc, x.fecha_entrega, x.concepto, x.almacen, x.codigo_proveedor,
             x.codigo_producto, x.cantidad, x.precio, x.respuesta_item_id, x.orden
      FROM oc_exportaciones x JOIN empresas e ON e.id = x.empresa_id
      WHERE x.agente_estado = 'pendiente' AND x.tipo = 'oc'
      ORDER BY e.nombre, x.serie, x.folio, x.id`
   );
+  const rows = rows0.filter((r) => cfgAg['oc_auto_e' + r.empresa_id] === '1');
   const porEmpresa = {};
   rows.forEach((r) => {
     const emp = porEmpresa[r.empresa_id] || (porEmpresa[r.empresa_id] = { empresaId: r.empresa_id, empresa: r.empresa, ocs: {} });

@@ -8835,6 +8835,41 @@ async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, a
   return { success: true, partidas: n };
 }
 
+// Panel (oct-2026): guardar serie, concepto, almacén y el SIGUIENTE folio
+// de cada tipo (refacciones y gastos) de una empresa SIN exportar nada --
+// p.ej. para corregir el VER 100000000 de una prueba antes de prender la
+// carga automática. Se guarda como "último folio" = siguiente - 1.
+async function guardarFoliosOc(code, nombreUsuario, empresaId, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  data = data || {};
+  const id = Number(empresaId) || 0;
+  const [e] = await pool.query('SELECT nombre FROM empresas WHERE id = ?', [id]);
+  if (!e.length) return { success: false, error: 'Elige la empresa.' };
+  const t = (v) => (v === null || v === undefined ? '' : String(v)).trim();
+  const serie = t(data.serie).toUpperCase();
+  const serieGasto = t(data.serieGasto);
+  const concepto = t(data.concepto);
+  const conceptoGasto = t(data.conceptoGasto);
+  const almacen = t(data.almacen).toUpperCase();
+  const folioOk = (v) => v === '' || (Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 999999999);
+  const sig = t(data.siguienteFolio);
+  const sigG = t(data.siguienteFolioGasto);
+  if (!serie || serie.length > 10 || !serieGasto || serieGasto.length > 10) return { success: false, error: 'Escribe la serie de refacciones y la de gastos.' };
+  if (!concepto || !conceptoGasto || !almacen) return { success: false, error: 'Escribe los conceptos y el almacén.' };
+  if (!folioOk(sig) || !folioOk(sigG)) return { success: false, error: 'Los folios deben ser números enteros (el SIGUIENTE folio libre en Comercial).' };
+  const suf = '_e' + id;
+  await guardarConfigOc_('oc_serie' + suf, serie);
+  await guardarConfigOc_('oc_concepto' + suf, concepto);
+  await guardarConfigOc_('oc_almacen' + suf, almacen);
+  await guardarConfigOc_('oc_serie_gasto' + suf, serieGasto);
+  await guardarConfigOc_('oc_concepto_gasto' + suf, conceptoGasto);
+  if (sig !== '') await guardarConfigOc_('oc_ultimo_folio' + suf, Number(sig) - 1);
+  if (sigG !== '') await guardarConfigOc_('oc_ultimo_folio_gasto' + suf, Number(sigG) - 1);
+  await registrarAuditoria_('configuracion', 'oc_folios' + suf, 'editar', nombreUsuario,
+    e[0].nombre + ': ' + serie + ' sig. ' + (sig || '—') + ', ' + serieGasto + ' sig. ' + (sigG || '—'));
+  return { success: true, config: await leerConfigOc_(id) };
+}
+
 // Para la orden (Refaccionamiento): OC/gasto directo de cada refacción.
 async function ocsDeOrden_(orden) {
   const [rows] = await pool.query(
@@ -10616,6 +10651,7 @@ module.exports = {
   guardarTipoUnidad,
   eliminarTipoUnidad,
   getEmpresasCatalogo,
+  guardarFoliosOc,
   agenteOcTrabajo,
   agenteOcPing,
   agenteOcResultado,

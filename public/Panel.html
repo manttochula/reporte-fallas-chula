@@ -3535,6 +3535,7 @@
           </table>
         </div>
         <div class="maq-modal-actions">
+          <button class="maq-delete-btn" id="ocx-btn-guardar-folios" title="Guarda serie, concepto, almacén y los folios de esta empresa sin exportar nada (los usa la carga automática)" style="color:#2b5bb5;border-color:#2b5bb5;">Guardar series y folios</button>
           <button class="maq-save-btn" id="ocx-btn-generar">Generar Excel</button>
         </div>
         <div class="maq-modal-status" id="ocx-status"></div>
@@ -4423,7 +4424,7 @@ var PANEL_SOLO_EN_LINEA = {
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
-  agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true,
+  agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -4995,7 +4996,7 @@ function ocultarControlesSoloLectura(){
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
-      '.ocx-auto-chk', '.ocx-auto-acc', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
+      '.ocx-auto-chk', '.ocx-auto-acc', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
     ]);
   }
   if(!puedeCapturarPestana('insumos')){
@@ -21201,6 +21202,32 @@ function renderResumenOcx_(){
 
 document.getElementById('ocx-abrir').addEventListener('click', abrirModalOcx);
 document.getElementById('ocx-abrir').addEventListener('click', cargarCargaComercial_);
+// Guardar series/folios de la empresa sin exportar (para la carga automática).
+document.getElementById('ocx-btn-guardar-folios').addEventListener('click', function(){
+  const st = document.getElementById('ocx-status');
+  const empId = Number(document.getElementById('ocx-empresa').value) || 0;
+  const sel = document.getElementById('ocx-empresa');
+  const nombre = sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].textContent : '';
+  const datos = {
+    serie: document.getElementById('ocx-serie').value, siguienteFolio: document.getElementById('ocx-folio').value,
+    concepto: document.getElementById('ocx-concepto').value, almacen: document.getElementById('ocx-almacen').value,
+    serieGasto: document.getElementById('ocx-serie-gasto').value, siguienteFolioGasto: document.getElementById('ocx-folio-gasto').value,
+    conceptoGasto: document.getElementById('ocx-concepto-gasto').value
+  };
+  if(!confirm('Guardar para ' + nombre + ':\n- Refacciones: ' + datos.serie + ', siguiente folio ' + (datos.siguienteFolio || '(sin cambio)') + '\n- Gastos: ' + datos.serieGasto + ', siguiente folio ' + (datos.siguienteFolioGasto || '(sin cambio)') + '\n\nEl folio debe ser el SIGUIENTE libre en Comercial. ¿Guardar?')) return;
+  const btn = this;
+  btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+      st.textContent = '✓ Guardado. Siguiente refacciones: ' + r.config.serie + ' ' + (r.config.siguienteFolio || '—') + ' · siguiente gastos: ' + r.config.gasto.serie + ' ' + (r.config.gasto.siguienteFolio || '—') + '.';
+      st.className = 'maq-modal-status show ok';
+      cargarPartidasOcx_(true); cargarCargaComercial_();
+    })
+    .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+    .guardarFoliosOc(ACCESS_CODE, PANEL_USUARIO, empId, datos);
+});
 
 // --- Carga automática a Comercial (agente en la PC de Comercial) ---
 const OCX_EST_AGENTE_ = { pendiente: 'Esperando al agente', cargada: '✓ Cargada en Comercial', error: '⚠ Error' };

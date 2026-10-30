@@ -21257,7 +21257,7 @@ function cargarCargaComercial_(){
           + '<td>' + escapeHtml(OCX_EST_AGENTE_[c.estado] || c.estado) + (c.total !== null ? ' · $' + Number(c.total).toFixed(2) : '') + (c.mensaje ? '<div class="ocx-auto-aviso">' + escapeHtml(c.mensaje) + '</div>' : '') + '</td><td>' + acc + '</td></tr>';
       }).join('');
       caja.innerHTML = '<div style="margin-bottom:4px;"><b>Carga automática a Comercial</b> · ' + est + '</div>' + errAg
-        + '<div class="mnt-subtext" style="margin-bottom:4px;">Con la empresa prendida, todo lo autorizado ("Aut") se carga solo en Comercial con el siguiente folio de su serie (refacciones y gastos aparte). Lo que no tiene código de producto se queda en "Gasto directo".</div>'
+        + '<div class="mnt-subtext" style="margin-bottom:4px;">Con la empresa prendida, todo lo autorizado ("Aut") se carga solo en Comercial (refacciones y gastos aparte). El agente usa el siguiente folio <b>libre en Comercial</b>: si alguien ya capturó a mano ese folio, toma el que sigue y aquí se ve el folio real. Lo que no tiene código de producto se queda en "Gasto directo".</div>'
         + emps + (filas ? '<div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Empresa</th><th>OC</th><th>Proveedor</th><th>Orden</th><th>Partidas</th><th>Estado</th><th></th></tr></thead><tbody>' + filas + '</tbody></table></div>' : '');
       caja.querySelectorAll('.ocx-auto-chk').forEach(function(chk){
         chk.addEventListener('change', function(){

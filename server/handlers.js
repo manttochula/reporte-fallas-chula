@@ -8754,19 +8754,39 @@ async function agenteOcResultado(token, resultados) {
   if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
   const lista = Array.isArray(resultados) ? resultados.slice(0, 500) : [];
   let cargadas = 0, errores = 0;
+  // 1) Primero se ubican las partidas de cada OC por el folio que les dio el
+  //    sistema (ANTES de mover ninguno: si el agente corrió una OC al folio
+  //    de otra de la misma vuelta, no se deben mezclar).
+  const filas = [];
   for (const r of lista) {
     const empresaId = Number(r.empresaId) || 0;
     const serie = (r.serie || '').toString();
     const folio = Number(r.folio) || 0;
+    const [ids] = await pool.query("SELECT id FROM oc_exportaciones WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'pendiente'", [empresaId, serie, folio]);
+    filas.push({ r, empresaId, serie, folio, ids: ids.map((x) => x.id) });
+  }
+  // 2) Se aplica cada resultado a SUS partidas.
+  for (const { r, empresaId, serie, ids } of filas) {
+    if (!ids.length) continue;
+    let folio = Number(r.folio) || 0;
+    // Oct-2026: el agente busca el siguiente folio LIBRE en Comercial (ahí
+    // también se capturan OC a mano). Si usó otro, se corrige aquí y el
+    // consecutivo del sistema avanza hasta ese folio.
+    const folioReal = Number(r.folioReal) || folio;
+    if (r.ok && folioReal > 0) folio = folioReal;
+    if (r.ok && folio > 0) {
+      const cfg = await leerConfigOc_(empresaId);
+      const suf = '_e' + empresaId;
+      if (serie.toUpperCase() === String(cfg.serie).toUpperCase() && folio > (cfg.ultimoFolio || 0)) await guardarConfigOc_('oc_ultimo_folio' + suf, folio);
+      else if (serie.toUpperCase() === String(cfg.gasto.serie).toUpperCase() && folio > (cfg.gasto.ultimoFolio || 0)) await guardarConfigOc_('oc_ultimo_folio_gasto' + suf, folio);
+    }
     const mensaje = (r.mensaje || '').toString().slice(0, 1000) || null;
     const total = r.total === null || r.total === undefined || r.total === '' ? null : Number(r.total);
-    const [upd] = await pool.query(
-      `UPDATE oc_exportaciones SET agente_estado = ?, agente_mensaje = ?, agente_total = ?, agente_en = NOW()
-       WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'pendiente'`,
-      [r.ok ? 'cargada' : 'error', mensaje, Number.isFinite(total) ? total : null, empresaId, serie, folio]
+    await pool.query(
+      'UPDATE oc_exportaciones SET folio = ?, agente_estado = ?, agente_mensaje = ?, agente_total = ?, agente_en = NOW() WHERE id IN (?)',
+      [folio, r.ok ? 'cargada' : 'error', mensaje, Number.isFinite(total) ? total : null, ids]
     );
-    if (!upd.affectedRows) continue;
-    const [ords] = await pool.query('SELECT DISTINCT orden FROM oc_exportaciones WHERE empresa_id = ? AND serie = ? AND folio = ? AND orden IS NOT NULL', [empresaId, serie, folio]);
+    const [ords] = await pool.query('SELECT DISTINCT orden FROM oc_exportaciones WHERE id IN (?) AND orden IS NOT NULL', [ids]);
     for (const o of ords) {
       await agregarObservacionOrden_(o.orden, r.ok
         ? 'OC ' + serie + ' ' + folio + ' cargada en CONTPAQi Comercial' + (Number.isFinite(total) ? ' (total $' + total.toFixed(2) + ')' : '') + '.'

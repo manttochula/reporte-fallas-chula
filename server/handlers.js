@@ -46,7 +46,7 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // Panel, ver requierePermisoAvanceHuerta_) para dejar calibrar el mapa
 // desde el celular -- no cualquier operador puede recalibrar, solo a quien
 // Carlos le dé este permiso.
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores'];
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -8717,8 +8717,9 @@ async function ocsPendientesAgente_() {
   const cfgAg = await leerConfigAgente_();
   const [rows0] = await pool.query(
     `SELECT x.empresa_id, e.nombre AS empresa, x.serie, x.folio, x.fecha_oc, x.fecha_entrega, x.concepto, x.almacen, x.codigo_proveedor,
-            x.codigo_producto, x.cantidad, x.precio, x.respuesta_item_id, x.orden
+            x.codigo_producto, x.cantidad, x.precio, x.respuesta_item_id, x.orden, ri.iva_pct
      FROM oc_exportaciones x JOIN empresas e ON e.id = x.empresa_id
+     LEFT JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
      WHERE x.agente_estado = 'pendiente' AND x.tipo = 'oc'
      ORDER BY e.nombre, x.serie, x.folio, x.id`
   );
@@ -8731,7 +8732,12 @@ async function ocsPendientesAgente_() {
       serie: r.serie, folio: r.folio, fecha: fechaSoloOrNull(r.fecha_oc), fechaEntrega: r.fecha_entrega ? fechaSoloOrNull(r.fecha_entrega) : null,
       concepto: r.concepto, almacen: r.almacen, codigoProveedor: r.codigo_proveedor, orden: r.orden || '', partidas: [],
     });
-    oc.partidas.push({ codigoProducto: r.codigo_producto, cantidad: Number(r.cantidad), precio: Number(r.precio) });
+    // IVA en IMPORTE (columna "Impuesto 1" de la Hoja Electrónica = cantidad × precio × %).
+    // Se manda siempre: si va vacío, Comercial solo pone IVA a los productos que
+    // lo tienen configurado en su catálogo (GTS30 sí; varias refacciones VRZ no).
+    const pct = r.iva_pct === null || r.iva_pct === undefined ? 16 : Number(r.iva_pct);
+    const iva = Math.round(Number(r.cantidad) * Number(r.precio) * pct) / 100;
+    oc.partidas.push({ codigoProducto: r.codigo_producto, cantidad: Number(r.cantidad), precio: Number(r.precio), ivaPct: pct, iva });
   });
   return Object.values(porEmpresa).map((e) => ({ empresaId: e.empresaId, empresa: e.empresa, ocs: Object.values(e.ocs) }));
 }
@@ -10501,7 +10507,353 @@ async function quitarTelegram(code, nombreUsuario) {
 }
 avisos.configurarUtilRecorrido_({ filtrarSaltosGps_, tramosDeRecorrido_, distanciaMetros_ });
 
+// =====================================================================
+// SEGUROS de las unidades (oct-2026, Carlos). Pestaña "Seguros" del Panel:
+// pólizas (una o varias unidades = flotilla), PDF, costo y calendario de
+// pagos, contactos para siniestros y bitácora de siniestros. Permiso
+// 'seguros'. Avisos por Telegram: revisarAvisosSeguros_ (server.js, cada 30 min).
+// =====================================================================
+const SEG_COBERTURAS = ['Amplia', 'Limitada', 'Responsabilidad civil', 'Otra'];
+const SEG_FORMAS_PAGO = { contado: 1, semestral: 2, trimestral: 4, mensual: 12 };
+const SEG_ESTATUS_SINIESTRO = ['abierto', 'en_proceso', 'cerrado'];
+const SEG_DIAS_POR_VENCER = 30;
+
+function segTexto_(v, max) {
+  const t = (v === null || v === undefined ? '' : String(v)).trim();
+  return max ? t.slice(0, max) : t;
+}
+function segFecha_(v) {
+  const t = segTexto_(v);
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+}
+function segNum_(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(String(v).replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+// Días entre dos fechas 'YYYY-MM-DD' (b - a).
+function segDias_(a, b) {
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000);
+}
+function segSumarMeses_(iso, meses) {
+  const p = iso.split('-').map(Number);
+  const base = new Date(Date.UTC(p[0], p[1] - 1 + meses, 1));
+  const ultimo = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+  base.setUTCDate(Math.min(p[2], ultimo));
+  return base.toISOString().slice(0, 10);
+}
+// Estado de una póliza para hoy: vigente / por_vencer / vencida / cancelada / futura.
+function estadoPolizaSeguro_(p, hoy) {
+  if (p.cancelada) return { estado: 'cancelada', dias: null };
+  const dias = segDias_(hoy, p.vigenciaFin);
+  if (segDias_(hoy, p.vigenciaInicio) > 0) return { estado: 'futura', dias };
+  if (dias < 0) return { estado: 'vencida', dias };
+  if (dias <= SEG_DIAS_POR_VENCER) return { estado: 'por_vencer', dias };
+  return { estado: 'vigente', dias };
+}
+// Calendario de pagos en partes iguales según la forma de pago (el último
+// absorbe los centavos). Puro: lo usa el Panel (botón "Generar") y las pruebas.
+function calendarioPagosSeguro_(inicio, primaTotal, formaPago) {
+  const n = SEG_FORMAS_PAGO[formaPago] || 1;
+  const total = Math.round(Number(primaTotal || 0) * 100);
+  const base = Math.floor(total / n);
+  const pagos = [];
+  for (let i = 0; i < n; i++) {
+    const cent = i === n - 1 ? total - base * (n - 1) : base;
+    pagos.push({ numero: i + 1, fechaVencimiento: segSumarMeses_(inicio, (12 / n) * i), monto: cent / 100 });
+  }
+  return pagos;
+}
+
+async function getSeguros(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'visualizar');
+  const hoy = fechaMexico_();
+  const [pol] = await pool.query(
+    `SELECT p.*, e.nombre AS empresa FROM seguros_polizas p LEFT JOIN empresas e ON e.id = p.empresa_id
+     WHERE p.eliminado = 0 ORDER BY p.vigencia_fin DESC, p.id DESC`);
+  const ids = pol.map((p) => p.id);
+  const [uni] = ids.length ? await pool.query('SELECT * FROM seguros_poliza_unidades WHERE poliza_id IN (?) ORDER BY codigo_unidad', [ids]) : [[]];
+  const [pag] = ids.length ? await pool.query('SELECT * FROM seguros_pagos WHERE poliza_id IN (?) ORDER BY fecha_vencimiento, numero', [ids]) : [[]];
+  const [sin] = await pool.query('SELECT * FROM seguros_siniestros WHERE eliminado = 0 ORDER BY fecha DESC, id DESC');
+  const [maq] = await pool.query(
+    `SELECT m.codigo_unidad, m.unidad, m.tipo_unidad, m.placa, m.serie, m.anio, m.usa_gasolina,
+            COALESCE(mca.nombre, m.marca) AS marca, COALESCE(mdo.nombre, m.modelo) AS modelo, emp.nombre AS empresa
+     FROM maquinaria m
+     LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
+     LEFT JOIN modelos_refacciones mdo ON mdo.id = m.modelo_id
+     LEFT JOIN empresas emp ON emp.id = m.empresa_id
+     ORDER BY m.codigo_unidad`);
+  const polizas = pol.map((p) => {
+    const o = {
+      id: p.id, aseguradora: p.aseguradora, numeroPoliza: p.numero_poliza, cobertura: p.cobertura || '', coberturaDetalle: p.cobertura_detalle || '',
+      vigenciaInicio: fechaSoloOrNull(p.vigencia_inicio), vigenciaFin: fechaSoloOrNull(p.vigencia_fin),
+      primaTotal: p.prima_total === null ? null : Number(p.prima_total), formaPago: p.forma_pago || '', deducible: p.deducible || '',
+      agenteNombre: p.agente_nombre || '', agenteTelefono: p.agente_telefono || '', agenteCorreo: p.agente_correo || '', telefonoSiniestros: p.telefono_siniestros || '',
+      empresaId: p.empresa_id, empresa: p.empresa || '', pdfUrl: p.pdf_url || '', observaciones: p.observaciones || '', cancelada: !!p.cancelada,
+      creadoPor: p.creado_por || '', actualizadoPor: p.actualizado_por || '', actualizadoEn: isoOrNull(p.actualizado_en),
+      unidades: uni.filter((u) => u.poliza_id === p.id).map((u) => ({ codigoUnidad: u.codigo_unidad, inciso: u.inciso || '', sumaAsegurada: u.suma_asegurada === null ? null : Number(u.suma_asegurada) })),
+      pagos: pag.filter((x) => x.poliza_id === p.id).map((x) => ({ id: x.id, numero: x.numero, fechaVencimiento: fechaSoloOrNull(x.fecha_vencimiento), monto: Number(x.monto), pagado: !!x.pagado, pagadoEn: fechaSoloOrNull(x.pagado_en), referencia: x.referencia || '', marcadoPor: x.marcado_por || '' })),
+    };
+    Object.assign(o, estadoPolizaSeguro_(o, hoy));
+    const prox = o.pagos.find((x) => !x.pagado);
+    o.proximoPago = prox || null;
+    return o;
+  });
+  const siniestros = sin.map((s) => ({
+    id: s.id, polizaId: s.poliza_id, codigoUnidad: s.codigo_unidad, fecha: fechaSoloOrNull(s.fecha), numeroReporte: s.numero_reporte || '',
+    descripcion: s.descripcion || '', lugar: s.lugar || '', conductor: s.conductor || '', deducible: s.deducible === null ? null : Number(s.deducible),
+    estatus: s.estatus, orden: s.orden || '', notas: s.notas || '', creadoPor: s.creado_por || '', actualizadoEn: isoOrNull(s.actualizado_en),
+  }));
+  // Por unidad: la póliza que la cubre hoy (vigente/por vencer); si no, la más reciente.
+  const unidades = maq.map((m) => {
+    const suyas = polizas.filter((p) => !p.cancelada && p.unidades.some((u) => u.codigoUnidad === m.codigo_unidad));
+    const actual = suyas.find((p) => p.estado === 'vigente' || p.estado === 'por_vencer') || suyas[0] || null;
+    return {
+      codigoUnidad: m.codigo_unidad, unidad: m.unidad, tipoUnidad: m.tipo_unidad || '', placa: m.placa || '', serie: m.serie || '', anio: m.anio || '',
+      marca: m.marca || '', modelo: m.modelo || '', empresa: m.empresa || '', automotriz: !!m.usa_gasolina,
+      polizaId: actual ? actual.id : null, estado: actual ? actual.estado : 'sin_seguro', dias: actual ? actual.dias : null,
+      siniestros: siniestros.filter((s) => s.codigoUnidad === m.codigo_unidad).length,
+    };
+  });
+  const [empresas] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
+  return { success: true, hoy, diasPorVencer: SEG_DIAS_POR_VENCER, coberturas: SEG_COBERTURAS, formasPago: Object.keys(SEG_FORMAS_PAGO), polizas, siniestros, unidades, empresas };
+}
+
+async function guardarPolizaSeguro(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  datos = datos || {};
+  const id = Number(datos.id) || 0;
+  const aseguradora = segTexto_(datos.aseguradora, 150);
+  const numero = segTexto_(datos.numeroPoliza, 100);
+  const inicio = segFecha_(datos.vigenciaInicio);
+  const fin = segFecha_(datos.vigenciaFin);
+  if (!aseguradora) return { success: false, error: 'Escribe la aseguradora.' };
+  if (!numero) return { success: false, error: 'Escribe el número de póliza.' };
+  if (!inicio || !fin) return { success: false, error: 'Captura el inicio y el fin de la vigencia.' };
+  if (fin < inicio) return { success: false, error: 'El fin de la vigencia no puede ser antes del inicio.' };
+  const prima = segNum_(datos.primaTotal);
+  if (Number.isNaN(prima) || (prima !== null && prima < 0)) return { success: false, error: 'La prima debe ser un número.' };
+  const formaPago = SEG_FORMAS_PAGO[datos.formaPago] ? datos.formaPago : (datos.formaPago ? null : '');
+  if (formaPago === null) return { success: false, error: 'Forma de pago no válida.' };
+  const cobertura = segTexto_(datos.cobertura, 60);
+  // Unidades: deben existir en el catálogo; sin repetir.
+  const codigos = Array.from(new Set((Array.isArray(datos.unidades) ? datos.unidades : []).map((u) => segTexto_(u && u.codigoUnidad, 50)).filter(Boolean)));
+  if (!codigos.length) return { success: false, error: 'Elige al menos una unidad asegurada.' };
+  const [existen] = await pool.query('SELECT codigo_unidad FROM maquinaria WHERE codigo_unidad IN (?)', [codigos]);
+  const set = new Set(existen.map((r) => r.codigo_unidad));
+  const faltan = codigos.filter((c) => !set.has(c));
+  if (faltan.length) return { success: false, error: 'Estas unidades no están en el catálogo: ' + faltan.join(', ') };
+  const unidades = codigos.map((c) => {
+    const u = datos.unidades.find((x) => segTexto_(x && x.codigoUnidad, 50) === c) || {};
+    const suma = segNum_(u.sumaAsegurada);
+    return { codigo: c, inciso: segTexto_(u.inciso, 30) || null, suma: Number.isNaN(suma) ? null : suma };
+  });
+  // Pagos
+  const pagos = [];
+  for (const x of (Array.isArray(datos.pagos) ? datos.pagos : [])) {
+    const f = segFecha_(x && x.fechaVencimiento);
+    const m = segNum_(x && x.monto);
+    if (!f || m === null || Number.isNaN(m) || m < 0) return { success: false, error: 'Revisa el calendario de pagos: cada pago necesita fecha y monto.' };
+    pagos.push({ id: Number(x.id) || 0, fecha: f, monto: m, pagado: !!x.pagado, pagadoEn: x.pagado ? (segFecha_(x.pagadoEn) || fechaMexico_()) : null, referencia: segTexto_(x.referencia, 150) || null });
+  }
+  let pdfUrl;
+  if (datos.pdfDataUrl) {
+    if (!/^data:application\/pdf;base64,/.test(datos.pdfDataUrl)) return { success: false, error: 'La póliza debe ser un archivo PDF.' };
+    if (datos.pdfDataUrl.length > 14 * 1024 * 1024) return { success: false, error: 'El PDF es muy grande (máximo 10 MB).' };
+    pdfUrl = await guardarArchivo_(datos.pdfDataUrl);
+  }
+  const empresaId = Number(datos.empresaId) || null;
+  const valores = [aseguradora, numero, cobertura || null, segTexto_(datos.coberturaDetalle, 2000) || null, inicio, fin, prima, formaPago || null,
+    segTexto_(datos.deducible, 120) || null, segTexto_(datos.agenteNombre, 150) || null, segTexto_(datos.agenteTelefono, 60) || null,
+    segTexto_(datos.agenteCorreo, 150) || null, segTexto_(datos.telefonoSiniestros, 60) || null, empresaId, segTexto_(datos.observaciones, 4000) || null, datos.cancelada ? 1 : 0];
+  const conn = await pool.getConnection();
+  let polizaId = id;
+  try {
+    await conn.beginTransaction();
+    if (id) {
+      const [ex] = await conn.query('SELECT id FROM seguros_polizas WHERE id = ? AND eliminado = 0 FOR UPDATE', [id]);
+      if (!ex.length) { await conn.rollback(); return { success: false, error: 'La póliza ya no existe.' }; }
+      await conn.query(
+        `UPDATE seguros_polizas SET aseguradora=?, numero_poliza=?, cobertura=?, cobertura_detalle=?, vigencia_inicio=?, vigencia_fin=?, prima_total=?, forma_pago=?,
+           deducible=?, agente_nombre=?, agente_telefono=?, agente_correo=?, telefono_siniestros=?, empresa_id=?, observaciones=?, cancelada=?, actualizado_por=?` + (pdfUrl ? ', pdf_url=?' : '') + ' WHERE id=?',
+        valores.concat([segTexto_(nombreUsuario, 255)], pdfUrl ? [pdfUrl] : [], [id]));
+    } else {
+      const [r] = await conn.query(
+        `INSERT INTO seguros_polizas (aseguradora, numero_poliza, cobertura, cobertura_detalle, vigencia_inicio, vigencia_fin, prima_total, forma_pago,
+           deducible, agente_nombre, agente_telefono, agente_correo, telefono_siniestros, empresa_id, observaciones, cancelada, creado_por, actualizado_por, pdf_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        valores.concat([segTexto_(nombreUsuario, 255), segTexto_(nombreUsuario, 255), pdfUrl || null]));
+      polizaId = r.insertId;
+    }
+    await conn.query('DELETE FROM seguros_poliza_unidades WHERE poliza_id = ?', [polizaId]);
+    await conn.query('INSERT INTO seguros_poliza_unidades (poliza_id, codigo_unidad, inciso, suma_asegurada) VALUES ?', [unidades.map((u) => [polizaId, u.codigo, u.inciso, u.suma])]);
+    // Pagos: se reemplaza el calendario; los ya pagados conservan quién los marcó.
+    const [antes] = await conn.query('SELECT id, pagado, marcado_por FROM seguros_pagos WHERE poliza_id = ?', [polizaId]);
+    await conn.query('DELETE FROM seguros_pagos WHERE poliza_id = ?', [polizaId]);
+    pagos.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+    if (pagos.length) {
+      await conn.query('INSERT INTO seguros_pagos (poliza_id, numero, fecha_vencimiento, monto, pagado, pagado_en, referencia, marcado_por) VALUES ?',
+        [pagos.map((x, i) => {
+          const prev = antes.find((a) => a.id === x.id);
+          const por = x.pagado ? ((prev && prev.pagado && prev.marcado_por) || segTexto_(nombreUsuario, 255)) : null;
+          return [polizaId, i + 1, x.fecha, x.monto, x.pagado ? 1 : 0, x.pagadoEn, x.referencia, por];
+        })]);
+    }
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+  await registrarAuditoria_('seguros_polizas', polizaId, id ? 'editar' : 'crear', nombreUsuario,
+    aseguradora + ' ' + numero + ' — ' + inicio + ' a ' + fin + ' — ' + codigos.join(', ') + (pdfUrl ? ' (PDF nuevo)' : ''));
+  return { success: true, id: polizaId };
+}
+
+async function eliminarPolizaSeguro(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const [r] = await pool.query('UPDATE seguros_polizas SET eliminado = 1, actualizado_por = ? WHERE id = ? AND eliminado = 0', [segTexto_(nombreUsuario, 255), Number(id) || 0]);
+  if (!r.affectedRows) return { success: false, error: 'La póliza ya no existe.' };
+  await registrarAuditoria_('seguros_polizas', id, 'eliminar', nombreUsuario, 'Póliza eliminada');
+  return { success: true };
+}
+
+async function marcarPagoSeguro(code, nombreUsuario, pagoId, pagado, fecha, referencia) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const [rows] = await pool.query(
+    'SELECT x.id, x.numero, p.numero_poliza, p.aseguradora FROM seguros_pagos x JOIN seguros_polizas p ON p.id = x.poliza_id WHERE x.id = ? AND p.eliminado = 0', [Number(pagoId) || 0]);
+  if (!rows.length) return { success: false, error: 'El pago ya no existe.' };
+  const f = pagado ? (segFecha_(fecha) || fechaMexico_()) : null;
+  await pool.query('UPDATE seguros_pagos SET pagado = ?, pagado_en = ?, referencia = COALESCE(?, referencia), marcado_por = ? WHERE id = ?',
+    [pagado ? 1 : 0, f, segTexto_(referencia, 150) || null, pagado ? segTexto_(nombreUsuario, 255) : null, rows[0].id]);
+  await registrarAuditoria_('seguros_pagos', rows[0].id, 'editar', nombreUsuario,
+    rows[0].aseguradora + ' ' + rows[0].numero_poliza + ' pago ' + rows[0].numero + (pagado ? ' pagado el ' + f : ' marcado como NO pagado'));
+  return { success: true };
+}
+
+async function guardarSiniestroSeguro(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  datos = datos || {};
+  const id = Number(datos.id) || 0;
+  const codigo = segTexto_(datos.codigoUnidad, 50);
+  const fecha = segFecha_(datos.fecha);
+  if (!codigo) return { success: false, error: 'Elige la unidad.' };
+  if (!fecha) return { success: false, error: 'Captura la fecha del siniestro.' };
+  const [m] = await pool.query('SELECT codigo_unidad FROM maquinaria WHERE codigo_unidad = ?', [codigo]);
+  if (!m.length) return { success: false, error: 'La unidad no está en el catálogo.' };
+  const estatus = SEG_ESTATUS_SINIESTRO.includes(datos.estatus) ? datos.estatus : 'abierto';
+  const deducible = segNum_(datos.deducible);
+  if (Number.isNaN(deducible)) return { success: false, error: 'El deducible debe ser un número.' };
+  let polizaId = Number(datos.polizaId) || null;
+  if (!polizaId) {
+    // La póliza que cubría esa unidad en la fecha del siniestro.
+    const [p] = await pool.query(
+      `SELECT p.id FROM seguros_polizas p JOIN seguros_poliza_unidades u ON u.poliza_id = p.id
+       WHERE u.codigo_unidad = ? AND p.eliminado = 0 AND p.cancelada = 0 AND ? BETWEEN p.vigencia_inicio AND p.vigencia_fin ORDER BY p.vigencia_fin DESC LIMIT 1`, [codigo, fecha]);
+    polizaId = p.length ? p[0].id : null;
+  }
+  const v = [polizaId, codigo, fecha, segTexto_(datos.numeroReporte, 100) || null, segTexto_(datos.descripcion, 4000) || null, segTexto_(datos.lugar, 200) || null,
+    segTexto_(datos.conductor, 150) || null, deducible, estatus, segTexto_(datos.orden, 30) || null, segTexto_(datos.notas, 4000) || null];
+  let sid = id;
+  if (id) {
+    const [r] = await pool.query(`UPDATE seguros_siniestros SET poliza_id=?, codigo_unidad=?, fecha=?, numero_reporte=?, descripcion=?, lugar=?, conductor=?, deducible=?, estatus=?, orden=?, notas=?, actualizado_por=?
+      WHERE id = ? AND eliminado = 0`, v.concat([segTexto_(nombreUsuario, 255), id]));
+    if (!r.affectedRows) return { success: false, error: 'El siniestro ya no existe.' };
+  } else {
+    const [r] = await pool.query(`INSERT INTO seguros_siniestros (poliza_id, codigo_unidad, fecha, numero_reporte, descripcion, lugar, conductor, deducible, estatus, orden, notas, creado_por, actualizado_por)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, v.concat([segTexto_(nombreUsuario, 255), segTexto_(nombreUsuario, 255)]));
+    sid = r.insertId;
+  }
+  await registrarAuditoria_('seguros_siniestros', sid, id ? 'editar' : 'crear', nombreUsuario, codigo + ' ' + fecha + ' — ' + estatus + (v[3] ? ' — reporte ' + v[3] : ''));
+  return { success: true, id: sid, polizaId };
+}
+
+async function eliminarSiniestroSeguro(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const [r] = await pool.query('UPDATE seguros_siniestros SET eliminado = 1, actualizado_por = ? WHERE id = ? AND eliminado = 0', [segTexto_(nombreUsuario, 255), Number(id) || 0]);
+  if (!r.affectedRows) return { success: false, error: 'El siniestro ya no existe.' };
+  await registrarAuditoria_('seguros_siniestros', id, 'eliminar', nombreUsuario, 'Siniestro eliminado');
+  return { success: true };
+}
+
+// Avisos por Telegram (una vez cada uno, guardado en seguros_avisos):
+//  - póliza: 30 y 7 días antes de vencer y el día que vence
+//  - pago pendiente: 7 días antes y el día
+// Solo de 8:00 a 20:00 (hora de México) para no avisar de madrugada.
+// Si el servidor estuvo apagado, se manda el aviso del umbral más cercano
+// que ya pasó (p. ej. si ya faltan 5 días, manda el de 7) una sola vez.
+function avisosPendientesSeguros_(polizas, hoy) {
+  const salida = [];
+  for (const p of polizas) {
+    if (p.cancelada) continue;
+    const dias = segDias_(hoy, p.vigenciaFin);
+    const umbral = [0, 7, 30].find((u) => dias >= 0 && dias <= u);
+    if (umbral !== undefined && !p.renovada) {
+      salida.push({ clave: 'vence-' + p.id + '-' + p.vigenciaFin + '-' + umbral, tipo: 'vence', poliza: p, dias });
+    }
+    for (const x of p.pagos || []) {
+      if (x.pagado) continue;
+      const d = segDias_(hoy, x.fechaVencimiento);
+      const u = [0, 7].find((k) => d >= 0 && d <= k);
+      if (u !== undefined) salida.push({ clave: 'pago-' + x.id + '-' + x.fechaVencimiento + '-' + u, tipo: 'pago', poliza: p, pago: x, dias: d });
+    }
+  }
+  return salida;
+}
+
+async function revisarAvisosSeguros_(opciones) {
+  opciones = opciones || {};
+  const hora = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Mexico_City', hour: 'numeric', hour12: false }).format(new Date()));
+  if (!opciones.ignorarHora && (hora < 8 || hora >= 20)) return { enviados: 0 };
+  const hoy = opciones.hoy || fechaMexico_();
+  const [pol] = await pool.query("SELECT * FROM seguros_polizas WHERE eliminado = 0 AND cancelada = 0 AND vigencia_fin >= ? - INTERVAL 1 DAY", [hoy]);
+  if (!pol.length) return { enviados: 0 };
+  const ids = pol.map((p) => p.id);
+  const [uni] = await pool.query('SELECT poliza_id, codigo_unidad FROM seguros_poliza_unidades WHERE poliza_id IN (?)', [ids]);
+  const [pag] = await pool.query('SELECT * FROM seguros_pagos WHERE poliza_id IN (?) AND pagado = 0', [ids]);
+  // Una póliza está "renovada" si TODAS sus unidades ya tienen otra póliza que empieza después.
+  const [todas] = await pool.query(
+    `SELECT u.codigo_unidad, p.vigencia_inicio, p.id FROM seguros_poliza_unidades u JOIN seguros_polizas p ON p.id = u.poliza_id WHERE p.eliminado = 0 AND p.cancelada = 0`);
+  const polizas = pol.map((p) => {
+    const unidades = uni.filter((u) => u.poliza_id === p.id).map((u) => u.codigo_unidad);
+    const fin = fechaSoloOrNull(p.vigencia_fin);
+    const renovada = unidades.length > 0 && unidades.every((c) => todas.some((t) => t.codigo_unidad === c && t.id !== p.id && fechaSoloOrNull(t.vigencia_inicio) >= fin));
+    return {
+      id: p.id, aseguradora: p.aseguradora, numeroPoliza: p.numero_poliza, vigenciaFin: fin, cancelada: !!p.cancelada, renovada, unidades,
+      pagos: pag.filter((x) => x.poliza_id === p.id).map((x) => ({ id: x.id, numero: x.numero, fechaVencimiento: fechaSoloOrNull(x.fecha_vencimiento), monto: Number(x.monto), pagado: false })),
+    };
+  });
+  let enviados = 0;
+  for (const a of avisosPendientesSeguros_(polizas, hoy)) {
+    const [ins] = await pool.query('INSERT IGNORE INTO seguros_avisos (clave) VALUES (?)', [a.clave]);
+    if (!ins.affectedRows) continue;  // ya se había mandado
+    const p = a.poliza;
+    const cuando = a.dias === 0 ? 'HOY' : 'en ' + a.dias + ' día' + (a.dias === 1 ? '' : 's');
+    if (a.tipo === 'vence') {
+      avisos.avisarTexto_('Seguro vence ' + cuando + ': ' + p.aseguradora + ' ' + p.numeroPoliza,
+        [['Unidades', p.unidades.join(', ') || '—'], ['Vence', p.vigenciaFin]], '/panel', 'seguro-vence-' + p.id);
+    } else {
+      avisos.avisarTexto_('Pago de seguro ' + cuando + ': ' + p.aseguradora + ' ' + p.numeroPoliza,
+        [['Pago', a.pago.numero + ' por $' + a.pago.monto.toFixed(2)], ['Fecha', a.pago.fechaVencimiento], ['Unidades', p.unidades.join(', ') || '—']], '/panel', 'seguro-pago-' + a.pago.id);
+    }
+    enviados++;
+  }
+  return { enviados };
+}
+
 module.exports = {
+  getSeguros,
+  guardarPolizaSeguro,
+  eliminarPolizaSeguro,
+  marcarPagoSeguro,
+  guardarSiniestroSeguro,
+  eliminarSiniestroSeguro,
+  revisarAvisosSeguros_,
+  avisosPendientesSeguros_,
+  calendarioPagosSeguro_,
+  estadoPolizaSeguro_,
   HUECO_SIN_DATOS_MS,
   getIndicadorPreparacion,
   calcularIndicadorPreparacion_,

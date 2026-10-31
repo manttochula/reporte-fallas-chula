@@ -890,6 +890,37 @@
   .ins-badge.pendiente{ background: rgba(232,135,30,0.15); color: var(--amber); }
   .ins-badge.autorizado{ background: rgba(76,141,174,0.18); color: var(--steel); }
   .ins-badge.entregado{ background: rgba(95,163,106,0.15); color: var(--ok); }
+  /* ---- Pestaña Seguros (oct-2026) ---- */
+  .seg-tarjetas{ display:flex; flex-wrap:wrap; gap:10px; margin:4px 0 14px; }
+  .seg-tarjeta{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 14px; min-width:140px; cursor:pointer; }
+  .seg-tarjeta:hover{ border-color:var(--amber); }
+  .seg-tarjeta .n{ font-family:'Oswald',sans-serif; font-size:24px; line-height:1.1; }
+  .seg-tarjeta .t{ font-size:11.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+  .seg-tarjeta.rojo .n{ color:var(--danger); } .seg-tarjeta.ambar .n{ color:var(--amber); } .seg-tarjeta.verde .n{ color:var(--ok); }
+  .seg-subtabs{ display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .seg-subtab{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:7px 14px; cursor:pointer; font-size:13px; }
+  .seg-subtab.active{ background:var(--amber); color:#1c1c1c; border-color:var(--amber); font-weight:700; }
+  .seg-badge{ font-family:'IBM Plex Mono',monospace; font-size:11px; text-transform:uppercase; padding:3px 8px; border-radius:3px; font-weight:600; display:inline-block; white-space:nowrap; }
+  .seg-badge.vigente, .seg-badge.cerrado, .seg-badge.pagado{ background:rgba(95,163,106,0.15); color:var(--ok); }
+  .seg-badge.por_vencer, .seg-badge.en_proceso, .seg-badge.proximo{ background:rgba(232,135,30,0.15); color:var(--amber); }
+  .seg-badge.vencida, .seg-badge.sin_seguro, .seg-badge.abierto, .seg-badge.atrasado{ background:rgba(194,75,63,0.18); color:var(--danger); }
+  .seg-badge.cancelada, .seg-badge.futura, .seg-badge.pendiente{ background:rgba(154,157,158,0.15); color:var(--text-dim); }
+  .seg-sub{ font-size:11.5px; color:var(--text-dim); }
+  .seg-status{ font-size:13px; color:var(--text-dim); margin:6px 0; }
+  .seg-acc{ display:flex; gap:6px; flex-wrap:wrap; }
+  #seg-pol-overlay .maq-modal, #seg-sin-overlay .maq-modal{ max-width:900px; }
+  .seg-sec{ font-family:'Oswald',sans-serif; font-size:15px; margin:16px 0 8px; border-bottom:1px solid #e3e3e3; padding-bottom:4px; }
+  table.seg-mini{ width:100%; min-width:0; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+  .seg-mini th{ text-align:left; font-size:11px; color:#666; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid #ddd; }
+  .seg-mini td{ padding:4px 6px; border-bottom:1px solid #eee; vertical-align:middle; }
+  .seg-mini td input, .seg-mini td input[type=date]{ width:100%; min-width:0; border:1px solid #ccc; border-radius:4px; padding:6px 7px; font-size:13px; box-sizing:border-box; background:#fff; color:#1c1c1c; color-scheme:light; }
+  .seg-mini td:first-child{ overflow:hidden; text-overflow:ellipsis; }
+  .seg-mini input[type=checkbox]{ width:auto; }
+  .seg-quitar{ background:none; border:1px solid #c24b3f; color:#c24b3f; border-radius:4px; padding:3px 8px; cursor:pointer; }
+  .seg-agregar-uni{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .seg-agregar-uni input{ flex:1; border:1px solid #ccc; border-radius:4px; padding:8px 9px; font-size:13.5px; }
+  .seg-btn-claro{ background:#fff; border:1px solid #2b5bb5; color:#2b5bb5; border-radius:4px; padding:7px 12px; cursor:pointer; font-size:13px; }
+  .seg-pdf-actual{ font-size:12.5px; margin-top:4px; }
   .rpd-total-row td{ font-weight:700; border-top:2px solid var(--line); }
   .rpd-total-general{
     margin-top:16px; padding:12px 16px; border:1px solid var(--amber); border-radius:6px;
@@ -1403,6 +1434,7 @@
       <div class="panel-tab" id="ptab-servicios-automotrices">Servicios Automotrices</div>
       <div class="panel-tab" id="ptab-refacciones">Refacciones</div>
       <div class="panel-tab" id="ptab-insumos">Insumos</div>
+      <div class="panel-tab" id="ptab-seguros">Seguros</div>
       <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
       <div class="panel-tab" id="ptab-indicadores">Indicadores</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
@@ -4142,6 +4174,118 @@
       </div>
     </div>
 
+    <div id="pview-seguros" style="display:none;">
+      <div class="seg-tarjetas" id="seg-tarjetas"></div>
+      <div class="seg-subtabs">
+        <button type="button" class="seg-subtab active" data-vista="polizas">Pólizas</button>
+        <button type="button" class="seg-subtab" data-vista="unidades">Unidades</button>
+        <button type="button" class="seg-subtab" data-vista="pagos">Pagos</button>
+        <button type="button" class="seg-subtab" data-vista="siniestros">Siniestros</button>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="seg-buscar" placeholder="Buscar por unidad, placa, aseguradora o póliza...">
+        <select id="seg-estado">
+          <option value="">Todos los estados</option>
+          <option value="vigente">Vigentes</option>
+          <option value="por_vencer">Por vencer (30 días)</option>
+          <option value="vencida">Vencidas</option>
+          <option value="sin_seguro">Sin seguro</option>
+          <option value="cancelada">Canceladas</option>
+        </select>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;" id="seg-solo-auto-wrap"><input type="checkbox" id="seg-solo-auto" checked> Solo automotrices</label>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;" id="seg-ver-pagados-wrap"><input type="checkbox" id="seg-ver-pagados"> Ver también pagados</label>
+        <button class="export-btn" id="seg-add-poliza">+ Nueva póliza</button>
+        <button class="export-btn" id="seg-add-siniestro">+ Registrar siniestro</button>
+        <button class="export-btn" id="seg-actualizar">Actualizar</button>
+      </div>
+      <div class="seg-status" id="seg-status"></div>
+      <div class="table-wrap"><table id="seg-tabla"><thead id="seg-thead"></thead><tbody id="seg-tbody"></tbody></table></div>
+    </div>
+
+    <div class="maq-modal-overlay" id="seg-pol-overlay">
+      <div class="maq-modal">
+        <button class="maq-modal-close" id="seg-pol-cerrar">&times;</button>
+        <h3 id="seg-pol-titulo">Nueva póliza</h3>
+        <input type="hidden" id="seg-pol-id">
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Aseguradora *</label><input type="text" id="seg-pol-aseguradora" list="seg-dl-aseguradoras"></div>
+          <div class="maq-field"><label>Número de póliza *</label><input type="text" id="seg-pol-numero"></div>
+          <div class="maq-field"><label>Empresa (contratante)</label><select id="seg-pol-empresa"><option value="">—</option></select></div>
+        </div>
+        <datalist id="seg-dl-aseguradoras"></datalist>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Cobertura</label><select id="seg-pol-cobertura"><option value="">—</option></select></div>
+          <div class="maq-field"><label>Vigencia desde *</label><input type="date" id="seg-pol-inicio"></div>
+          <div class="maq-field"><label>Vigencia hasta *</label><input type="date" id="seg-pol-fin"></div>
+        </div>
+        <div class="maq-field"><label>Detalle de la cobertura (opcional)</label><textarea id="seg-pol-cob-detalle" placeholder="Daños materiales, robo total, RC, gastos médicos..."></textarea></div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Deducible</label><input type="text" id="seg-pol-deducible" placeholder="Ej. 5% DM / 10% RT"></div>
+          <div class="maq-field"><label>Teléfono de siniestros (cabina)</label><input type="text" id="seg-pol-tel-siniestros"></div>
+        </div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Agente</label><input type="text" id="seg-pol-agente"></div>
+          <div class="maq-field"><label>Teléfono del agente</label><input type="text" id="seg-pol-agente-tel"></div>
+          <div class="maq-field"><label>Correo del agente</label><input type="text" id="seg-pol-agente-correo"></div>
+        </div>
+
+        <div class="seg-sec">Unidades aseguradas *</div>
+        <div class="seg-agregar-uni">
+          <input type="text" id="seg-pol-uni-buscar" list="seg-dl-unidades" placeholder="Escribe el código o nombre de la unidad y da Agregar">
+          <button type="button" class="seg-btn-claro" id="seg-pol-uni-agregar">Agregar</button>
+        </div>
+        <datalist id="seg-dl-unidades"></datalist>
+        <table class="seg-mini"><thead><tr><th>Unidad</th><th style="width:150px;">Placa / serie</th><th style="width:90px;">Inciso</th><th style="width:130px;">Suma asegurada</th><th style="width:70px;"></th></tr></thead><tbody id="seg-pol-uni-body"></tbody></table>
+
+        <div class="seg-sec">Costo y pagos</div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Prima total (con IVA)</label><input type="number" id="seg-pol-prima" min="0" step="0.01"></div>
+          <div class="maq-field"><label>Forma de pago</label><select id="seg-pol-forma">
+            <option value="">—</option><option value="contado">Contado (1 pago)</option><option value="semestral">Semestral (2)</option><option value="trimestral">Trimestral (4)</option><option value="mensual">Mensual (12)</option>
+          </select></div>
+          <div class="maq-field" style="align-self:flex-end;"><button type="button" class="seg-btn-claro" id="seg-pol-generar-pagos" title="Reparte la prima en pagos iguales desde el inicio de la vigencia">Generar calendario</button></div>
+        </div>
+        <table class="seg-mini"><thead><tr><th style="width:30px;">#</th><th style="width:150px;">Fecha límite</th><th style="width:120px;">Monto</th><th style="width:60px;">Pagado</th><th style="width:150px;">Fecha de pago</th><th>Referencia</th><th style="width:70px;"></th></tr></thead><tbody id="seg-pol-pagos-body"></tbody></table>
+        <button type="button" class="seg-btn-claro" id="seg-pol-pago-agregar" style="margin-top:6px;">+ Agregar pago</button>
+
+        <div class="seg-sec">Documento y notas</div>
+        <div class="maq-field"><label>PDF de la póliza</label><input type="file" id="seg-pol-pdf" accept="application/pdf"><div class="seg-pdf-actual" id="seg-pol-pdf-actual"></div></div>
+        <div class="maq-field"><label>Observaciones</label><textarea id="seg-pol-obs"></textarea></div>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px;"><input type="checkbox" id="seg-pol-cancelada" style="width:auto;"> Póliza cancelada (ya no cubre)</label>
+        <div class="maq-modal-actions">
+          <button class="maq-save-btn" id="seg-pol-guardar">Guardar póliza</button>
+        </div>
+        <div class="maq-modal-status" id="seg-pol-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="seg-sin-overlay">
+      <div class="maq-modal">
+        <button class="maq-modal-close" id="seg-sin-cerrar">&times;</button>
+        <h3 id="seg-sin-titulo">Registrar siniestro</h3>
+        <input type="hidden" id="seg-sin-id">
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Unidad *</label><input type="text" id="seg-sin-unidad" list="seg-dl-unidades" placeholder="Código o nombre"></div>
+          <div class="maq-field"><label>Fecha *</label><input type="date" id="seg-sin-fecha"></div>
+          <div class="maq-field"><label>Póliza</label><select id="seg-sin-poliza"><option value="">La que cubría ese día (automática)</option></select></div>
+        </div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Número de reporte / siniestro</label><input type="text" id="seg-sin-reporte"></div>
+          <div class="maq-field"><label>Conductor</label><input type="text" id="seg-sin-conductor"></div>
+          <div class="maq-field"><label>Lugar</label><input type="text" id="seg-sin-lugar"></div>
+        </div>
+        <div class="maq-field"><label>¿Qué pasó?</label><textarea id="seg-sin-descripcion"></textarea></div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Deducible pagado</label><input type="number" id="seg-sin-deducible" min="0" step="0.01"></div>
+          <div class="maq-field"><label>Estatus</label><select id="seg-sin-estatus"><option value="abierto">Abierto</option><option value="en_proceso">En proceso</option><option value="cerrado">Cerrado</option></select></div>
+          <div class="maq-field"><label>Orden de Taller (opcional)</label><input type="text" id="seg-sin-orden" placeholder="Ej. OF-00398"></div>
+        </div>
+        <div class="maq-field"><label>Notas / seguimiento</label><textarea id="seg-sin-notas"></textarea></div>
+        <div class="maq-modal-actions"><button class="maq-save-btn" id="seg-sin-guardar">Guardar siniestro</button></div>
+        <div class="maq-modal-status" id="seg-sin-status"></div>
+      </div>
+    </div>
+
     <div id="pview-indicadores" style="display:none;">
       <div class="ind-encabezado">
         <h2 class="ind-titulo">Cumplimiento de programación semanal</h2>
@@ -4298,6 +4442,7 @@
             <div class="usr-permiso-row"><label>Servicios Automotrices</label><select id="usr-perm-servicios_automotrices" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Refacciones</label><select id="usr-perm-refacciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Insumos</label><select id="usr-perm-insumos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Seguros</label><select id="usr-perm-seguros" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
             <div class="usr-permiso-row"><label>Indicadores</label><select id="usr-perm-indicadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (catálogo de semanas)</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
@@ -4425,6 +4570,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
+  guardarPolizaSeguro: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -4703,7 +4849,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'avance_huerta', 'indicadores', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'avance_huerta', 'indicadores', 'usuarios'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -4812,6 +4958,7 @@ function aplicarPermisosPanelUI(){
     ['servicios_automotrices', ptabServiciosAutomotrices, pviewServiciosAutomotrices],
     ['refacciones', ptabRefacciones, pviewRefacciones],
     ['insumos', ptabInsumos, pviewInsumos],
+    ['seguros', ptabSeguros, pviewSeguros],
     ['avance_huerta', ptabAvanceHuerta, pviewAvanceHuerta],
     ['indicadores', ptabIndicadores, pviewIndicadores],
     ['usuarios', ptabUsuarios, pviewUsuarios],
@@ -7043,6 +7190,7 @@ const ptabMantenimiento = document.getElementById('ptab-mantenimiento');
 const ptabServiciosAutomotrices = document.getElementById('ptab-servicios-automotrices');
 const ptabRefacciones = document.getElementById('ptab-refacciones');
 const ptabInsumos = document.getElementById('ptab-insumos');
+const ptabSeguros = document.getElementById('ptab-seguros');
 const ptabAvanceHuerta = document.getElementById('ptab-avancehuerta');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
 const ptabIndicadores = document.getElementById('ptab-indicadores');
@@ -7057,6 +7205,7 @@ const pviewMantenimiento = document.getElementById('pview-mantenimiento');
 const pviewServiciosAutomotrices = document.getElementById('pview-servicios-automotrices');
 const pviewRefacciones = document.getElementById('pview-refacciones');
 const pviewInsumos = document.getElementById('pview-insumos');
+const pviewSeguros = document.getElementById('pview-seguros');
 const pviewAvanceHuerta = document.getElementById('pview-avancehuerta');
 const pviewUsuarios = document.getElementById('pview-usuarios');
 const pviewIndicadores = document.getElementById('pview-indicadores');
@@ -7073,8 +7222,8 @@ let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
 let AVANCE_HUERTA_HUERTAS_CARGADAS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -7164,6 +7313,10 @@ ptabInsumos.addEventListener('click', function(){
   // la pestaña Refacciones igual puede elegir el insumo del catálogo.
   if(!INSUMOS_CATALOGO_CARGADO){ cargarCatalogoInsumos(); }
   if(!INSUMOS_CARGADOS){ cargarInsumos(); }
+});
+ptabSeguros.addEventListener('click', function(){
+  activarPanelTab(ptabSeguros, pviewSeguros);
+  if(!SEG_CARGADO){ cargarSeguros(); } else { renderSeguros(); }
 });
 ptabAvanceHuerta.addEventListener('click', function(){
   activarPanelTab(ptabAvanceHuerta, pviewAvanceHuerta);
@@ -18804,6 +18957,423 @@ document.getElementById('ref-btn-delete').addEventListener('click', function(){
     })
     .eliminarRefaccion(ACCESS_CODE, PANEL_USUARIO, Number(id));
 });
+
+// =====================================================================
+// Pestaña "Seguros" (oct-2026, Carlos): control de pólizas de las unidades
+// (una o varias = flotilla), PDF, costo y pagos, contactos de siniestros y
+// bitácora de siniestros. Datos: getSeguros; cambios: guardarPolizaSeguro,
+// eliminarPolizaSeguro, marcarPagoSeguro, guardarSiniestroSeguro,
+// eliminarSiniestroSeguro (permiso 'seguros'). Los avisos de vencimiento
+// por Telegram los manda el servidor (revisarAvisosSeguros_).
+// =====================================================================
+let SEG_DATOS = null;
+let SEG_CARGADO = false;
+let SEG_VISTA = 'polizas';
+let SEG_POL_UNIDADES = [];   // filas del modal de póliza
+let SEG_POL_PAGOS = [];
+const SEG_ESTADO_TXT = { vigente: 'Vigente', por_vencer: 'Por vencer', vencida: 'Vencida', cancelada: 'Cancelada', futura: 'Aún no inicia', sin_seguro: 'Sin seguro' };
+const SEG_SIN_TXT = { abierto: 'Abierto', en_proceso: 'En proceso', cerrado: 'Cerrado' };
+const SEG_FORMAS_N = { contado: 1, semestral: 2, trimestral: 4, mensual: 12 };
+
+function segPuede_(){ return puedeCapturarPestana('seguros'); }
+function segFechaTxt_(iso){ if(!iso) return '—'; const p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+function segMoney_(n){ return (n === null || n === undefined || n === '') ? '—' : '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function segDias_(a, b){ const pa = a.split('-').map(Number), pb = b.split('-').map(Number); return Math.round((Date.UTC(pb[0], pb[1]-1, pb[2]) - Date.UTC(pa[0], pa[1]-1, pa[2])) / 86400000); }
+function segSumarMeses_(iso, meses){
+  const p = iso.split('-').map(Number);
+  const base = new Date(Date.UTC(p[0], p[1] - 1 + meses, 1));
+  const ultimo = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+  base.setUTCDate(Math.min(p[2], ultimo));
+  return base.toISOString().slice(0, 10);
+}
+// Igual que calendarioPagosSeguro_ del servidor.
+function segCalendario_(inicio, prima, forma){
+  const n = SEG_FORMAS_N[forma] || 1;
+  const total = Math.round(Number(prima || 0) * 100);
+  const base = Math.floor(total / n);
+  const out = [];
+  for(let i = 0; i < n; i++){ out.push({ id: 0, fechaVencimiento: segSumarMeses_(inicio, (12 / n) * i), monto: (i === n - 1 ? total - base * (n - 1) : base) / 100, pagado: false, pagadoEn: '', referencia: '' }); }
+  return out;
+}
+function segBadge_(estado, dias){
+  let txt = SEG_ESTADO_TXT[estado] || estado;
+  if(estado === 'por_vencer' && dias !== null) txt += dias === 0 ? ' (hoy)' : ' (' + dias + ' d)';
+  if(estado === 'vencida' && dias !== null) txt += ' (hace ' + (-dias) + ' d)';
+  return '<span class="seg-badge ' + estado + '">' + escapeHtml(txt) + '</span>';
+}
+function segUnidad_(codigo){ return (SEG_DATOS && SEG_DATOS.unidades.find(function(u){ return u.codigoUnidad === codigo; })) || null; }
+function segPoliza_(id){ return (SEG_DATOS && SEG_DATOS.polizas.find(function(p){ return p.id === id; })) || null; }
+function segStatus_(t, err){ const el = document.getElementById('seg-status'); el.textContent = t || ''; el.style.color = err ? 'var(--danger)' : ''; }
+
+function cargarSeguros(){
+  segStatus_('Cargando seguros...');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ segStatus_((r && r.error) || 'No se pudieron leer los seguros.', true); return; }
+      SEG_DATOS = r; SEG_CARGADO = true; segStatus_('');
+      segLlenarListas_();
+      renderSeguros();
+    })
+    .withFailureHandler(function(e){ segStatus_((e && e.message) || 'No se pudieron leer los seguros.', true); })
+    .getSeguros(ACCESS_CODE, PANEL_USUARIO);
+}
+
+function segLlenarListas_(){
+  const dl = document.getElementById('seg-dl-unidades');
+  dl.innerHTML = SEG_DATOS.unidades.map(function(u){ return '<option value="' + escapeHtml(u.codigoUnidad) + '">' + escapeHtml(u.unidad + (u.placa ? ' · ' + u.placa : '')) + '</option>'; }).join('');
+  const aseg = Array.from(new Set(SEG_DATOS.polizas.map(function(p){ return p.aseguradora; }))).sort();
+  document.getElementById('seg-dl-aseguradoras').innerHTML = aseg.map(function(a){ return '<option value="' + escapeHtml(a) + '">'; }).join('');
+  const cob = document.getElementById('seg-pol-cobertura');
+  cob.innerHTML = '<option value="">—</option>' + SEG_DATOS.coberturas.map(function(c){ return '<option>' + escapeHtml(c) + '</option>'; }).join('');
+  const emp = document.getElementById('seg-pol-empresa');
+  emp.innerHTML = '<option value="">—</option>' + (SEG_DATOS.empresas || []).map(function(e){ return '<option value="' + e.id + '">' + escapeHtml(e.nombre.split(',')[0]) + '</option>'; }).join('');
+}
+
+function segTarjetas_(){
+  const d = SEG_DATOS, hoy = d.hoy;
+  const activas = d.polizas.filter(function(p){ return !p.cancelada; });
+  const cuenta = function(e){ return activas.filter(function(p){ return p.estado === e; }).length; };
+  const sinSeg = d.unidades.filter(function(u){ return u.automotriz && (u.estado === 'sin_seguro' || u.estado === 'vencida'); }).length;
+  const pagos30 = [];
+  activas.forEach(function(p){ p.pagos.forEach(function(x){ if(!x.pagado && segDias_(hoy, x.fechaVencimiento) <= 30) pagos30.push(x); }); });
+  const abiertos = d.siniestros.filter(function(s){ return s.estatus !== 'cerrado'; }).length;
+  const t = [
+    ['verde', cuenta('vigente'), 'Pólizas vigentes', 'polizas', 'vigente'],
+    ['ambar', cuenta('por_vencer'), 'Por vencer (30 días)', 'polizas', 'por_vencer'],
+    ['rojo', cuenta('vencida'), 'Vencidas', 'polizas', 'vencida'],
+    ['rojo', sinSeg, 'Automotrices sin seguro vigente', 'unidades', 'sin_seguro'],
+    ['ambar', pagos30.length, 'Pagos en 30 días o atrasados', 'pagos', ''],
+    ['ambar', abiertos, 'Siniestros abiertos', 'siniestros', ''],
+  ];
+  document.getElementById('seg-tarjetas').innerHTML = t.map(function(x){
+    return '<div class="seg-tarjeta ' + x[0] + '" data-vista="' + x[3] + '" data-estado="' + x[4] + '"><div class="n">' + x[1] + '</div><div class="t">' + escapeHtml(x[2]) + '</div></div>';
+  }).join('');
+}
+
+function renderSeguros(){
+  if(!SEG_DATOS) return;
+  segTarjetas_();
+  document.querySelectorAll('.seg-subtab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-vista') === SEG_VISTA); });
+  document.getElementById('seg-solo-auto-wrap').style.display = SEG_VISTA === 'unidades' ? '' : 'none';
+  document.getElementById('seg-ver-pagados-wrap').style.display = SEG_VISTA === 'pagos' ? '' : 'none';
+  document.getElementById('seg-estado').style.display = (SEG_VISTA === 'polizas' || SEG_VISTA === 'unidades') ? '' : 'none';
+  const q = document.getElementById('seg-buscar').value.trim().toLowerCase();
+  const est = document.getElementById('seg-estado').value;
+  const puede = segPuede_();
+  const th = document.getElementById('seg-thead'), tb = document.getElementById('seg-tbody');
+  const coincide = function(txt){ return !q || txt.toLowerCase().indexOf(q) !== -1; };
+  const nomUni = function(c){ const u = segUnidad_(c); return c + (u ? ' ' + u.unidad + ' ' + u.placa : ''); };
+  let filas = [];
+  if(SEG_VISTA === 'polizas'){
+    th.innerHTML = '<tr><th>Aseguradora / póliza</th><th>Cobertura</th><th>Unidades</th><th>Vigencia</th><th>Estado</th><th>Prima</th><th>Próximo pago</th><th>Siniestros (cabina)</th><th>Acciones</th></tr>';
+    filas = SEG_DATOS.polizas.filter(function(p){
+      if(est && est !== 'sin_seguro' && p.estado !== est) return false;
+      if(est === 'sin_seguro') return false;
+      return coincide([p.aseguradora, p.numeroPoliza, p.cobertura, p.empresa].concat(p.unidades.map(function(u){ return nomUni(u.codigoUnidad); })).join(' '));
+    }).map(function(p){
+      const unis = p.unidades.map(function(u){ const x = segUnidad_(u.codigoUnidad); return '<div>' + escapeHtml(u.codigoUnidad) + (x ? ' <span class="seg-sub">' + escapeHtml(x.unidad + (x.placa ? ' · ' + x.placa : '')) + '</span>' : '') + '</div>'; }).join('');
+      const prox = p.proximoPago ? segMoney_(p.proximoPago.monto) + '<div class="seg-sub">' + segFechaTxt_(p.proximoPago.fechaVencimiento) + '</div>' : (p.pagos.length ? '<span class="seg-badge pagado">Pagada</span>' : '—');
+      let acc = p.pdfUrl ? '<a class="row-view" href="' + escapeHtml(p.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '';
+      if(puede) acc += '<button type="button" class="row-view seg-btn-editar" data-id="' + p.id + '">Editar</button><button type="button" class="row-view seg-btn-renovar" data-id="' + p.id + '" title="Nueva póliza con las mismas unidades y la vigencia siguiente">Renovar</button><button type="button" class="row-view seg-btn-eliminar" data-id="' + p.id + '">Eliminar</button>';
+      else acc += '<button type="button" class="row-view seg-btn-ver" data-id="' + p.id + '">Ver</button>';
+      return '<tr><td><b>' + escapeHtml(p.aseguradora) + '</b><div class="seg-sub">' + escapeHtml(p.numeroPoliza) + (p.empresa ? ' · ' + escapeHtml(p.empresa.split(',')[0]) : '') + '</div></td>'
+        + '<td>' + escapeHtml(p.cobertura || '—') + (p.deducible ? '<div class="seg-sub">Ded. ' + escapeHtml(p.deducible) + '</div>' : '') + '</td>'
+        + '<td>' + unis + '</td><td>' + segFechaTxt_(p.vigenciaInicio) + ' – ' + segFechaTxt_(p.vigenciaFin) + '</td><td>' + segBadge_(p.estado, p.dias) + '</td>'
+        + '<td>' + segMoney_(p.primaTotal) + (p.formaPago ? '<div class="seg-sub">' + escapeHtml(p.formaPago) + '</div>' : '') + '</td><td>' + prox + '</td>'
+        + '<td>' + escapeHtml(p.telefonoSiniestros || '—') + (p.agenteNombre ? '<div class="seg-sub">' + escapeHtml(p.agenteNombre + (p.agenteTelefono ? ' · ' + p.agenteTelefono : '')) + '</div>' : '') + '</td>'
+        + '<td><div class="seg-acc">' + acc + '</div></td></tr>';
+    });
+  } else if(SEG_VISTA === 'unidades'){
+    const soloAuto = document.getElementById('seg-solo-auto').checked;
+    th.innerHTML = '<tr><th>Unidad</th><th>Tipo</th><th>Placa / serie</th><th>Marca / modelo</th><th>Empresa</th><th>Póliza</th><th>Vence</th><th>Estado</th><th>Siniestros</th><th></th></tr>';
+    filas = SEG_DATOS.unidades.filter(function(u){
+      if(soloAuto && !u.automotriz) return false;
+      if(est === 'sin_seguro' ? (u.estado !== 'sin_seguro' && u.estado !== 'vencida') : (est && u.estado !== est)) return false;
+      const p = u.polizaId ? segPoliza_(u.polizaId) : null;
+      return coincide([u.codigoUnidad, u.unidad, u.placa, u.serie, u.marca, u.modelo, p ? p.aseguradora + ' ' + p.numeroPoliza : ''].join(' '));
+    }).map(function(u){
+      const p = u.polizaId ? segPoliza_(u.polizaId) : null;
+      let acc = '';
+      if(puede && (!p || u.estado === 'vencida' || u.estado === 'por_vencer')) acc = '<button type="button" class="row-view seg-btn-asegurar" data-codigo="' + escapeHtml(u.codigoUnidad) + '">Asegurar</button>';
+      return '<tr><td><b>' + escapeHtml(u.codigoUnidad) + '</b><div class="seg-sub">' + escapeHtml(u.unidad) + '</div></td><td>' + escapeHtml(u.tipoUnidad || '—') + '</td>'
+        + '<td>' + escapeHtml(u.placa || '—') + (u.serie ? '<div class="seg-sub">' + escapeHtml(u.serie) + '</div>' : '') + '</td><td>' + escapeHtml([u.marca, u.modelo, u.anio].filter(Boolean).join(' ') || '—') + '</td>'
+        + '<td>' + escapeHtml((u.empresa || '—').split(',')[0]) + '</td><td>' + (p ? escapeHtml(p.aseguradora) + '<div class="seg-sub">' + escapeHtml(p.numeroPoliza) + '</div>' : '—') + '</td>'
+        + '<td>' + (p ? segFechaTxt_(p.vigenciaFin) : '—') + '</td><td>' + segBadge_(u.estado, u.dias) + '</td><td>' + (u.siniestros || '') + '</td><td>' + acc + '</td></tr>';
+    });
+  } else if(SEG_VISTA === 'pagos'){
+    const verPagados = document.getElementById('seg-ver-pagados').checked;
+    th.innerHTML = '<tr><th>Fecha límite</th><th>Póliza</th><th>Unidades</th><th>Pago</th><th>Monto</th><th>Estado</th><th>Pagado / referencia</th><th></th></tr>';
+    const lista = [];
+    SEG_DATOS.polizas.filter(function(p){ return !p.cancelada; }).forEach(function(p){ p.pagos.forEach(function(x){ if(verPagados || !x.pagado) lista.push({ p: p, x: x }); }); });
+    lista.sort(function(a, b){ return a.x.fechaVencimiento < b.x.fechaVencimiento ? -1 : 1; });
+    filas = lista.filter(function(o){ return coincide([o.p.aseguradora, o.p.numeroPoliza].concat(o.p.unidades.map(function(u){ return nomUni(u.codigoUnidad); })).join(' ')); }).map(function(o){
+      const d = segDias_(SEG_DATOS.hoy, o.x.fechaVencimiento);
+      const badge = o.x.pagado ? '<span class="seg-badge pagado">Pagado</span>' : d < 0 ? '<span class="seg-badge atrasado">Atrasado ' + (-d) + ' d</span>' : d <= 30 ? '<span class="seg-badge proximo">' + (d === 0 ? 'Hoy' : 'En ' + d + ' d') + '</span>' : '<span class="seg-badge pendiente">Pendiente</span>';
+      let acc = '';
+      if(puede) acc = o.x.pagado ? '<button type="button" class="row-view seg-btn-despagar" data-pago="' + o.x.id + '">Desmarcar</button>' : '<button type="button" class="row-view seg-btn-pagar" data-pago="' + o.x.id + '">Marcar pagado</button>';
+      return '<tr><td>' + segFechaTxt_(o.x.fechaVencimiento) + '</td><td>' + escapeHtml(o.p.aseguradora) + '<div class="seg-sub">' + escapeHtml(o.p.numeroPoliza) + '</div></td>'
+        + '<td>' + escapeHtml(o.p.unidades.map(function(u){ return u.codigoUnidad; }).join(', ')) + '</td><td>' + o.x.numero + ' de ' + o.p.pagos.length + '</td><td>' + segMoney_(o.x.monto) + '</td><td>' + badge + '</td>'
+        + '<td>' + (o.x.pagado ? segFechaTxt_(o.x.pagadoEn) + (o.x.referencia ? '<div class="seg-sub">' + escapeHtml(o.x.referencia) + '</div>' : '') + (o.x.marcadoPor ? '<div class="seg-sub">' + escapeHtml(o.x.marcadoPor) + '</div>' : '') : '—') + '</td><td>' + acc + '</td></tr>';
+    });
+  } else {
+    th.innerHTML = '<tr><th>Fecha</th><th>Unidad</th><th>Póliza</th><th>Reporte</th><th>¿Qué pasó?</th><th>Deducible</th><th>Estatus</th><th>Orden</th><th></th></tr>';
+    filas = SEG_DATOS.siniestros.filter(function(s){
+      const p = s.polizaId ? segPoliza_(s.polizaId) : null;
+      return coincide([nomUni(s.codigoUnidad), s.numeroReporte, s.descripcion, s.conductor, s.lugar, s.orden, p ? p.aseguradora + ' ' + p.numeroPoliza : ''].join(' '));
+    }).map(function(s){
+      const p = s.polizaId ? segPoliza_(s.polizaId) : null;
+      const u = segUnidad_(s.codigoUnidad);
+      let acc = puede ? '<button type="button" class="row-view seg-sin-editar" data-id="' + s.id + '">Editar</button><button type="button" class="row-view seg-sin-eliminar" data-id="' + s.id + '">Eliminar</button>' : '';
+      return '<tr><td>' + segFechaTxt_(s.fecha) + '</td><td><b>' + escapeHtml(s.codigoUnidad) + '</b>' + (u ? '<div class="seg-sub">' + escapeHtml(u.unidad) + '</div>' : '') + '</td>'
+        + '<td>' + (p ? escapeHtml(p.aseguradora) + '<div class="seg-sub">' + escapeHtml(p.numeroPoliza) + (p.telefonoSiniestros ? ' · ' + escapeHtml(p.telefonoSiniestros) : '') + '</div>' : '<span class="seg-badge sin_seguro">Sin póliza</span>') + '</td>'
+        + '<td>' + escapeHtml(s.numeroReporte || '—') + '</td><td>' + escapeHtml(s.descripcion || '—') + (s.conductor || s.lugar ? '<div class="seg-sub">' + escapeHtml([s.conductor, s.lugar].filter(Boolean).join(' · ')) + '</div>' : '') + '</td>'
+        + '<td>' + segMoney_(s.deducible) + '</td><td><span class="seg-badge ' + s.estatus + '">' + escapeHtml(SEG_SIN_TXT[s.estatus] || s.estatus) + '</span></td><td>' + escapeHtml(s.orden || '—') + '</td><td><div class="seg-acc">' + acc + '</div></td></tr>';
+    });
+  }
+  const cols = th.querySelectorAll('th').length;
+  tb.innerHTML = filas.length ? filas.join('') : '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text-dim);padding:24px;">' + (SEG_VISTA === 'polizas' && !SEG_DATOS.polizas.length ? 'Todavía no hay pólizas. Da "+ Nueva póliza".' : 'Nada que mostrar con estos filtros.') + '</td></tr>';
+  document.getElementById('seg-add-poliza').style.display = puede ? '' : 'none';
+  document.getElementById('seg-add-siniestro').style.display = puede ? '' : 'none';
+}
+
+// ---------- Modal de póliza ----------
+function segRenderPolUnidades_(){
+  const b = document.getElementById('seg-pol-uni-body');
+  b.innerHTML = SEG_POL_UNIDADES.length ? SEG_POL_UNIDADES.map(function(u, i){
+    const x = segUnidad_(u.codigoUnidad);
+    return '<tr><td><b>' + escapeHtml(u.codigoUnidad) + '</b> <span style="color:#666;">' + escapeHtml(x ? x.unidad : '') + '</span></td><td>' + escapeHtml(x ? [x.placa, x.serie].filter(Boolean).join(' / ') : '') + '</td>'
+      + '<td><input type="text" data-i="' + i + '" data-k="inciso" value="' + escapeHtml(u.inciso || '') + '"></td><td><input type="number" step="0.01" min="0" data-i="' + i + '" data-k="sumaAsegurada" value="' + (u.sumaAsegurada === null || u.sumaAsegurada === undefined ? '' : u.sumaAsegurada) + '"></td>'
+      + '<td><button type="button" class="seg-quitar" data-quitar-uni="' + i + '">Quitar</button></td></tr>';
+  }).join('') : '<tr><td colspan="5" style="color:#888;">Agrega al menos una unidad.</td></tr>';
+}
+function segRenderPolPagos_(){
+  const b = document.getElementById('seg-pol-pagos-body');
+  b.innerHTML = SEG_POL_PAGOS.length ? SEG_POL_PAGOS.map(function(x, i){
+    return '<tr><td>' + (i + 1) + '</td><td><input type="date" data-pi="' + i + '" data-k="fechaVencimiento" value="' + escapeHtml(x.fechaVencimiento || '') + '"></td>'
+      + '<td><input type="number" step="0.01" min="0" data-pi="' + i + '" data-k="monto" value="' + (x.monto === null || x.monto === undefined ? '' : x.monto) + '"></td>'
+      + '<td><input type="checkbox" data-pi="' + i + '" data-k="pagado"' + (x.pagado ? ' checked' : '') + '></td>'
+      + '<td><input type="date" data-pi="' + i + '" data-k="pagadoEn" value="' + escapeHtml(x.pagadoEn || '') + '"></td>'
+      + '<td><input type="text" data-pi="' + i + '" data-k="referencia" value="' + escapeHtml(x.referencia || '') + '"></td>'
+      + '<td><button type="button" class="seg-quitar" data-quitar-pago="' + i + '">Quitar</button></td></tr>';
+  }).join('') : '<tr><td colspan="7" style="color:#888;">Sin pagos. Usa "Generar calendario" o "+ Agregar pago".</td></tr>';
+}
+function segAbrirPoliza_(p, opciones){
+  opciones = opciones || {};
+  const renovar = !!opciones.renovar;
+  const val = function(id, v){ document.getElementById(id).value = v === null || v === undefined ? '' : v; };
+  document.getElementById('seg-pol-titulo').textContent = !p ? 'Nueva póliza' : renovar ? 'Renovar póliza' : 'Editar póliza';
+  val('seg-pol-id', p && !renovar ? p.id : '');
+  val('seg-pol-aseguradora', p ? p.aseguradora : '');
+  val('seg-pol-numero', p && !renovar ? p.numeroPoliza : '');
+  val('seg-pol-empresa', p ? (p.empresaId || '') : '');
+  val('seg-pol-cobertura', p ? p.cobertura : '');
+  val('seg-pol-cob-detalle', p ? p.coberturaDetalle : '');
+  val('seg-pol-deducible', p ? p.deducible : '');
+  val('seg-pol-tel-siniestros', p ? p.telefonoSiniestros : '');
+  val('seg-pol-agente', p ? p.agenteNombre : '');
+  val('seg-pol-agente-tel', p ? p.agenteTelefono : '');
+  val('seg-pol-agente-correo', p ? p.agenteCorreo : '');
+  val('seg-pol-forma', p ? p.formaPago : '');
+  val('seg-pol-prima', p && !renovar ? p.primaTotal : '');
+  val('seg-pol-obs', p && !renovar ? p.observaciones : '');
+  if(renovar){
+    val('seg-pol-inicio', p.vigenciaFin);
+    val('seg-pol-fin', segSumarMeses_(p.vigenciaFin, 12));
+  } else {
+    val('seg-pol-inicio', p ? p.vigenciaInicio : SEG_DATOS.hoy);
+    val('seg-pol-fin', p ? p.vigenciaFin : segSumarMeses_(SEG_DATOS.hoy, 12));
+  }
+  document.getElementById('seg-pol-cancelada').checked = !!(p && !renovar && p.cancelada);
+  document.getElementById('seg-pol-pdf').value = '';
+  document.getElementById('seg-pol-pdf-actual').innerHTML = p && !renovar && p.pdfUrl ? 'Actual: <a href="' + escapeHtml(p.pdfUrl) + '" target="_blank" rel="noopener">ver PDF</a> (sube otro solo si quieres reemplazarlo)' : '';
+  SEG_POL_UNIDADES = p ? p.unidades.map(function(u){ return { codigoUnidad: u.codigoUnidad, inciso: u.inciso, sumaAsegurada: renovar ? null : u.sumaAsegurada }; }) : (opciones.codigos || []).map(function(c){ return { codigoUnidad: c, inciso: '', sumaAsegurada: null }; });
+  SEG_POL_PAGOS = p && !renovar ? p.pagos.map(function(x){ return Object.assign({}, x); }) : [];
+  segRenderPolUnidades_(); segRenderPolPagos_();
+  const st = document.getElementById('seg-pol-status'); st.textContent = ''; st.className = 'maq-modal-status';
+  const soloVer = !segPuede_();
+  document.getElementById('seg-pol-guardar').style.display = soloVer ? 'none' : '';
+  document.getElementById('seg-pol-overlay').classList.add('open');
+}
+function segCerrarPoliza_(){ document.getElementById('seg-pol-overlay').classList.remove('open'); }
+function segAgregarUnidadPol_(){
+  const inp = document.getElementById('seg-pol-uni-buscar');
+  const t = inp.value.trim();
+  if(!t) return;
+  let u = segUnidad_(t);
+  if(!u){
+    const tl = t.toLowerCase();
+    const cand = SEG_DATOS.unidades.filter(function(x){ return (x.codigoUnidad + ' ' + x.unidad + ' ' + x.placa).toLowerCase().indexOf(tl) !== -1; });
+    if(cand.length === 1) u = cand[0];
+    else { alert(cand.length ? 'Hay ' + cand.length + ' unidades que coinciden; elige una de la lista.' : 'No encontré esa unidad en el catálogo de Maquinaria.'); return; }
+  }
+  if(SEG_POL_UNIDADES.some(function(x){ return x.codigoUnidad === u.codigoUnidad; })){ inp.value = ''; return; }
+  SEG_POL_UNIDADES.push({ codigoUnidad: u.codigoUnidad, inciso: '', sumaAsegurada: null });
+  inp.value = '';
+  segRenderPolUnidades_();
+}
+function segGuardarPoliza_(){
+  const st = document.getElementById('seg-pol-status');
+  const g = function(id){ return document.getElementById(id).value; };
+  const datos = {
+    id: Number(g('seg-pol-id')) || 0, aseguradora: g('seg-pol-aseguradora'), numeroPoliza: g('seg-pol-numero'), empresaId: g('seg-pol-empresa'),
+    cobertura: g('seg-pol-cobertura'), coberturaDetalle: g('seg-pol-cob-detalle'), vigenciaInicio: g('seg-pol-inicio'), vigenciaFin: g('seg-pol-fin'),
+    deducible: g('seg-pol-deducible'), telefonoSiniestros: g('seg-pol-tel-siniestros'), agenteNombre: g('seg-pol-agente'), agenteTelefono: g('seg-pol-agente-tel'),
+    agenteCorreo: g('seg-pol-agente-correo'), primaTotal: g('seg-pol-prima'), formaPago: g('seg-pol-forma'), observaciones: g('seg-pol-obs'),
+    cancelada: document.getElementById('seg-pol-cancelada').checked, unidades: SEG_POL_UNIDADES, pagos: SEG_POL_PAGOS,
+  };
+  const enviar = function(){
+    const btn = document.getElementById('seg-pol-guardar');
+    btn.disabled = true; st.textContent = 'Guardando...'; st.className = 'maq-modal-status show';
+    google.script.run
+      .withSuccessHandler(function(r){
+        btn.disabled = false;
+        if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+        segCerrarPoliza_(); cargarSeguros();
+      })
+      .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+      .guardarPolizaSeguro(ACCESS_CODE, PANEL_USUARIO, datos);
+  };
+  const f = document.getElementById('seg-pol-pdf').files[0];
+  if(f){
+    if(f.size > 10 * 1024 * 1024){ st.textContent = 'El PDF pesa más de 10 MB.'; st.className = 'maq-modal-status show err'; return; }
+    const fr = new FileReader();
+    fr.onload = function(){ datos.pdfDataUrl = String(fr.result).replace(/^data:[^;]*;/, 'data:application/pdf;'); enviar(); };
+    fr.onerror = function(){ st.textContent = 'No se pudo leer el PDF.'; st.className = 'maq-modal-status show err'; };
+    fr.readAsDataURL(f);
+  } else enviar();
+}
+
+// ---------- Modal de siniestro ----------
+function segLlenarPolizasSiniestro_(codigo, seleccion){
+  const sel = document.getElementById('seg-sin-poliza');
+  const suyas = SEG_DATOS.polizas.filter(function(p){ return p.unidades.some(function(u){ return u.codigoUnidad === codigo; }); });
+  sel.innerHTML = '<option value="">La que cubría ese día (automática)</option>' + suyas.map(function(p){
+    return '<option value="' + p.id + '">' + escapeHtml(p.aseguradora + ' ' + p.numeroPoliza + ' (' + segFechaTxt_(p.vigenciaInicio) + ' – ' + segFechaTxt_(p.vigenciaFin) + ')') + '</option>';
+  }).join('');
+  sel.value = seleccion ? String(seleccion) : '';
+}
+function segAbrirSiniestro_(s){
+  const val = function(id, v){ document.getElementById(id).value = v === null || v === undefined ? '' : v; };
+  document.getElementById('seg-sin-titulo').textContent = s ? 'Editar siniestro' : 'Registrar siniestro';
+  val('seg-sin-id', s ? s.id : ''); val('seg-sin-unidad', s ? s.codigoUnidad : ''); val('seg-sin-fecha', s ? s.fecha : SEG_DATOS.hoy);
+  val('seg-sin-reporte', s ? s.numeroReporte : ''); val('seg-sin-conductor', s ? s.conductor : ''); val('seg-sin-lugar', s ? s.lugar : '');
+  val('seg-sin-descripcion', s ? s.descripcion : ''); val('seg-sin-deducible', s ? s.deducible : ''); val('seg-sin-estatus', s ? s.estatus : 'abierto');
+  val('seg-sin-orden', s ? s.orden : ''); val('seg-sin-notas', s ? s.notas : '');
+  segLlenarPolizasSiniestro_(s ? s.codigoUnidad : '', s ? s.polizaId : '');
+  const st = document.getElementById('seg-sin-status'); st.textContent = ''; st.className = 'maq-modal-status';
+  document.getElementById('seg-sin-overlay').classList.add('open');
+}
+function segCerrarSiniestro_(){ document.getElementById('seg-sin-overlay').classList.remove('open'); }
+function segGuardarSiniestro_(){
+  const st = document.getElementById('seg-sin-status');
+  const g = function(id){ return document.getElementById(id).value; };
+  let codigo = g('seg-sin-unidad').trim();
+  if(codigo && !segUnidad_(codigo)){
+    const cand = SEG_DATOS.unidades.filter(function(x){ return (x.codigoUnidad + ' ' + x.unidad + ' ' + x.placa).toLowerCase().indexOf(codigo.toLowerCase()) !== -1; });
+    if(cand.length === 1) codigo = cand[0].codigoUnidad;
+  }
+  const datos = { id: Number(g('seg-sin-id')) || 0, codigoUnidad: codigo, fecha: g('seg-sin-fecha'), polizaId: g('seg-sin-poliza'), numeroReporte: g('seg-sin-reporte'),
+    conductor: g('seg-sin-conductor'), lugar: g('seg-sin-lugar'), descripcion: g('seg-sin-descripcion'), deducible: g('seg-sin-deducible'), estatus: g('seg-sin-estatus'),
+    orden: g('seg-sin-orden'), notas: g('seg-sin-notas') };
+  const btn = document.getElementById('seg-sin-guardar');
+  btn.disabled = true; st.textContent = 'Guardando...'; st.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+      segCerrarSiniestro_(); cargarSeguros();
+    })
+    .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+    .guardarSiniestroSeguro(ACCESS_CODE, PANEL_USUARIO, datos);
+}
+
+function segAccionSimple_(fn, args, confirmar){
+  if(confirmar && !confirm(confirmar)) return;
+  segStatus_('Guardando...');
+  const run = google.script.run
+    .withSuccessHandler(function(r){ if(!r || !r.success){ segStatus_((r && r.error) || 'No se pudo.', true); return; } segStatus_(''); cargarSeguros(); })
+    .withFailureHandler(function(e){ segStatus_((e && e.message) || 'No se pudo.', true); });
+  run[fn].apply(run, [ACCESS_CODE, PANEL_USUARIO].concat(args));
+}
+
+// ---------- Eventos ----------
+document.querySelectorAll('.seg-subtab').forEach(function(b){
+  b.addEventListener('click', function(){ SEG_VISTA = b.getAttribute('data-vista'); document.getElementById('seg-estado').value = ''; renderSeguros(); });
+});
+document.getElementById('seg-tarjetas').addEventListener('click', function(e){
+  const t = e.target.closest('.seg-tarjeta'); if(!t) return;
+  SEG_VISTA = t.getAttribute('data-vista');
+  document.getElementById('seg-estado').value = t.getAttribute('data-estado') || '';
+  if(SEG_VISTA === 'unidades') document.getElementById('seg-solo-auto').checked = true;
+  renderSeguros();
+});
+['seg-buscar', 'seg-estado', 'seg-solo-auto', 'seg-ver-pagados'].forEach(function(id){
+  document.getElementById(id).addEventListener(id === 'seg-buscar' ? 'input' : 'change', renderSeguros);
+});
+document.getElementById('seg-actualizar').addEventListener('click', cargarSeguros);
+document.getElementById('seg-add-poliza').addEventListener('click', function(){ segAbrirPoliza_(null); });
+document.getElementById('seg-add-siniestro').addEventListener('click', function(){ segAbrirSiniestro_(null); });
+document.getElementById('seg-tbody').addEventListener('click', function(e){
+  const b = e.target.closest('button'); if(!b) return;
+  const id = Number(b.getAttribute('data-id'));
+  if(b.classList.contains('seg-btn-editar') || b.classList.contains('seg-btn-ver')) segAbrirPoliza_(segPoliza_(id));
+  else if(b.classList.contains('seg-btn-renovar')) segAbrirPoliza_(segPoliza_(id), { renovar: true });
+  else if(b.classList.contains('seg-btn-eliminar')){ const p = segPoliza_(id); segAccionSimple_('eliminarPolizaSeguro', [id], '¿Eliminar la póliza ' + (p ? p.aseguradora + ' ' + p.numeroPoliza : '') + '? (Si solo ya no cubre, mejor edítala y márcala como cancelada.)'); }
+  else if(b.classList.contains('seg-btn-asegurar')){
+    const c = b.getAttribute('data-codigo');
+    const vieja = SEG_DATOS.polizas.find(function(p){ return !p.cancelada && p.unidades.some(function(u){ return u.codigoUnidad === c; }); });
+    if(vieja && confirm('¿Renovar la póliza ' + vieja.aseguradora + ' ' + vieja.numeroPoliza + ' (con todas sus unidades)? Cancelar = póliza nueva solo para ' + c + '.')) segAbrirPoliza_(vieja, { renovar: true });
+    else segAbrirPoliza_(null, { codigos: [c] });
+  }
+  else if(b.classList.contains('seg-btn-pagar')){
+    const ref = prompt('Referencia del pago (opcional, ej. número de transferencia):', '');
+    if(ref === null) return;
+    segAccionSimple_('marcarPagoSeguro', [Number(b.getAttribute('data-pago')), true, '', ref]);
+  }
+  else if(b.classList.contains('seg-btn-despagar')) segAccionSimple_('marcarPagoSeguro', [Number(b.getAttribute('data-pago')), false, '', ''], '¿Marcar este pago como NO pagado?');
+  else if(b.classList.contains('seg-sin-editar')) segAbrirSiniestro_(SEG_DATOS.siniestros.find(function(s){ return s.id === id; }));
+  else if(b.classList.contains('seg-sin-eliminar')) segAccionSimple_('eliminarSiniestroSeguro', [id], '¿Eliminar este siniestro?');
+});
+document.getElementById('seg-pol-cerrar').addEventListener('click', segCerrarPoliza_);
+document.getElementById('seg-pol-overlay').addEventListener('click', function(e){ if(e.target.id === 'seg-pol-overlay') segCerrarPoliza_(); });
+document.getElementById('seg-pol-uni-agregar').addEventListener('click', segAgregarUnidadPol_);
+document.getElementById('seg-pol-uni-buscar').addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); segAgregarUnidadPol_(); } });
+document.getElementById('seg-pol-uni-body').addEventListener('input', function(e){
+  const i = e.target.getAttribute('data-i'); if(i === null) return;
+  SEG_POL_UNIDADES[Number(i)][e.target.getAttribute('data-k')] = e.target.value;
+});
+document.getElementById('seg-pol-uni-body').addEventListener('click', function(e){
+  const q = e.target.getAttribute('data-quitar-uni'); if(q === null) return;
+  SEG_POL_UNIDADES.splice(Number(q), 1); segRenderPolUnidades_();
+});
+document.getElementById('seg-pol-pagos-body').addEventListener('input', function(e){
+  const i = e.target.getAttribute('data-pi'); if(i === null) return;
+  const k = e.target.getAttribute('data-k');
+  const x = SEG_POL_PAGOS[Number(i)];
+  x[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  if(k === 'pagado' && x.pagado && !x.pagadoEn){ x.pagadoEn = SEG_DATOS.hoy; segRenderPolPagos_(); }
+});
+document.getElementById('seg-pol-pagos-body').addEventListener('click', function(e){
+  const q = e.target.getAttribute('data-quitar-pago'); if(q === null) return;
+  SEG_POL_PAGOS.splice(Number(q), 1); segRenderPolPagos_();
+});
+document.getElementById('seg-pol-pago-agregar').addEventListener('click', function(){
+  const ult = SEG_POL_PAGOS[SEG_POL_PAGOS.length - 1];
+  SEG_POL_PAGOS.push({ id: 0, fechaVencimiento: ult ? segSumarMeses_(ult.fechaVencimiento, 1) : (document.getElementById('seg-pol-inicio').value || SEG_DATOS.hoy), monto: '', pagado: false, pagadoEn: '', referencia: '' });
+  segRenderPolPagos_();
+});
+document.getElementById('seg-pol-generar-pagos').addEventListener('click', function(){
+  const ini = document.getElementById('seg-pol-inicio').value, prima = document.getElementById('seg-pol-prima').value, forma = document.getElementById('seg-pol-forma').value;
+  if(!ini || !prima || !forma){ alert('Primero captura la vigencia desde, la prima total y la forma de pago.'); return; }
+  if(SEG_POL_PAGOS.some(function(x){ return x.pagado; }) && !confirm('Ya hay pagos marcados como pagados. ¿Reemplazar todo el calendario?')) return;
+  SEG_POL_PAGOS = segCalendario_(ini, prima, forma);
+  segRenderPolPagos_();
+});
+document.getElementById('seg-pol-guardar').addEventListener('click', segGuardarPoliza_);
+document.getElementById('seg-sin-cerrar').addEventListener('click', segCerrarSiniestro_);
+document.getElementById('seg-sin-overlay').addEventListener('click', function(e){ if(e.target.id === 'seg-sin-overlay') segCerrarSiniestro_(); });
+document.getElementById('seg-sin-unidad').addEventListener('change', function(){ segLlenarPolizasSiniestro_(this.value.trim(), ''); });
+document.getElementById('seg-sin-guardar').addEventListener('click', segGuardarSiniestro_);
 
 // --- Pestaña "Insumos": bitácora de lo que van pidiendo los encargados de
 // campo (herramienta, material, fertilizante, etc.), capturada por la

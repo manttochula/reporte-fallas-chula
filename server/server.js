@@ -275,4 +275,10 @@ app.listen(PORT, () => {
       console.error('[preventivo-auto] Falló la revisión periódica:', err);
     });
   }, INTERVALO_REVISION_PREVENTIVOS_MS);
+
+  // Seguros (oct-2026): avisos por Telegram de pólizas y pagos por vencer
+  // (30/7/0 días; cada aviso una sola vez). Mismo ritmo que preventivos.
+  const revisarSeguros = () => handlers.revisarAvisosSeguros_().catch((err) => console.error('[seguros] Falló la revisión de avisos:', err.message));
+  setTimeout(revisarSeguros, 60 * 1000);
+  setInterval(revisarSeguros, INTERVALO_REVISION_PREVENTIVOS_MS);
 });

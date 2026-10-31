@@ -3314,3 +3314,102 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_codigo_gasto_2026
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'oc_exportaciones' AND column_name = 'agente_estado');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE oc_exportaciones ADD COLUMN codigo_producto VARCHAR(30) DEFAULT NULL, ADD COLUMN concepto VARCHAR(120) DEFAULT NULL, ADD COLUMN almacen VARCHAR(30) DEFAULT NULL, ADD COLUMN codigo_proveedor VARCHAR(20) DEFAULT NULL, ADD COLUMN fecha_entrega DATE DEFAULT NULL, ADD COLUMN agente_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN agente_mensaje TEXT DEFAULT NULL, ADD COLUMN agente_en DATETIME DEFAULT NULL, ADD COLUMN agente_total DECIMAL(14,2) DEFAULT NULL, ADD INDEX idx_oc_export_agente (agente_estado, empresa_id)', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- SEGUROS de las unidades (oct-2026, Carlos: "una pestaña nueva en el panel
+-- llamada Seguros, para llevar un control de los seguros de las unidades").
+-- Una póliza puede cubrir una o varias unidades (flotilla), de cualquier
+-- equipo del catálogo de maquinaria. Lleva su PDF, costo y calendario de
+-- pagos, contactos para siniestros y la bitácora de siniestros por unidad.
+-- Avisos por Telegram 30 y 7 días antes del vencimiento y el día que vence
+-- (y de cada pago 7 días antes y el día), una sola vez cada uno
+-- (seguros_avisos). Ver getSeguros / revisarAvisosSeguros_ en handlers.js.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS seguros_polizas (
+  id                  INT AUTO_INCREMENT PRIMARY KEY,
+  aseguradora         VARCHAR(150) NOT NULL,
+  numero_poliza       VARCHAR(100) NOT NULL,
+  cobertura           VARCHAR(60)  DEFAULT NULL,   -- Amplia / Limitada / Responsabilidad civil / Otra
+  cobertura_detalle   TEXT         DEFAULT NULL,
+  vigencia_inicio     DATE         NOT NULL,
+  vigencia_fin        DATE         NOT NULL,
+  prima_total         DECIMAL(12,2) DEFAULT NULL,
+  forma_pago          VARCHAR(20)  DEFAULT NULL,   -- contado / semestral / trimestral / mensual
+  deducible           VARCHAR(120) DEFAULT NULL,
+  agente_nombre       VARCHAR(150) DEFAULT NULL,
+  agente_telefono     VARCHAR(60)  DEFAULT NULL,
+  agente_correo       VARCHAR(150) DEFAULT NULL,
+  telefono_siniestros VARCHAR(60)  DEFAULT NULL,
+  empresa_id          INT          DEFAULT NULL,
+  pdf_url             VARCHAR(500) DEFAULT NULL,
+  observaciones       TEXT         DEFAULT NULL,
+  cancelada           TINYINT(1)   NOT NULL DEFAULT 0,
+  eliminado           TINYINT(1)   NOT NULL DEFAULT 0,
+  creado_por          VARCHAR(255) DEFAULT NULL,
+  creado_en           TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  actualizado_por     VARCHAR(255) DEFAULT NULL,
+  actualizado_en      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_seg_pol_fin (vigencia_fin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS seguros_poliza_unidades (
+  poliza_id       INT          NOT NULL,
+  codigo_unidad   VARCHAR(50)  NOT NULL,
+  inciso          VARCHAR(30)  DEFAULT NULL,      -- número de inciso en pólizas de flotilla
+  suma_asegurada  DECIMAL(14,2) DEFAULT NULL,
+  PRIMARY KEY (poliza_id, codigo_unidad),
+  INDEX idx_seg_pu_unidad (codigo_unidad)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS seguros_pagos (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  poliza_id         INT           NOT NULL,
+  numero            INT           NOT NULL DEFAULT 1,
+  fecha_vencimiento DATE          NOT NULL,
+  monto             DECIMAL(12,2) NOT NULL DEFAULT 0,
+  pagado            TINYINT(1)    NOT NULL DEFAULT 0,
+  pagado_en         DATE          DEFAULT NULL,
+  referencia        VARCHAR(150)  DEFAULT NULL,
+  marcado_por       VARCHAR(255)  DEFAULT NULL,
+  INDEX idx_seg_pago_poliza (poliza_id),
+  INDEX idx_seg_pago_fecha (fecha_vencimiento)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS seguros_siniestros (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  poliza_id       INT           DEFAULT NULL,
+  codigo_unidad   VARCHAR(50)   NOT NULL,
+  fecha           DATE          NOT NULL,
+  numero_reporte  VARCHAR(100)  DEFAULT NULL,
+  descripcion     TEXT          DEFAULT NULL,
+  lugar           VARCHAR(200)  DEFAULT NULL,
+  conductor       VARCHAR(150)  DEFAULT NULL,
+  deducible       DECIMAL(12,2) DEFAULT NULL,
+  estatus         VARCHAR(20)   NOT NULL DEFAULT 'abierto',   -- abierto / en_proceso / cerrado
+  orden           VARCHAR(30)   DEFAULT NULL,                 -- orden de Taller relacionada (opcional)
+  notas           TEXT          DEFAULT NULL,
+  eliminado       TINYINT(1)    NOT NULL DEFAULT 0,
+  creado_por      VARCHAR(255)  DEFAULT NULL,
+  creado_en       TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  actualizado_por VARCHAR(255)  DEFAULT NULL,
+  actualizado_en  TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_seg_sin_unidad (codigo_unidad),
+  INDEX idx_seg_sin_fecha (fecha)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS seguros_avisos (
+  clave      VARCHAR(80) PRIMARY KEY,     -- p.ej. 'vence-12-30' o 'pago-55-0'
+  enviado_en TIMESTAMP   DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Permiso de la pestaña nueva: "capturar" solo para quien hoy administra
+-- Usuarios (una sola vez; después se asigna desde Usuarios).
+SET @perm_seg_hecho = (SELECT COUNT(*) FROM configuracion WHERE clave = 'permiso_seguros_2026_10');
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.seguros', 'capturar')
+WHERE @perm_seg_hecho = 0
+  AND panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_UNQUOTE(JSON_EXTRACT(panel_permisos, '$.usuarios')) = 'capturar'
+  AND JSON_EXTRACT(panel_permisos, '$.seguros') IS NULL;
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('permiso_seguros_2026_10', 'hecho');

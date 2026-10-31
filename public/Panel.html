@@ -3099,6 +3099,7 @@
           <option value="sin_base">Sin línea base</option>
         </select>
         <button class="export-btn" id="srv-export">Exportar a Excel</button>
+        <button class="export-btn svu-abrir" data-scope="agricola" title="Quitarle a un equipo un servicio de su modelo, o agregarle uno">Servicios por unidad</button>
       </div>
       <div class="summary" id="srv-summary"></div>
       <div class="table-wrap">
@@ -3169,6 +3170,7 @@
           <option value="sin_base">Sin línea base</option>
         </select>
         <button class="export-btn" id="sa-srv-export">Exportar a Excel</button>
+        <button class="export-btn svu-abrir" data-scope="automotriz" title="Quitarle a una unidad un servicio de su modelo, o agregarle uno">Servicios por unidad</button>
       </div>
       <div class="summary" id="sa-srv-summary"></div>
       <div class="table-wrap">
@@ -4283,6 +4285,22 @@
         <div class="maq-field"><label>Notas / seguimiento</label><textarea id="seg-sin-notas"></textarea></div>
         <div class="maq-modal-actions"><button class="maq-save-btn" id="seg-sin-guardar">Guardar siniestro</button></div>
         <div class="maq-modal-status" id="seg-sin-status"></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="svu-overlay">
+      <div class="maq-modal" style="max-width:820px;">
+        <button class="maq-modal-close" id="svu-cerrar">&times;</button>
+        <h3>Servicios por unidad</h3>
+        <div style="color:#555;font-size:12.5px;margin-bottom:12px;">Los servicios salen de las Reglas de cada modelo. Aquí le quitas a una unidad un servicio que no lleva, o le agregas el servicio de otro modelo. Para quitar uno también puedes usar el botón "Quitar" de la tabla.</div>
+        <div class="maq-field"><label>Unidad</label><select id="svu-unidad"></select></div>
+        <div id="svu-agregar-caja">
+          <div class="maq-field"><label>Servicio a agregar</label><select id="svu-regla"></select></div>
+          <div class="maq-modal-actions" style="margin-top:0;"><button class="maq-save-btn" id="svu-agregar">Agregar a la unidad</button></div>
+        </div>
+        <div class="seg-sec">Cambios por unidad</div>
+        <table class="seg-mini"><thead><tr><th>Unidad</th><th>Servicio</th><th style="width:100px;">Cambio</th><th style="width:140px;">Quién / cuándo</th><th style="width:90px;"></th></tr></thead><tbody id="svu-body"></tbody></table>
+        <div class="maq-modal-status" id="svu-status"></div>
       </div>
     </div>
 
@@ -17349,7 +17367,7 @@ function renderServiciosMantenimiento(){
     <tr>
       <td>${escapeHtml(r.Unidad || r.CodigoUnidad)}<span class="mnt-subtext">${escapeHtml(r.Huerta || 'Sin ubicación')}</span></td>
       <td>${escapeHtml(r.MarcaNombre)}<span class="mnt-subtext">${escapeHtml(r.ModeloNombre)}</span></td>
-      <td>${escapeHtml(r.TipoPreventivoNombre || r.NombreServicio)}</td>
+      <td>${escapeHtml(r.TipoPreventivoNombre || r.NombreServicio)}${r.Agregado ? '<span class="mnt-subtext">agregado a esta unidad</span>' : ''}</td>
       <td>${escapeHtml(formatUltimoRegistro_(r))}</td>
       <td>${formatLecturaActual_(r)}</td>
       <td>${formatProximoServicio_(r)}</td>
@@ -17358,6 +17376,7 @@ function renderServiciosMantenimiento(){
       <td>
         <button type="button" class="export-btn srv-btn-editar" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;">Editar</button>
         <button type="button" class="export-btn srv-btn-orden" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;margin-left:4px;">Generar orden</button>
+        ${puedeCapturarPestana('mantenimiento') ? `<button type="button" class="export-btn svu-btn-quitar" data-scope="agricola" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;margin-left:4px;" title="Este servicio no aplica a este equipo">Quitar</button>` : ''}
       </td>
     </tr>
     `;
@@ -18098,7 +18117,7 @@ function renderServiciosAutomotrices(){
     <tr>
       <td>${escapeHtml(r.Unidad || r.CodigoUnidad)}<span class="mnt-subtext">${escapeHtml(r.Huerta || 'Sin ubicación')}</span></td>
       <td>${escapeHtml(r.MarcaNombre)}<span class="mnt-subtext">${escapeHtml(r.ModeloNombre)}</span></td>
-      <td>${escapeHtml(r.TipoPreventivoNombre || r.NombreServicio)}</td>
+      <td>${escapeHtml(r.TipoPreventivoNombre || r.NombreServicio)}${r.Agregado ? '<span class="mnt-subtext">agregado a esta unidad</span>' : ''}</td>
       <td>${escapeHtml(formatUltimoRegistro_(r))}</td>
       <td>${formatLecturaActual_(r)}</td>
       <td>${formatProximoServicio_(r)}</td>
@@ -18107,6 +18126,7 @@ function renderServiciosAutomotrices(){
       <td>
         <button type="button" class="export-btn sa-srv-btn-editar" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;">Editar</button>
         <button type="button" class="export-btn sa-srv-btn-orden" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;margin-left:4px;">Generar orden</button>
+        ${puedeCapturarPestana('servicios_automotrices') ? `<button type="button" class="export-btn svu-btn-quitar" data-scope="automotriz" data-regla="${r.ReglaId}" data-codigo="${escapeHtml(r.CodigoUnidad)}" style="padding:6px 10px;font-size:11px;margin-left:4px;" title="Este servicio no aplica a esta unidad">Quitar</button>` : ''}
       </td>
     </tr>
     `;
@@ -18956,6 +18976,97 @@ document.getElementById('ref-btn-delete').addEventListener('click', function(){
       statusEl.className = 'maq-modal-status show err';
     })
     .eliminarRefaccion(ACCESS_CODE, PANEL_USUARIO, Number(id));
+});
+
+// ---------------------------------------------------------------------
+// Servicios por UNIDAD (oct-2026, Carlos: "quiero agregar un servicio o
+// quitárselo" a una unidad). Sirve en Servicios Automotrices y en
+// Preventivos Agrícolas (scope). Server: quitarServicioUnidad,
+// agregarServicioUnidad, deshacerAjusteServicioUnidad, getAjustesServiciosUnidad.
+// ---------------------------------------------------------------------
+const SVU = { scope: 'automotriz', datos: null };
+function svuPestana_(scope){ return scope === 'agricola' ? 'mantenimiento' : 'servicios_automotrices'; }
+function svuServicios_(scope){ return scope === 'agricola' ? ALL_SERVICIOS_MANTENIMIENTO : ALL_SERVICIOS_AUTOMOTRICES; }
+function svuRecargar_(scope){ if(scope === 'agricola') cargarServiciosMantenimiento(); else cargarServiciosAutomotricesDatos(); }
+function svuStatus_(t, err){ const st = document.getElementById('svu-status'); st.textContent = t || ''; st.className = 'maq-modal-status' + (t ? ' show' + (err ? ' err' : ' ok') : ''); }
+function svuPeriodo_(r){ const u = r.TipoPeriodicidad === 'kilometros' ? 'km' : r.TipoPeriodicidad === 'horas' ? 'horas' : 'meses'; return 'cada ' + r.Intervalo + ' ' + u; }
+function svuAbrir_(scope, codigo, okMsg){
+  SVU.scope = scope; SVU.datos = null;
+  document.getElementById('svu-agregar-caja').style.display = puedeCapturarPestana(svuPestana_(scope)) ? '' : 'none';
+  document.getElementById('svu-body').innerHTML = '<tr><td colspan="5" style="color:#888;">Cargando...</td></tr>';
+  svuStatus_('');
+  document.getElementById('svu-overlay').classList.add('open');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ svuStatus_((r && r.error) || 'No se pudo leer.', true); return; }
+      SVU.datos = r;
+      const sel = document.getElementById('svu-unidad');
+      sel.innerHTML = '<option value="">Todas las unidades / elige una...</option>' + r.equipos.map(function(e){ return '<option value="' + escapeHtml(e.CodigoUnidad) + '">' + escapeHtml(e.Unidad + (e.Modelo ? ' — ' + e.Modelo : '')) + '</option>'; }).join('');
+      if(codigo) sel.value = codigo;
+      svuRender_();
+      if(okMsg) svuStatus_(okMsg);
+    })
+    .withFailureHandler(function(e){ svuStatus_((e && e.message) || 'No se pudo leer.', true); })
+    .getAjustesServiciosUnidad(ACCESS_CODE, PANEL_USUARIO, scope);
+}
+function svuRender_(){
+  const d = SVU.datos; if(!d) return;
+  const codigo = document.getElementById('svu-unidad').value;
+  const tiene = svuServicios_(SVU.scope).filter(function(s){ return s.CodigoUnidad === codigo; });
+  const quitados = d.ajustes.filter(function(a){ return a.CodigoUnidad === codigo && a.Accion === 'quitar'; }).map(function(a){ return a.ReglaId; });
+  const regSel = document.getElementById('svu-regla');
+  const disponibles = codigo ? d.reglas.filter(function(r){ return !tiene.some(function(s){ return s.ReglaId === r.Id; }); }) : [];
+  regSel.innerHTML = codigo
+    ? '<option value="">Elige el servicio...</option>' + disponibles.map(function(r){
+        return '<option value="' + r.Id + '">' + escapeHtml(r.NombreServicio + ' — ' + [r.MarcaNombre, r.ModeloNombre].filter(Boolean).join(' ') + ' (' + svuPeriodo_(r) + ')' + (quitados.indexOf(r.Id) !== -1 ? ' · se le había quitado' : '')) + '</option>';
+      }).join('')
+    : '<option value="">Primero elige la unidad</option>';
+  const puede = puedeCapturarPestana(svuPestana_(SVU.scope));
+  const lista = d.ajustes.filter(function(a){ return !codigo || a.CodigoUnidad === codigo; });
+  document.getElementById('svu-body').innerHTML = lista.length ? lista.map(function(a){
+    return '<tr><td><b>' + escapeHtml(a.Unidad) + '</b></td><td>' + escapeHtml(a.NombreServicio) + '<div style="color:#777;font-size:11.5px;">regla de ' + escapeHtml(a.ModeloRegla || '—') + '</div></td>'
+      + '<td>' + (a.Accion === 'quitar' ? '<span style="color:#c24b3f;font-weight:600;">Quitado</span>' : '<span style="color:#2e7d32;font-weight:600;">Agregado</span>') + '</td>'
+      + '<td style="font-size:12px;">' + escapeHtml(a.HechoPor || '') + '<div style="color:#777;">' + (a.HechoEn ? escapeHtml(new Date(a.HechoEn).toLocaleDateString('es-MX')) : '') + '</div></td>'
+      + '<td>' + (puede ? '<button type="button" class="seg-btn-claro svu-deshacer" data-regla="' + a.ReglaId + '" data-codigo="' + escapeHtml(a.CodigoUnidad) + '">Deshacer</button>' : '') + '</td></tr>';
+  }).join('') : '<tr><td colspan="5" style="color:#888;">' + (codigo ? 'Esta unidad lleva exactamente los servicios de su modelo.' : 'No hay cambios: todas las unidades llevan los servicios de su modelo.') + '</td></tr>';
+}
+function svuLlamar_(fn, reglaId, codigo, okMsg){
+  svuStatus_('Guardando...');
+  const run = google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ svuStatus_((r && r.error) || 'No se pudo.', true); return; }
+      svuRecargar_(SVU.scope);
+      svuAbrir_(SVU.scope, document.getElementById('svu-unidad').value, okMsg);
+    })
+    .withFailureHandler(function(e){ svuStatus_((e && e.message) || 'No se pudo.', true); });
+  run[fn](ACCESS_CODE, PANEL_USUARIO, Number(reglaId), codigo);
+}
+document.querySelectorAll('.svu-abrir').forEach(function(b){ b.addEventListener('click', function(){ svuAbrir_(b.getAttribute('data-scope'), ''); }); });
+document.getElementById('svu-cerrar').addEventListener('click', function(){ document.getElementById('svu-overlay').classList.remove('open'); });
+document.getElementById('svu-overlay').addEventListener('click', function(e){ if(e.target.id === 'svu-overlay') e.target.classList.remove('open'); });
+document.getElementById('svu-unidad').addEventListener('change', svuRender_);
+document.getElementById('svu-agregar').addEventListener('click', function(){
+  const codigo = document.getElementById('svu-unidad').value, regla = document.getElementById('svu-regla').value;
+  if(!codigo || !regla){ svuStatus_('Elige la unidad y el servicio.', true); return; }
+  svuLlamar_('agregarServicioUnidad', regla, codigo, '✓ Servicio agregado a la unidad.');
+});
+document.getElementById('svu-body').addEventListener('click', function(e){
+  const b = e.target.closest('.svu-deshacer'); if(!b) return;
+  svuLlamar_('deshacerAjusteServicioUnidad', b.getAttribute('data-regla'), b.getAttribute('data-codigo'), '✓ Listo: la unidad vuelve a llevar lo de su modelo.');
+});
+// Botón "Quitar" de cada fila (delegado: las tablas se vuelven a pintar).
+['sa-srv-table-body', 'srv-table-body'].forEach(function(id){
+  document.getElementById(id).addEventListener('click', function(e){
+    const b = e.target.closest('.svu-btn-quitar'); if(!b) return;
+    const scope = b.getAttribute('data-scope');
+    const s = svuServicios_(scope).find(function(r){ return String(r.ReglaId) === b.dataset.regla && r.CodigoUnidad === b.dataset.codigo; });
+    if(!s) return;
+    if(!confirm('¿Quitar "' + (s.TipoPreventivoNombre || s.NombreServicio) + '" de ' + (s.Unidad || s.CodigoUnidad) + '?\n\nYa no se calculará ni se generará orden de ese servicio para esta unidad (las demás de su modelo no cambian). Se puede deshacer en "Servicios por unidad".')) return;
+    google.script.run
+      .withSuccessHandler(function(r){ if(!r || !r.success){ alert((r && r.error) || 'No se pudo quitar.'); return; } svuRecargar_(scope); })
+      .withFailureHandler(function(err){ alert((err && err.message) || 'No se pudo quitar.'); })
+      .quitarServicioUnidad(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.regla), b.dataset.codigo);
+  });
 });
 
 // =====================================================================

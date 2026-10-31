@@ -3413,3 +3413,23 @@ WHERE @perm_seg_hecho = 0
   AND JSON_UNQUOTE(JSON_EXTRACT(panel_permisos, '$.usuarios')) = 'capturar'
   AND JSON_EXTRACT(panel_permisos, '$.seguros') IS NULL;
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('permiso_seguros_2026_10', 'hecho');
+
+-- ------------------------------------------------------------
+-- Servicios por UNIDAD (oct-2026, Carlos: "quiero agregar un servicio o
+-- quitárselo" — p.ej. AF-022 HILUX CHASIS tenía dos servicios de su modelo
+-- y solo lleva uno). Las reglas siguen siendo por modelo; aquí se guardan
+-- las excepciones de cada equipo:
+--   'quitar'  = esa regla de su modelo NO aplica a este equipo
+--   'agregar' = una regla de OTRO modelo también aplica a este equipo
+-- Ver obtenerServiciosMantenimiento_ y quitarServicioUnidad /
+-- agregarServicioUnidad / deshacerAjusteServicioUnidad en handlers.js.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mantenimiento_unidad_reglas (
+  regla_id      INT          NOT NULL,
+  codigo_unidad VARCHAR(50)  NOT NULL,
+  accion        VARCHAR(10)  NOT NULL,            -- 'quitar' | 'agregar'
+  hecho_por     VARCHAR(255) DEFAULT NULL,
+  hecho_en      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (regla_id, codigo_unidad),
+  INDEX idx_mur_unidad (codigo_unidad)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

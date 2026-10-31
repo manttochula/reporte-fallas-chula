@@ -4536,14 +4536,25 @@ async function obtenerServiciosMantenimiento_(scope) {
       s.id                 AS ServicioId,
       s.intervalo_override AS IntervaloOverride,
       s.ultima_lectura     AS UltimaLectura,
-      s.ultima_fecha       AS UltimaFecha
+      s.ultima_fecha       AS UltimaFecha,
+      par.agregado         AS Agregado
     FROM mantenimiento_reglas r
-    INNER JOIN modelos_refacciones mo ON mo.id = r.modelo_id
+    -- Equipo ↔ regla: los de su modelo, más los agregados a mano a ese
+    -- equipo, menos los quitados a ese equipo (mantenimiento_unidad_reglas).
+    INNER JOIN (
+      SELECT r2.id AS regla_id, m2.codigo_unidad, 0 AS agregado
+        FROM mantenimiento_reglas r2 INNER JOIN maquinaria m2 ON m2.modelo_id = r2.modelo_id
+      UNION ALL
+      SELECT ur.regla_id, ur.codigo_unidad, 1 AS agregado
+        FROM mantenimiento_unidad_reglas ur WHERE ur.accion = 'agregar'
+    ) par ON par.regla_id = r.id
+    INNER JOIN maquinaria m ON m.codigo_unidad = par.codigo_unidad
+    INNER JOIN modelos_refacciones mo ON mo.id = m.modelo_id
     LEFT JOIN marcas_refacciones mc ON mc.id = mo.marca_id
     LEFT JOIN tipos_preventivo tp ON tp.id = r.tipo_preventivo_id
-    INNER JOIN maquinaria m ON m.modelo_id = r.modelo_id
     LEFT JOIN mantenimiento_servicios s ON s.regla_id = r.id AND s.codigo_unidad = m.codigo_unidad
-    WHERE r.activo = 1
+    LEFT JOIN mantenimiento_unidad_reglas q ON q.regla_id = r.id AND q.codigo_unidad = m.codigo_unidad AND q.accion = 'quitar'
+    WHERE r.activo = 1 AND r.modelo_id IS NOT NULL AND q.regla_id IS NULL
     ORDER BY m.unidad, tp.nombre
   `);
 
@@ -4568,6 +4579,7 @@ async function obtenerServiciosMantenimiento_(scope) {
       ReglaId: r.ReglaId,
       CodigoUnidad: codigo,
       ServicioId: r.ServicioId || null,
+      Agregado: !!Number(r.Agregado),
       Unidad: r.Unidad || codigo,
       Huerta: ubicMap[codigo] || '',
       Departamento: r.Departamento || '',
@@ -4668,6 +4680,108 @@ async function guardarUmbralesPreventivo(code, nombreUsuario, scope, generar, av
 // Captura/edita a mano el "último servicio" (fecha + horómetro) de un
 // equipo para una regla en particular, y opcionalmente un intervalo propio
 // para ese equipo (intervaloOverride) distinto al estándar del modelo.
+// ---------------------------------------------------------------
+// Servicios por UNIDAD (oct-2026, Carlos): quitarle a un equipo un servicio
+// de su modelo, o agregarle uno de otro modelo. Tabla
+// mantenimiento_unidad_reglas. El permiso depende del equipo: automotriz →
+// servicios_automotrices; si no → mantenimiento (Preventivos Agrícolas).
+// ---------------------------------------------------------------
+async function reglaAplicaAEquipo_(reglaId, reglaModeloId, codigoUnidad, equipoModeloId) {
+  const [aj] = await pool.query('SELECT accion FROM mantenimiento_unidad_reglas WHERE regla_id = ? AND codigo_unidad = ?', [Number(reglaId), codigoUnidad]);
+  const accion = aj.length ? aj[0].accion : null;
+  if (accion === 'agregar') return true;
+  if (accion === 'quitar') return false;
+  return !!reglaModeloId && reglaModeloId === equipoModeloId;
+}
+
+async function equipoYPermisoServicio_(code, nombreUsuario, codigoUnidad, nivel) {
+  codigoUnidad = (codigoUnidad || '').toString().trim();
+  const [m] = await pool.query('SELECT codigo_unidad, unidad, modelo_id, usa_gasolina FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
+  if (!m.length) throw new Error('No se encontró el equipo.');
+  await requierePermisoPanel_(code, nombreUsuario, m[0].usa_gasolina ? 'servicios_automotrices' : 'mantenimiento', nivel);
+  return m[0];
+}
+
+async function quitarServicioUnidad(code, nombreUsuario, reglaId, codigoUnidad) {
+  const eq = await equipoYPermisoServicio_(code, nombreUsuario, codigoUnidad, 'capturar');
+  const [r] = await pool.query('SELECT id, modelo_id, nombre_servicio FROM mantenimiento_reglas WHERE id = ?', [Number(reglaId) || 0]);
+  if (!r.length) return { success: false, error: 'No se encontró el servicio.' };
+  const [aj] = await pool.query('SELECT accion FROM mantenimiento_unidad_reglas WHERE regla_id = ? AND codigo_unidad = ?', [r[0].id, eq.codigo_unidad]);
+  if (aj.length && aj[0].accion === 'agregar') {
+    // Era uno agregado a mano: quitarlo es simplemente deshacer el agregado.
+    await pool.query('DELETE FROM mantenimiento_unidad_reglas WHERE regla_id = ? AND codigo_unidad = ?', [r[0].id, eq.codigo_unidad]);
+  } else {
+    if (r[0].modelo_id !== eq.modelo_id) return { success: false, error: 'Ese servicio no es del modelo de este equipo.' };
+    await pool.query(
+      "INSERT INTO mantenimiento_unidad_reglas (regla_id, codigo_unidad, accion, hecho_por) VALUES (?, ?, 'quitar', ?) ON DUPLICATE KEY UPDATE accion = 'quitar', hecho_por = VALUES(hecho_por), hecho_en = NOW()",
+      [r[0].id, eq.codigo_unidad, (nombreUsuario || '').toString().trim()]);
+  }
+  await registrarAuditoria_('mantenimiento_unidad_reglas', r[0].id + '|' + eq.codigo_unidad, 'quitar', nombreUsuario, r[0].nombre_servicio + ' — ' + eq.unidad);
+  return { success: true };
+}
+
+async function agregarServicioUnidad(code, nombreUsuario, reglaId, codigoUnidad) {
+  const eq = await equipoYPermisoServicio_(code, nombreUsuario, codigoUnidad, 'capturar');
+  const [r] = await pool.query('SELECT id, modelo_id, nombre_servicio, activo FROM mantenimiento_reglas WHERE id = ? AND modelo_id IS NOT NULL', [Number(reglaId) || 0]);
+  if (!r.length) return { success: false, error: 'No se encontró el servicio.' };
+  if (!r[0].activo) return { success: false, error: 'Ese servicio está desactivado en Reglas.' };
+  if (r[0].modelo_id === eq.modelo_id) {
+    // Es de su propio modelo: solo se quita la marca de "quitado" (si la tenía).
+    const [d] = await pool.query("DELETE FROM mantenimiento_unidad_reglas WHERE regla_id = ? AND codigo_unidad = ? AND accion = 'quitar'", [r[0].id, eq.codigo_unidad]);
+    if (!d.affectedRows) return { success: false, error: 'Este equipo ya tiene ese servicio (es de su modelo).' };
+  } else {
+    // Que no quede repetido el mismo tipo de servicio (p.ej. dos "Cambio de aceite").
+    const [rep] = await pool.query(
+      `SELECT r.id FROM mantenimiento_reglas r
+        WHERE r.activo = 1 AND r.id <> ? AND r.nombre_servicio = ?
+          AND ((r.modelo_id = ? AND NOT EXISTS (SELECT 1 FROM mantenimiento_unidad_reglas q WHERE q.regla_id = r.id AND q.codigo_unidad = ? AND q.accion = 'quitar'))
+            OR EXISTS (SELECT 1 FROM mantenimiento_unidad_reglas a WHERE a.regla_id = r.id AND a.codigo_unidad = ? AND a.accion = 'agregar'))`,
+      [r[0].id, r[0].nombre_servicio, eq.modelo_id, eq.codigo_unidad, eq.codigo_unidad]);
+    if (rep.length) return { success: false, error: 'Este equipo ya tiene un servicio "' + r[0].nombre_servicio + '". Quítale primero el que tiene.' };
+    await pool.query(
+      "INSERT INTO mantenimiento_unidad_reglas (regla_id, codigo_unidad, accion, hecho_por) VALUES (?, ?, 'agregar', ?) ON DUPLICATE KEY UPDATE accion = 'agregar', hecho_por = VALUES(hecho_por), hecho_en = NOW()",
+      [r[0].id, eq.codigo_unidad, (nombreUsuario || '').toString().trim()]);
+  }
+  await registrarAuditoria_('mantenimiento_unidad_reglas', r[0].id + '|' + eq.codigo_unidad, 'agregar', nombreUsuario, r[0].nombre_servicio + ' — ' + eq.unidad);
+  return { success: true };
+}
+
+async function deshacerAjusteServicioUnidad(code, nombreUsuario, reglaId, codigoUnidad) {
+  const eq = await equipoYPermisoServicio_(code, nombreUsuario, codigoUnidad, 'capturar');
+  const [d] = await pool.query('DELETE FROM mantenimiento_unidad_reglas WHERE regla_id = ? AND codigo_unidad = ?', [Number(reglaId) || 0, eq.codigo_unidad]);
+  if (d.affectedRows) await registrarAuditoria_('mantenimiento_unidad_reglas', reglaId + '|' + eq.codigo_unidad, 'deshacer', nombreUsuario, eq.unidad);
+  return { success: true };
+}
+
+// Lista de servicios QUITADOS y AGREGADOS por equipo, para el Panel.
+// scope: 'automotriz' | 'agricola'.
+async function getAjustesServiciosUnidad(code, nombreUsuario, scope) {
+  scope = scope === 'agricola' ? 'agricola' : 'automotriz';
+  await requierePermisoPanel_(code, nombreUsuario, scope === 'automotriz' ? 'servicios_automotrices' : 'mantenimiento', 'visualizar');
+  const [rows] = await pool.query(
+    `SELECT ur.regla_id, ur.codigo_unidad, ur.accion, ur.hecho_por, ur.hecho_en, m.unidad, m.usa_gasolina,
+            r.nombre_servicio, r.tipo_periodicidad, r.intervalo, mo.nombre AS modelo_regla, mq.nombre AS modelo_equipo
+       FROM mantenimiento_unidad_reglas ur
+       JOIN maquinaria m ON m.codigo_unidad = ur.codigo_unidad
+       JOIN mantenimiento_reglas r ON r.id = ur.regla_id
+       LEFT JOIN modelos_refacciones mo ON mo.id = r.modelo_id
+       LEFT JOIN modelos_refacciones mq ON mq.id = m.modelo_id
+      ORDER BY m.unidad, r.nombre_servicio`);
+  const ajustes = rows.filter((x) => (scope === 'automotriz') === !!x.usa_gasolina).map((x) => ({
+    ReglaId: x.regla_id, CodigoUnidad: x.codigo_unidad, Unidad: x.unidad, Accion: x.accion, NombreServicio: x.nombre_servicio,
+    TipoPeriodicidad: x.tipo_periodicidad, Intervalo: Number(x.intervalo) || 0, ModeloRegla: x.modelo_regla || '', ModeloEquipo: x.modelo_equipo || '',
+    HechoPor: x.hecho_por || '', HechoEn: isoOrNull(x.hecho_en),
+  }));
+  const [eq] = await pool.query(
+    `SELECT m.codigo_unidad, m.unidad, mo.nombre AS modelo FROM maquinaria m LEFT JOIN modelos_refacciones mo ON mo.id = m.modelo_id
+      WHERE m.usa_gasolina = ? ORDER BY m.unidad`, [scope === 'automotriz' ? 1 : 0]);
+  const reglas = (await obtenerReglasMantenimiento_(scope)).filter((r) => r.Activo).map((r) => ({
+    Id: r.Id, NombreServicio: r.TipoPreventivoNombre || r.NombreServicio, ModeloNombre: r.ModeloNombre, MarcaNombre: r.MarcaNombre,
+    TipoPeriodicidad: r.TipoPeriodicidad, Intervalo: r.Intervalo,
+  }));
+  return { success: true, ajustes, equipos: eq.map((e) => ({ CodigoUnidad: e.codigo_unidad, Unidad: e.unidad, Modelo: e.modelo || '' })), reglas };
+}
+
 async function guardarServicioMantenimiento(code, nombreUsuario, reglaId, codigoUnidad, data) {
   await requierePermisoPanel_(code, nombreUsuario, 'mantenimiento', 'capturar');
   return guardarServicioMantenimiento_(nombreUsuario, reglaId, codigoUnidad, data, 'agricola');
@@ -4689,8 +4803,8 @@ async function guardarServicioMantenimiento_(nombreUsuario, reglaId, codigoUnida
     if (reglas.length === 0) return { success: false, error: 'No se encontró la regla de mantenimiento.' };
     const [maquinas] = await pool.query('SELECT modelo_id, usa_gasolina FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
     if (maquinas.length === 0) return { success: false, error: 'No se encontró el equipo.' };
-    if (!reglas[0].modelo_id || reglas[0].modelo_id !== maquinas[0].modelo_id) {
-      return { success: false, error: 'Ese equipo no es del modelo de esta regla.' };
+    if (!(await reglaAplicaAEquipo_(reglaId, reglas[0].modelo_id, codigoUnidad, maquinas[0].modelo_id))) {
+      return { success: false, error: 'Ese servicio no aplica a este equipo (no es de su modelo o se le quitó).' };
     }
     if (scope === 'automotriz' && !maquinas[0].usa_gasolina) {
       return { success: false, error: 'Ese equipo no es un vehículo automotriz.' };
@@ -10212,8 +10326,8 @@ async function crearOrdenDesdeRegla_(reglaId, codigoUnidad, data) {
       if (!codigoUnidad) return { success: false, error: 'Selecciona el equipo para el que se genera la orden.' };
       const [maquinas] = await pool.query('SELECT modelo_id FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
       if (maquinas.length === 0) return { success: false, error: 'No se encontró el equipo.' };
-      if (maquinas[0].modelo_id !== regla.modelo_id) {
-        return { success: false, error: 'Ese equipo no es del modelo de esta regla.' };
+      if (!(await reglaAplicaAEquipo_(regla.id, regla.modelo_id, codigoUnidad, maquinas[0].modelo_id))) {
+        return { success: false, error: 'Ese servicio no aplica a este equipo (no es de su modelo o se le quitó).' };
       }
     } else if (!codigoUnidad) {
       codigoUnidad = regla.codigo_unidad || null; // regla antigua (por equipo)
@@ -10844,6 +10958,10 @@ async function revisarAvisosSeguros_(opciones) {
 }
 
 module.exports = {
+  quitarServicioUnidad,
+  agregarServicioUnidad,
+  deshacerAjusteServicioUnidad,
+  getAjustesServiciosUnidad,
   getSeguros,
   guardarPolizaSeguro,
   eliminarPolizaSeguro,

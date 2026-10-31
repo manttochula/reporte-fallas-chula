@@ -7537,28 +7537,40 @@ async function getCuadrosHuerta(huerta) {
 // volver a escribir el trabajo ni el intervalo por cada cuadro.
 // ------------------------------------------------------------
 
+// Desde oct-2026 (Carlos: "que las actividades que doy de alta en avance
+// huerta se reflejen en todas las huertas") el catálogo es UNO para todas
+// las huertas. La columna huerta se conserva (dónde se dio de alta). Si de
+// antes había la misma actividad dada de alta en varias huertas, se muestra
+// una sola vez: la de esta huerta si existe (para que sus cuadros sigan
+// ligados a la misma), si no la más antigua. Editar o borrar una actividad
+// aplica a todas sus copias (mismo nombre).
+function claveActividad_(t) { return (t || '').toString().trim().toLowerCase(); }
+
 async function getActividadesCatalogo(code, nombreUsuario, huerta) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
-  const nombreHuerta = (huerta || '').toString().trim();
-  if (!nombreHuerta) return [];
-  const [rows] = await pool.query(
-    'SELECT id, trabajo, intervalo_surcos, creado_por, creado_en FROM actividades_catalogo WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY trabajo',
-    [nombreHuerta]
-  );
-  return rows.map((r) => ({
+  const nombreHuerta = (huerta || '').toString().trim().toLowerCase();
+  const [rows] = await pool.query('SELECT id, huerta, trabajo, intervalo_surcos, creado_por, creado_en FROM actividades_catalogo ORDER BY id');
+  const porClave = new Map();
+  rows.forEach((r) => {
+    const k = claveActividad_(r.trabajo);
+    const prev = porClave.get(k);
+    const esLocal = (r.huerta || '').toString().trim().toLowerCase() === nombreHuerta;
+    if (!prev || (esLocal && !prev.esLocal)) porClave.set(k, { r, esLocal });
+  });
+  return Array.from(porClave.values()).map(({ r }) => ({
     id: r.id,
     trabajo: r.trabajo,
     intervaloSurcos: intervaloSurcosValido_(r.intervalo_surcos),
     creadoPor: r.creado_por,
     creadoEn: r.creado_en,
-  }));
+    huertaAlta: r.huerta,
+  })).sort((x, y) => x.trabajo.localeCompare(y.trabajo, 'es'));
 }
 
-// id vacío/ausente = crear una actividad nueva en el catálogo; con id,
-// edita la que ya existía (cambia trabajo/intervalo para asignaciones
-// FUTURAS -- no toca las filas de huerta_actividades que ya se habían
-// creado con el valor anterior, igual que cualquier catálogo simple de
-// este sistema).
+// id vacío/ausente = crear una actividad nueva en el catálogo (sirve para
+// todas las huertas); con id, edita esa actividad y sus copias de otras
+// huertas (cambia trabajo/intervalo para asignaciones FUTURAS -- no toca
+// las filas de huerta_actividades que ya se habían creado).
 async function guardarActividadCatalogo(code, nombreUsuario, id, huerta, trabajo, intervaloSurcos) {
   await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
   const nombreHuerta = (huerta || '').toString().trim();
@@ -7568,12 +7580,20 @@ async function guardarActividadCatalogo(code, nombreUsuario, id, huerta, trabajo
   if (!trabajoTexto) return { success: false, error: 'Falta describir la actividad.' };
   try {
     const idNum = Number(id) || null;
+    const [todas] = await pool.query('SELECT id, trabajo FROM actividades_catalogo');
     if (idNum) {
-      await pool.query(
-        'UPDATE actividades_catalogo SET trabajo = ?, intervalo_surcos = ? WHERE id = ? AND LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
-        [trabajoTexto, intervalo, idNum, nombreHuerta]
-      );
+      const actual = todas.find((r) => r.id === idNum);
+      if (!actual) return { success: false, error: 'Esa actividad ya no existe en el catálogo.' };
+      const kVieja = claveActividad_(actual.trabajo);
+      if (claveActividad_(trabajoTexto) !== kVieja && todas.some((r) => claveActividad_(r.trabajo) === claveActividad_(trabajoTexto))) {
+        return { success: false, error: 'Ya existe otra actividad "' + trabajoTexto + '" en el catálogo.' };
+      }
+      const ids = todas.filter((r) => claveActividad_(r.trabajo) === kVieja).map((r) => r.id);
+      await pool.query('UPDATE actividades_catalogo SET trabajo = ?, intervalo_surcos = ? WHERE id IN (?)', [trabajoTexto, intervalo, ids]);
       return { success: true, id: idNum };
+    }
+    if (todas.some((r) => claveActividad_(r.trabajo) === claveActividad_(trabajoTexto))) {
+      return { success: false, error: 'La actividad "' + trabajoTexto + '" ya está en el catálogo (sirve para todas las huertas).' };
     }
     const [result] = await pool.query(
       'INSERT INTO actividades_catalogo (huerta, trabajo, intervalo_surcos, creado_por) VALUES (?, ?, ?, ?)',
@@ -7591,8 +7611,10 @@ async function eliminarActividadCatalogo(code, nombreUsuario, id) {
   if (!idNum) return { success: false, error: 'Falta indicar qué actividad del catálogo borrar.' };
   // No borra las asignaciones (huerta_actividades) que ya se hubieran
   // hecho con esta actividad -- solo deja de estar disponible para
-  // asignar de nuevo; cada cuadro sigue viendo lo que ya tenía.
-  await pool.query('DELETE FROM actividades_catalogo WHERE id = ?', [idNum]);
+  // asignar de nuevo en ninguna huerta; cada cuadro sigue viendo lo que ya tenía.
+  const [r] = await pool.query('SELECT trabajo FROM actividades_catalogo WHERE id = ?', [idNum]);
+  if (!r.length) return { success: true };
+  await pool.query('DELETE FROM actividades_catalogo WHERE LOWER(TRIM(trabajo)) = ?', [claveActividad_(r[0].trabajo)]);
   return { success: true };
 }
 
@@ -7697,8 +7719,8 @@ async function asignarActividadCatalogoACuadros(code, nombreUsuario, huerta, act
   if (!catalogoId) return { success: false, error: 'Falta indicar qué actividad del catálogo asignar.' };
   if (!lista.length) return { success: false, error: 'Selecciona al menos un cuadro.' };
   const [catalogo] = await pool.query(
-    'SELECT trabajo, intervalo_surcos FROM actividades_catalogo WHERE id = ? AND LOWER(TRIM(huerta)) = LOWER(TRIM(?))',
-    [catalogoId, nombreHuerta]
+    'SELECT trabajo, intervalo_surcos FROM actividades_catalogo WHERE id = ?', // el catálogo sirve para todas las huertas
+    [catalogoId]
   );
   if (catalogo.length === 0) return { success: false, error: 'Esa actividad ya no existe en el catálogo.' };
   const trabajo = catalogo[0].trabajo;

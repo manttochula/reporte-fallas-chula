@@ -3952,7 +3952,7 @@
           <div class="maq-modal-status" id="ah-cuadros-status"></div>
 
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px;">
-            <div class="avance-paso" style="margin-bottom:0;">Catálogo de actividades</div>
+            <div class="avance-paso" style="margin-bottom:0;">Catálogo de actividades <span style="font-weight:400;font-size:12px;opacity:.8;">(el mismo para todas las huertas)</span></div>
           </div>
           <div class="mnt-subtext" style="margin:-4px 0 8px;">Da de alta cada actividad (con su "cada cuántos surcos") una sola vez aquí, y después asígnala, más abajo, a los cuadros que quieras.</div>
           <div id="ah-catalogo-form-wrap" style="display:flex; gap:8px; margin:12px 0; flex-wrap:wrap; align-items:flex-end;">
@@ -9623,7 +9623,7 @@ document.getElementById('ah-catalogo-table-body').addEventListener('click', func
   ev.preventDefault();
   var idEliminar = Number(linkEliminar.dataset.id);
   if(!idEliminar) return;
-  if(!window.confirm('¿Quitar esta actividad del catálogo? Los cuadros a los que ya se le asignó la conservan; solo deja de estar disponible para asignarla de nuevo.')) return;
+  if(!window.confirm('¿Quitar esta actividad del catálogo de TODAS las huertas? Los cuadros a los que ya se le asignó la conservan; solo deja de estar disponible para asignarla de nuevo.')) return;
   var huerta = AH_HUERTA_ACTUAL;
   google.script.run
     .withSuccessHandler(function(result){

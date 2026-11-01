@@ -5161,7 +5161,7 @@ function ocultarControlesSoloLectura(){
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
-      '.ocx-auto-chk', '.ocx-auto-acc', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar',
+      '.ocx-auto-chk', '.ocx-auto-acc', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar', '.ocp-btn-archivar', '.ocp-btn-gasto',
     ]);
   }
   if(!puedeCapturarPestana('insumos')){
@@ -22119,7 +22119,34 @@ function accionesOcHtml_(oc){
   if(oc.facturaXmlUrl) b.push('<a class="row-view" href="' + escapeHtml(oc.facturaXmlUrl) + '" target="_blank" rel="noopener" download>XML</a>');
   if(oc.estado !== 'cancelada' && oc.estado !== 'facturada') b.push('<button type="button" class="row-view ocp-btn-cancelar" data-id="' + oc.id + '" style="color:var(--danger);border-color:var(--danger);">Cancelar OC</button>');
   return '<div class="ocp-acciones">' + b.join('') + '</div>' +
-    (oc.facturaAvisos.length ? '<div class="ocp-aviso">⚠ ' + oc.facturaAvisos.map(escapeHtml).join('<br>⚠ ') + '</div>' : '');
+    (oc.facturaAvisos.length ? '<div class="ocp-aviso">⚠ ' + oc.facturaAvisos.map(escapeHtml).join('<br>⚠ ') + '</div>' : '') +
+    estadoFacturaOcHtml_(oc);
+}
+
+// Factura → almacén digital y → gasto en Comercial (oct-2026).
+function estadoFacturaOcHtml_(oc){
+  if(oc.estado !== 'facturada') return '';
+  const fechaF = oc.facturaFecha ? fechaOcCorta_(oc.facturaFecha) : '—';
+  const lineas = [];
+  const arch = oc.archivoEstado;
+  let a = '📁 <b>Almacén digital:</b> ';
+  if(arch === 'archivada') a += '<span style="color:var(--ok);">guardada</span> <span class="mnt-subtext" style="display:inline;">' + escapeHtml(oc.archivoRuta) + '</span>';
+  else if(arch === 'pendiente') a += 'esperando a la PC de Comercial (se guarda en cuanto esté prendida)';
+  else if(arch === 'error') a += '<span style="color:var(--danger);">⚠ ' + escapeHtml(oc.archivoMensaje || 'error') + '</span>';
+  else a += 'sin guardar';
+  if(arch !== 'pendiente') a += ' <button type="button" class="row-view ocp-btn-archivar" data-id="' + oc.id + '">' + (arch === 'archivada' ? 'Guardar otra vez' : 'Guardar en almacén') + '</button>';
+  lineas.push(a);
+  const gastos = (oc.ocsComercial || []).filter(function(x){ return x.esGasto; });
+  if(oc.gastoEstado || gastos.length){
+    const ocTxt = gastos.length ? gastos.map(function(x){ return x.serie + ' ' + x.folio; }).join(', ') : '(sin OC en Comercial)';
+    const datos = 'Serie <b>' + escapeHtml(oc.facturaSerie || '—') + '</b> · Folio <b>' + escapeHtml(oc.facturaFolio || '—') + '</b> · Fecha <b>' + escapeHtml(fechaF) + '</b>';
+    let g = '🧾 <b>Comercial:</b> ';
+    if(oc.gastoEstado === 'convertido') g += '<span style="color:var(--ok);">✓ OC ' + escapeHtml(ocTxt) + ' convertida a GASTOS EN PESOS</span> <span class="mnt-subtext" style="display:inline;">' + escapeHtml(oc.gastoMensaje || '') + '</span> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="0">Deshacer</button>';
+    else g += (oc.gastoEstado === 'error' ? '<span style="color:var(--danger);">⚠ ' + escapeHtml(oc.gastoMensaje || '') + '</span> · ' : '') + 'convertir OC <b>' + escapeHtml(ocTxt) + '</b> a GASTOS EN PESOS con ' + datos +
+      ' <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="1">✓ Ya lo convertí</button>';
+    lineas.push(g);
+  }
+  return '<div class="ocp-factura-estado" style="margin-top:6px;font-size:12.5px;line-height:1.7;">' + lineas.join('<br>') + '</div>';
 }
 
 function enlazarAccionesOc_(cont, lista, alCambiar){
@@ -22152,6 +22179,26 @@ function enlazarAccionesOc_(cont, lista, alCambiar){
       const ok = function(){ btn.textContent = '✓ Copiado (mensaje con enlaces)'; marcarEnviada(oc); };
       if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function(){ prompt('Copia este mensaje:', txt); ok(); });
       else { prompt('Copia este mensaje:', txt); ok(); }
+    });
+  });
+  cont.querySelectorAll('.ocp-btn-archivar').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ btn.disabled = false; alert((r && r.error) || 'No se pudo.'); return; } if(alCambiar) alCambiar(); })
+        .withFailureHandler(function(e){ btn.disabled = false; alert((e && e.message) || 'No se pudo.'); })
+        .archivarFacturaOc(ACCESS_CODE, PANEL_USUARIO, Number(btn.dataset.id));
+    });
+  });
+  cont.querySelectorAll('.ocp-btn-gasto').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const hecho = btn.dataset.hecho === '1';
+      if(hecho && !confirm('¿Ya convertiste en Comercial la OC a GASTOS EN PESOS con la serie, folio y fecha de la factura?')) return;
+      btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ btn.disabled = false; alert((r && r.error) || 'No se pudo.'); return; } if(alCambiar) alCambiar(); })
+        .withFailureHandler(function(e){ btn.disabled = false; alert((e && e.message) || 'No se pudo.'); })
+        .marcarGastoComercial(ACCESS_CODE, PANEL_USUARIO, Number(btn.dataset.id), hecho);
     });
   });
   cont.querySelectorAll('.ocp-btn-cancelar').forEach(function(btn){

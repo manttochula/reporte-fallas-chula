@@ -325,11 +325,40 @@ function attr_(xml, etiqueta, nombre) {
   const m = re.exec(xml);
   return m ? m[1] : null;
 }
+// ---- Almacén digital (oct-2026) ----
+const MESES_ALMACEN_ = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
+// Quita lo que Windows no deja en nombres de archivo/carpeta.
+function nombreArchivoSeguro_(t) {
+  return String(t || '').replace(/[\\/:*?"<>|\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
+}
+// "SAMEI S DE RL DE CV" -> "SAMEI"; "AGROS DE LA CUENCA, S.P.R. DE R.L." -> "AGROS DE LA CUENCA"
+function nombreCortoProveedor_(nombre) {
+  let n = String(nombre || '').split(',')[0].trim();
+  const sufijos = /\s+(S\.?\s?A\.?\s?P\.?\s?I\.?|S\.?\s?P\.?\s?R\.?|S\.?\s?C\.?|S\.?\s?A\.?|S\.?\s?DE\s?R\.?\s?L\.?|DE\s+C\.?\s?V\.?|DE\s+R\.?\s?L\.?|DE\s+R\.?\s?I\.?|S\.?\s?A\.?\s?S\.?)\.?\s*$/i;
+  for (let i = 0; i < 6 && sufijos.test(n); i++) n = n.replace(sufijos, '').trim();
+  return n || String(nombre || '').trim();
+}
+function dineroArchivo_(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// Ruta (relativa a la carpeta ALMACEN DIGITAL) y nombre del PDF:
+// <EMPRESA>\CFDI RECIBIDOS\01 PDF CFDI\2026\05 MAYO\SAMEI F-10326 $5,968.05.pdf
+function rutaAlmacenFactura_({ empresaCarpeta, fecha, proveedor, folio, serie, total }) {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(fecha || ''));
+  if (!m) throw new Error('La factura no trae fecha.');
+  const mes = Number(m[2]);
+  const carpeta = [nombreArchivoSeguro_(empresaCarpeta), 'CFDI RECIBIDOS', '01 PDF CFDI', m[1], String(mes).padStart(2, '0') + ' ' + MESES_ALMACEN_[mes - 1]].join('\\');
+  const fol = String(folio || '').trim() || String(serie || '').trim() || 'SIN FOLIO';
+  const archivo = nombreArchivoSeguro_(nombreCortoProveedor_(proveedor) + ' F-' + fol + ' ' + dineroArchivo_(total)) + '.pdf';
+  return { carpeta, archivo };
+}
+
 function leerCfdi(xmlTexto) {
   const xml = String(xmlTexto || '');
   if (!/<(?:[\w-]+:)?Comprobante\b/i.test(xml)) return null;
   const total = attr_(xml, 'Comprobante', 'Total');
   return {
+    fecha: (attr_(xml, 'Comprobante', 'Fecha') || '').slice(0, 10),   // 'YYYY-MM-DD' (fecha de la factura)
     serie: attr_(xml, 'Comprobante', 'Serie') || '',
     folio: attr_(xml, 'Comprobante', 'Folio') || '',
     total: total !== null ? Number(total) : null,
@@ -359,6 +388,8 @@ function revisarCfdiContraOc(cfdi, oc) {
 }
 
 module.exports = {
+  rutaAlmacenFactura_,
+  nombreCortoProveedor_,
   calcularTotales, importeConLetra, observacionDeUnidad, generarPdfOc, estamparNotaFactura, leerCfdi, revisarCfdiContraOc,
   fechaOc_, IVA_POR_OMISION,
 };

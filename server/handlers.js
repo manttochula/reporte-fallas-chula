@@ -8893,7 +8893,7 @@ async function agenteOcTrabajo(token, info) {
     empresasHoja: Array.isArray(info.hojaComercialEmpresas) ? info.hojaComercialEmpresas.slice(0, 30).map((x) => String(x).slice(0, 80)) : [], error: (info.error || '').toString().slice(0, 500) });
   await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
   await encolarOcAutomaticas_();
-  return { success: true, empresas: await ocsPendientesAgente_() };
+  return { success: true, empresas: await ocsPendientesAgente_(), facturas: await facturasPorArchivar_() };
 }
 
 // resultados: [{ empresaId, serie, folio, ok, mensaje, total }]
@@ -9318,6 +9318,7 @@ async function listarOcsProveedor_(filtro) {
     const [cs] = await pool.query('SELECT proveedor_id, correo, telefono FROM proveedor_contactos WHERE proveedor_id IN (?)', [rows.map((r) => r.proveedor_id)]);
     cs.forEach((c) => { (correosExtra[c.proveedor_id] = correosExtra[c.proveedor_id] || []).push(c); });
   }
+  const comercialPorOc = await ocsComercialDeOcsProveedor_(ids);
   return rows.map((r) => ({
     id: r.id,
     token: r.token,
@@ -9354,6 +9355,17 @@ async function listarOcsProveedor_(filtro) {
     facturaAvisos: r.factura_avisos ? r.factura_avisos.split('\n').filter(Boolean) : [],
     facturaNombre: r.factura_nombre || '',
     facturaEn: isoOrNull(r.factura_en),
+    facturaSerie: r.factura_serie || '',
+    facturaFolio: r.factura_folio || '',
+    facturaFecha: fechaSoloOrNull(r.factura_fecha),
+    archivoEstado: r.archivo_estado || '',
+    archivoRuta: r.archivo_ruta || '',
+    archivoMensaje: r.archivo_mensaje || '',
+    archivoEn: isoOrNull(r.archivo_en),
+    gastoEstado: r.gasto_estado || '',
+    gastoMensaje: r.gasto_mensaje || '',
+    gastoEn: isoOrNull(r.gasto_en),
+    ocsComercial: comercialPorOc[r.id] || [],
     canceladoPor: r.cancelado_por || '',
   })).filter((x) => ids.includes(x.id));
 }
@@ -9441,6 +9453,121 @@ const MAX_FACTURA_BYTES_ = 15 * 1024 * 1024;
 
 // Pública (sin clave): el proveedor sube su factura (PDF + XML). Se guarda
 // la original, el XML y una copia del PDF con la nota contable.
+// =====================================================================
+// Factura → ALMACÉN DIGITAL y → GASTO en Comercial (oct-2026, Carlos).
+// El agente de la PC de Comercial guarda la factura sellada en
+// <ALMACEN DIGITAL>\<EMPRESA>\CFDI RECIBIDOS\01 PDF CFDI\<AÑO>\<MM MES>\
+// <PROVEEDOR> F-<folio> $<total>.pdf (fecha de la factura), y las OC de
+// gastos quedan "por convertir" a GASTOS EN PESOS con serie/folio/fecha de
+// la factura.
+// =====================================================================
+
+// OC de Comercial (oc_exportaciones) que salen de las partidas de cada OC al proveedor.
+async function ocsComercialDeOcsProveedor_(ids) {
+  const res = {};
+  if (!ids || !ids.length) return res;
+  const [rows] = await pool.query(
+    `SELECT DISTINCT i.oc_id, x.empresa_id, x.serie, x.folio, x.concepto, x.agente_estado, x.codigo_producto
+       FROM ordenes_compra_items i JOIN oc_exportaciones x ON x.respuesta_item_id = i.respuesta_item_id
+      WHERE i.oc_id IN (?) AND x.tipo = 'oc' ORDER BY x.serie, x.folio`, [ids]);
+  const cfgs = {};
+  for (const r of rows) {
+    if (!cfgs[r.empresa_id]) cfgs[r.empresa_id] = await leerConfigOc_(r.empresa_id);
+    const g = cfgs[r.empresa_id].gasto || {};
+    const esGasto = (!!r.concepto && !!g.concepto && r.concepto.toUpperCase() === String(g.concepto).toUpperCase()) || (!!g.serie && String(r.serie) === String(g.serie));
+    const lista = res[r.oc_id] = res[r.oc_id] || [];
+    if (!lista.some((y) => y.serie === r.serie && y.folio === r.folio)) {
+      lista.push({ serie: r.serie, folio: r.folio, concepto: r.concepto || '', esGasto, enComercial: r.agente_estado === 'cargada' || r.agente_estado === null });
+    }
+  }
+  return res;
+}
+
+async function marcarGastoPendienteSiAplica_(ocId) {
+  const ocs = (await ocsComercialDeOcsProveedor_([ocId]))[ocId] || [];
+  if (ocs.some((x) => x.esGasto)) {
+    await pool.query("UPDATE ordenes_compra SET gasto_estado = IF(gasto_estado = 'convertido', gasto_estado, 'pendiente'), gasto_mensaje = NULL WHERE id = ?", [ocId]);
+  }
+}
+
+// Completa serie/folio/fecha de la factura leyendo el XML guardado (para
+// facturas que llegaron antes de oct-2026).
+async function completarDatosFactura_(row) {
+  if (row.factura_fecha && (row.factura_folio || row.factura_serie)) return row;
+  if (!row.factura_xml_url) return row;
+  try {
+    const buf = await leerArchivoComoBuffer_(row.factura_xml_url);
+    const cfdi = ocProv.leerCfdi(buf.toString('utf8').replace(/^﻿/, ''));
+    if (cfdi) {
+      const fecha = /^\d{4}-\d{2}-\d{2}$/.test(cfdi.fecha || '') ? cfdi.fecha : null;
+      await pool.query('UPDATE ordenes_compra SET factura_serie = ?, factura_folio = ?, factura_fecha = ? WHERE id = ?', [cfdi.serie || null, cfdi.folio || null, fecha, row.id]);
+      Object.assign(row, { factura_serie: cfdi.serie || null, factura_folio: cfdi.folio || null, factura_fecha: fecha });
+    }
+  } catch (err) { /* sin XML legible: se reporta al archivar */ }
+  return row;
+}
+
+// Lo que el agente tiene que guardar en el almacén digital.
+async function facturasPorArchivar_() {
+  const [rows] = await pool.query(
+    `SELECT o.*, e.nombre AS e_nombre, p.nombre AS p_nombre FROM ordenes_compra o
+       JOIN empresas e ON e.id = o.empresa_id JOIN proveedores p ON p.id = o.proveedor_id
+      WHERE o.archivo_estado = 'pendiente' AND o.estado = 'facturada' ORDER BY o.factura_en LIMIT 30`);
+  const out = [];
+  for (let r of rows) {
+    r = await completarDatosFactura_(r);
+    const url = r.factura_sellada_url || r.factura_pdf_url;
+    try {
+      const ruta = ocProv.rutaAlmacenFactura_({
+        empresaCarpeta: (r.e_nombre || '').split(',')[0].trim().toUpperCase(), fecha: fechaSoloOrNull(r.factura_fecha),
+        proveedor: r.p_nombre, folio: r.factura_folio, serie: r.factura_serie, total: r.factura_total !== null ? Number(r.factura_total) : Number(r.total),
+      });
+      if (!url) throw new Error('La OC no tiene PDF de factura.');
+      out.push({ id: r.id, oc: r.serie + ' ' + r.folio, carpeta: ruta.carpeta, archivo: ruta.archivo, url, sellada: !!r.factura_sellada_url });
+    } catch (err) {
+      await pool.query("UPDATE ordenes_compra SET archivo_estado = 'error', archivo_mensaje = ? WHERE id = ?", [err.message, r.id]);
+    }
+  }
+  return out;
+}
+
+// resultados: [{ id, ok, ruta, mensaje }]
+async function agenteFacturasResultado(token, resultados) {
+  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  let ok = 0, err = 0;
+  for (const r of (Array.isArray(resultados) ? resultados : [])) {
+    const id = Number(r.id) || 0;
+    if (!id) continue;
+    if (r.ok) {
+      ok++;
+      await pool.query("UPDATE ordenes_compra SET archivo_estado = 'archivada', archivo_ruta = ?, archivo_mensaje = NULL, archivo_en = NOW() WHERE id = ?", [String(r.ruta || '').slice(0, 500), id]);
+    } else {
+      err++;
+      await pool.query("UPDATE ordenes_compra SET archivo_estado = 'error', archivo_mensaje = ?, archivo_en = NOW() WHERE id = ?", [String(r.mensaje || 'sin detalle').slice(0, 2000), id]);
+    }
+  }
+  return { success: true, archivadas: ok, errores: err };
+}
+
+// Panel: mandar (o volver a mandar) una factura al almacén digital.
+async function archivarFacturaOc(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const [r] = await pool.query("UPDATE ordenes_compra SET archivo_estado = 'pendiente', archivo_mensaje = NULL WHERE id = ? AND estado = 'facturada'", [Number(id) || 0]);
+  if (!r.affectedRows) return { success: false, error: 'Esa OC no tiene factura.' };
+  return { success: true };
+}
+
+// Panel: la conversión a GASTOS EN PESOS ya se hizo (a mano) o se vuelve a pedir.
+async function marcarGastoComercial(code, nombreUsuario, id, hecho) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const [rows] = await pool.query('SELECT serie, folio, estado FROM ordenes_compra WHERE id = ?', [Number(id) || 0]);
+  if (!rows.length || rows[0].estado !== 'facturada') return { success: false, error: 'Esa OC no tiene factura.' };
+  await pool.query('UPDATE ordenes_compra SET gasto_estado = ?, gasto_mensaje = ?, gasto_en = NOW() WHERE id = ?',
+    [hecho ? 'convertido' : 'pendiente', hecho ? 'Marcado a mano por ' + ((nombreUsuario || '').toString().trim() || '—') : null, Number(id)]);
+  await registrarAuditoria_('ordenes_compra', rows[0].serie + '-' + rows[0].folio, hecho ? 'gasto convertido' : 'gasto pendiente', nombreUsuario, '');
+  return { success: true };
+}
+
 async function subirFacturaOc(token, data) {
   data = data || {};
   const oc = await datosOcCompletos_(token);
@@ -9477,9 +9604,13 @@ async function subirFacturaOc(token, data) {
   }
   await pool.query(
     `UPDATE ordenes_compra SET estado = 'facturada', factura_pdf_url = ?, factura_xml_url = ?, factura_sellada_url = ?, factura_uuid = ?,
-       factura_total = ?, factura_avisos = ?, factura_nombre = ?, factura_en = NOW() WHERE id = ?`,
-    [pdfUrl, xmlUrl, selladaUrl, cfdi.uuid || null, cfdi.total, avisosCfdi.join('\n') || null, nombre, oc.id]
+       factura_total = ?, factura_avisos = ?, factura_nombre = ?, factura_en = NOW(),
+       factura_serie = ?, factura_folio = ?, factura_fecha = ?, archivo_estado = 'pendiente', archivo_mensaje = NULL, archivo_ruta = NULL
+     WHERE id = ?`,
+    [pdfUrl, xmlUrl, selladaUrl, cfdi.uuid || null, cfdi.total, avisosCfdi.join('\n') || null, nombre,
+      cfdi.serie || null, cfdi.folio || null, /^\d{4}-\d{2}-\d{2}$/.test(cfdi.fecha || '') ? cfdi.fecha : null, oc.id]
   );
+  await marcarGastoPendienteSiAplica_(oc.id);
   if (oc.orden) await agregarObservacionOrden_(oc.orden, 'El proveedor ' + oc.proveedor.nombre + ' subió la factura de la OC ' + oc.serie + ' ' + oc.folio + ' (' + nombre + ').' + (avisosCfdi.length ? ' Revisar: ' + avisosCfdi.join(' ') : ''));
   avisos.avisarTexto_('Llegó factura de la OC ' + oc.serie + ' ' + oc.folio, [
     ['Proveedor', oc.proveedor.nombre], ['Orden', oc.orden || '—'], ['Total', '$' + (cfdi.total !== null ? cfdi.total : oc.total).toFixed(2)],
@@ -10980,6 +11111,10 @@ async function revisarAvisosSeguros_(opciones) {
 }
 
 module.exports = {
+  facturasPorArchivar_,
+  agenteFacturasResultado,
+  archivarFacturaOc,
+  marcarGastoComercial,
   quitarServicioUnidad,
   agregarServicioUnidad,
   deshacerAjusteServicioUnidad,

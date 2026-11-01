@@ -3433,3 +3433,17 @@ CREATE TABLE IF NOT EXISTS mantenimiento_unidad_reglas (
   PRIMARY KEY (regla_id, codigo_unidad),
   INDEX idx_mur_unidad (codigo_unidad)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Factura → Almacén digital y → gasto en Comercial (oct-2026, Carlos):
+--  - La factura sellada (con la nota contable) se guarda en la PC de
+--    Comercial en <ALMACEN DIGITAL>\<EMPRESA>\CFDI RECIBIDOS\01 PDF CFDI\
+--    <AÑO>\<MM MES>\<PROVEEDOR> F-<folio> $<total>.pdf (fecha = la de la
+--    factura). Lo hace el agente (archivo_estado: pendiente/archivada/error).
+--  - Las OC de gastos (ORDEN DE COMPRA GENERALES) se convierten en Comercial
+--    a GASTOS EN PESOS con la serie, folio y FECHA de la factura
+--    (gasto_estado: pendiente/convertido/error; NULL = no aplica).
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'ordenes_compra' AND column_name = 'archivo_estado');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE ordenes_compra ADD COLUMN factura_serie VARCHAR(30) DEFAULT NULL, ADD COLUMN factura_folio VARCHAR(40) DEFAULT NULL, ADD COLUMN factura_fecha DATE DEFAULT NULL, ADD COLUMN archivo_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN archivo_ruta VARCHAR(500) DEFAULT NULL, ADD COLUMN archivo_mensaje TEXT DEFAULT NULL, ADD COLUMN archivo_en DATETIME DEFAULT NULL, ADD COLUMN gasto_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN gasto_mensaje TEXT DEFAULT NULL, ADD COLUMN gasto_en DATETIME DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

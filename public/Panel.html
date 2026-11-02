@@ -5161,7 +5161,7 @@ function ocultarControlesSoloLectura(){
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
-      '.ocx-auto-chk', '.ocx-auto-acc', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar', '.ocp-btn-archivar', '.ocp-btn-gasto',
+      '.ocx-auto-chk', '.ocx-auto-acc', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar', '.ocp-btn-archivar', '.ocp-btn-gasto', '.ocp-btn-pedir-gasto',
     ]);
   }
   if(!puedeCapturarPestana('insumos')){
@@ -22137,15 +22137,23 @@ function estadoFacturaOcHtml_(oc){
   if(arch !== 'pendiente') a += ' <button type="button" class="row-view ocp-btn-archivar" data-id="' + oc.id + '">' + (arch === 'archivada' ? 'Guardar otra vez' : 'Guardar en almacén') + '</button>';
   lineas.push(a);
   const gastos = (oc.ocsComercial || []).filter(function(x){ return x.esGasto; });
-  if(oc.gastoEstado || gastos.length){
-    const ocTxt = gastos.length ? gastos.map(function(x){ return x.serie + ' ' + x.folio; }).join(', ') : '(sin OC en Comercial)';
-    const datos = 'Serie <b>' + escapeHtml(oc.facturaSerie || '—') + '</b> · Folio <b>' + escapeHtml(oc.facturaFolio || '—') + '</b> · Fecha <b>' + escapeHtml(fechaF) + '</b>';
-    let g = '🧾 <b>Comercial:</b> ';
-    if(oc.gastoEstado === 'convertido') g += '<span style="color:var(--ok);">✓ OC ' + escapeHtml(ocTxt) + ' convertida a GASTOS EN PESOS</span> <span class="mnt-subtext" style="display:inline;">' + escapeHtml(oc.gastoMensaje || '') + '</span> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="0">Deshacer</button>';
-    else g += (oc.gastoEstado === 'error' ? '<span style="color:var(--danger);">⚠ ' + escapeHtml(oc.gastoMensaje || '') + '</span> · ' : '') + 'convertir OC <b>' + escapeHtml(ocTxt) + '</b> a GASTOS EN PESOS con ' + datos +
+  const ocCom = oc.gastoOcFolio ? (oc.gastoOcSerie + ' ' + oc.gastoOcFolio) : (gastos.length ? gastos.map(function(x){ return x.serie + ' ' + x.folio; }).join(', ') : '');
+  const datos = 'Serie <b>' + escapeHtml(oc.facturaSerie || '—') + '</b> · Folio <b>' + escapeHtml(oc.facturaFolio || '—') + '</b> · Fecha <b>' + escapeHtml(fechaF) + '</b>';
+  const propuesta = oc.gastoOcFolio ? ocCom : (gastos.length === 1 ? gastos[0].serie + ' ' + gastos[0].folio : 'mtto ');
+  let g = '🧾 <b>Comercial (GASTOS EN PESOS):</b> ';
+  if(oc.gastoEstado === 'convertido'){
+    g += '<span style="color:var(--ok);">✓ OC ' + escapeHtml(ocCom || '') + ' convertida</span> <span class="mnt-subtext" style="display:inline;">' + escapeHtml(oc.gastoMensaje || '') + '</span> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="0">Deshacer</button>';
+  } else if(oc.gastoEstado === 'pendiente'){
+    g += 'pendiente: OC <b>' + escapeHtml(ocCom || '¿?') + '</b> con ' + datos + '. (La conversión automática está en pruebas: mientras, hazla en Comercial y da "Ya lo convertí".)' + (oc.gastoMensaje ? ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(oc.gastoMensaje) + ')</span>' : '') +
       ' <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="1">✓ Ya lo convertí</button>';
-    lineas.push(g);
+  } else if(oc.gastoEstado === 'error'){
+    g += '<span style="color:var(--danger);">⚠ ' + (oc.gastoPaso ? 'Paso "' + escapeHtml(oc.gastoPaso) + '": ' : '') + escapeHtml(oc.gastoMensaje || '') + '</span> · OC ' + escapeHtml(ocCom || '¿?') + ' con ' + datos +
+      ' <button type="button" class="row-view ocp-btn-pedir-gasto" data-id="' + oc.id + '" data-oc="' + escapeHtml(propuesta) + '">Reintentar</button> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="1">✓ Ya lo convertí</button>';
+  } else {
+    g += 'sin pedir' + (ocCom ? ' (OC ' + escapeHtml(ocCom) + ')' : '') + ' · ' + datos +
+      ' <button type="button" class="row-view ocp-btn-pedir-gasto" data-id="' + oc.id + '" data-oc="' + escapeHtml(propuesta) + '">Convertir a gasto en Comercial</button>';
   }
+  lineas.push(g);
   return '<div class="ocp-factura-estado" style="margin-top:6px;font-size:12.5px;line-height:1.7;">' + lineas.join('<br>') + '</div>';
 }
 
@@ -22188,6 +22196,19 @@ function enlazarAccionesOc_(cont, lista, alCambiar){
         .withSuccessHandler(function(r){ if(!r || !r.success){ btn.disabled = false; alert((r && r.error) || 'No se pudo.'); return; } if(alCambiar) alCambiar(); })
         .withFailureHandler(function(e){ btn.disabled = false; alert((e && e.message) || 'No se pudo.'); })
         .archivarFacturaOc(ACCESS_CODE, PANEL_USUARIO, Number(btn.dataset.id));
+    });
+  });
+  cont.querySelectorAll('.ocp-btn-pedir-gasto').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const v = prompt('Serie y folio de la OC en Comercial que se convierte a GASTOS EN PESOS (ej. mtto 100000000):', btn.dataset.oc || 'mtto ');
+      if(v === null) return;
+      const m = /^\s*(\S+)\s+([\d,]+)\s*$/.exec(v);
+      if(!m){ alert('Escribe la serie, un espacio y el folio. Ej.: mtto 100000000'); return; }
+      btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ btn.disabled = false; alert((r && r.error) || 'No se pudo.'); return; } if(alCambiar) alCambiar(); })
+        .withFailureHandler(function(e){ btn.disabled = false; alert((e && e.message) || 'No se pudo.'); })
+        .pedirGastoComercial(ACCESS_CODE, PANEL_USUARIO, Number(btn.dataset.id), m[1], m[2]);
     });
   });
   cont.querySelectorAll('.ocp-btn-gasto').forEach(function(btn){

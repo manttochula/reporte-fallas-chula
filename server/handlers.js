@@ -8893,7 +8893,7 @@ async function agenteOcTrabajo(token, info) {
     empresasHoja: Array.isArray(info.hojaComercialEmpresas) ? info.hojaComercialEmpresas.slice(0, 30).map((x) => String(x).slice(0, 80)) : [], error: (info.error || '').toString().slice(0, 500) });
   await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
   await encolarOcAutomaticas_();
-  return { success: true, empresas: await ocsPendientesAgente_(), facturas: await facturasPorArchivar_() };
+  return { success: true, empresas: await ocsPendientesAgente_(), facturas: await facturasPorArchivar_(), gastos: await gastosPorConvertir_() };
 }
 
 // resultados: [{ empresaId, serie, folio, ok, mensaje, total }]
@@ -9365,6 +9365,9 @@ async function listarOcsProveedor_(filtro) {
     gastoEstado: r.gasto_estado || '',
     gastoMensaje: r.gasto_mensaje || '',
     gastoEn: isoOrNull(r.gasto_en),
+    gastoOcSerie: r.gasto_oc_serie || '',
+    gastoOcFolio: r.gasto_oc_folio === null || r.gasto_oc_folio === undefined ? null : Number(r.gasto_oc_folio),
+    gastoPaso: r.gasto_paso || '',
     ocsComercial: comercialPorOc[r.id] || [],
     canceladoPor: r.cancelado_por || '',
   })).filter((x) => ids.includes(x.id));
@@ -9565,6 +9568,74 @@ async function marcarGastoComercial(code, nombreUsuario, id, hecho) {
   await pool.query('UPDATE ordenes_compra SET gasto_estado = ?, gasto_mensaje = ?, gasto_en = NOW() WHERE id = ?',
     [hecho ? 'convertido' : 'pendiente', hecho ? 'Marcado a mano por ' + ((nombreUsuario || '').toString().trim() || '—') : null, Number(id)]);
   await registrarAuditoria_('ordenes_compra', rows[0].serie + '-' + rows[0].folio, hecho ? 'gasto convertido' : 'gasto pendiente', nombreUsuario, '');
+  return { success: true };
+}
+
+// ---- Conversión automática a GASTOS EN PESOS (agente, oct-2026) ----
+// OC de Comercial que se convierte: la que puso Carlos en el Panel, o la
+// única OC de gastos ligada a las partidas.
+async function gastosPorConvertir_() {
+  const [rows] = await pool.query(
+    `SELECT o.*, e.nombre AS e_nombre,
+            (SELECT MAX(ri.fecha_entrega) FROM ordenes_compra_items i JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = i.respuesta_item_id WHERE i.oc_id = o.id) AS entrega
+       FROM ordenes_compra o JOIN empresas e ON e.id = o.empresa_id
+      WHERE o.gasto_estado = 'pendiente' AND o.estado = 'facturada' ORDER BY o.factura_en LIMIT 10`);
+  if (!rows.length) return [];
+  const ligadas = await ocsComercialDeOcsProveedor_(rows.map((r) => r.id));
+  const out = [];
+  for (let r of rows) {
+    r = await completarDatosFactura_(r);
+    const falla = async (m) => pool.query("UPDATE ordenes_compra SET gasto_estado = 'error', gasto_mensaje = ? WHERE id = ?", [m, r.id]);
+    let serie = r.gasto_oc_serie, folio = r.gasto_oc_folio !== null ? Number(r.gasto_oc_folio) : null;
+    if (!folio) {
+      const g = (ligadas[r.id] || []).filter((x) => x.esGasto);
+      if (g.length !== 1) { await falla(g.length ? 'Hay varias OC de gastos en Comercial para esta factura: indica cuál en el Panel.' : 'No sé qué OC de Comercial es: indícala en el Panel.'); continue; }
+      serie = g[0].serie; folio = Number(g[0].folio);
+    }
+    const fecha = fechaSoloOrNull(r.factura_fecha);
+    if (!fecha) { await falla('La factura no trae fecha.'); continue; }
+    if (!r.factura_folio) { await falla('La factura no trae folio.'); continue; }
+    out.push({
+      id: r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
+      ocSerie: serie || '', ocFolio: folio, facturaSerie: r.factura_serie || '', facturaFolio: r.factura_folio,
+      fechaFactura: fecha, fechaRecepcion: fechaSoloOrNull(r.entrega) || fecha,
+      total: r.factura_total !== null ? Number(r.factura_total) : Number(r.total),
+    });
+  }
+  return out;
+}
+
+// resultados: [{ id, ok, mensaje, paso }]
+async function agenteGastosResultado(token, resultados) {
+  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  let ok = 0, err = 0;
+  for (const r of (Array.isArray(resultados) ? resultados : [])) {
+    const id = Number(r.id) || 0;
+    if (!id) continue;
+    if (r.esperar) {   // la PC estaba ocupada o Comercial no estaba listo: sigue pendiente
+      await pool.query("UPDATE ordenes_compra SET gasto_mensaje = ? WHERE id = ? AND gasto_estado = 'pendiente'", [String(r.mensaje || '').slice(0, 2000), id]);
+      continue;
+    }
+    if (r.ok) ok++; else err++;
+    await pool.query('UPDATE ordenes_compra SET gasto_estado = ?, gasto_mensaje = ?, gasto_paso = ?, gasto_en = NOW() WHERE id = ?',
+      [r.ok ? 'convertido' : 'error', String(r.mensaje || (r.ok ? 'Convertido por el agente' : 'sin detalle')).slice(0, 2000), r.ok ? null : String(r.paso || '').slice(0, 80) || null, id]);
+    if (!r.ok) {
+      const [o] = await pool.query('SELECT serie, folio FROM ordenes_compra WHERE id = ?', [id]);
+      if (o.length) avisos.avisarTexto_('No se pudo convertir a gasto la OC ' + o[0].serie + ' ' + o[0].folio, [['Paso', r.paso || '—'], ['Motivo', r.mensaje || 'sin detalle']], '/panel', 'oc-gasto-' + id);
+    }
+  }
+  return { success: true, convertidas: ok, errores: err };
+}
+
+// Panel: pedir la conversión indicando la OC de Comercial (serie y folio).
+async function pedirGastoComercial(code, nombreUsuario, id, ocSerie, ocFolio) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const serie = (ocSerie || '').toString().trim().slice(0, 10);
+  const folio = Number(String(ocFolio || '').replace(/[,\s]/g, ''));
+  if (!serie || !Number.isInteger(folio) || folio <= 0) return { success: false, error: 'Escribe la serie y el folio de la OC en Comercial (ej. mtto 100000000).' };
+  const [r] = await pool.query("UPDATE ordenes_compra SET gasto_oc_serie = ?, gasto_oc_folio = ?, gasto_estado = 'pendiente', gasto_mensaje = NULL, gasto_paso = NULL WHERE id = ? AND estado = 'facturada'", [serie, folio, Number(id) || 0]);
+  if (!r.affectedRows) return { success: false, error: 'Esa OC no tiene factura.' };
+  await registrarAuditoria_('ordenes_compra', id, 'pedir gasto', nombreUsuario, serie + ' ' + folio);
   return { success: true };
 }
 
@@ -11111,6 +11182,9 @@ async function revisarAvisosSeguros_(opciones) {
 }
 
 module.exports = {
+  gastosPorConvertir_,
+  agenteGastosResultado,
+  pedirGastoComercial,
   facturasPorArchivar_,
   agenteFacturasResultado,
   archivarFacturaOc,

@@ -3447,3 +3447,9 @@ CREATE TABLE IF NOT EXISTS mantenimiento_unidad_reglas (
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'ordenes_compra' AND column_name = 'archivo_estado');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE ordenes_compra ADD COLUMN factura_serie VARCHAR(30) DEFAULT NULL, ADD COLUMN factura_folio VARCHAR(40) DEFAULT NULL, ADD COLUMN factura_fecha DATE DEFAULT NULL, ADD COLUMN archivo_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN archivo_ruta VARCHAR(500) DEFAULT NULL, ADD COLUMN archivo_mensaje TEXT DEFAULT NULL, ADD COLUMN archivo_en DATETIME DEFAULT NULL, ADD COLUMN gasto_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN gasto_mensaje TEXT DEFAULT NULL, ADD COLUMN gasto_en DATETIME DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+-- OC de Comercial a convertir cuando no se sabe sola (se cargó con Excel
+-- antes de oct-2026): la pone Carlos en el Panel. gasto_paso: en qué paso
+-- se quedó el agente si no terminó la conversión.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'ordenes_compra' AND column_name = 'gasto_oc_folio');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE ordenes_compra ADD COLUMN gasto_oc_serie VARCHAR(10) DEFAULT NULL, ADD COLUMN gasto_oc_folio BIGINT DEFAULT NULL, ADD COLUMN gasto_paso VARCHAR(80) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

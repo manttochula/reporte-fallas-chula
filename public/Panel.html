@@ -22149,7 +22149,8 @@ function cargarCargaComercial_(){
       const filas = r.cola.map(function(c){
         const acc = c.estado === 'error'
           ? '<button type="button" class="row-view ocx-auto-acc" data-acc="reintentar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Reintentar</button> <button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '" title="Quita la OC de la cola; sus partidas vuelven a quedar pendientes y tomarán un folio nuevo">Liberar</button>'
-          : c.estado === 'pendiente' ? '<button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Quitar de la cola</button>' : '';
+          : c.estado === 'pendiente' ? '<button type="button" class="row-view ocx-auto-acc" data-acc="liberar" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '">Quitar de la cola</button>'
+          : c.estado === 'cargada' ? '<button type="button" class="row-view ocx-auto-acc" data-acc="noEsta" data-emp="' + c.empresaId + '" data-serie="' + escapeHtml(c.serie) + '" data-folio="' + c.folio + '" title="Úsalo solo si la OC NO aparece en Comercial: vuelve a la cola y el agente la crea con un folio libre">No está en Comercial</button>' : '';
         return '<tr><td>' + escapeHtml(nombreEmp[c.empresaId] || '') + '</td><td><b>' + escapeHtml(c.serie + ' ' + c.folio) + '</b></td><td>' + escapeHtml(c.proveedor) + '</td><td>' + escapeHtml(c.ordenes) + '</td><td>' + c.partidas + '</td>'
           + '<td>' + escapeHtml(c.estado === 'pendiente' && !autoEmp[c.empresaId] ? 'En pausa (no se carga hasta prender la empresa)' : (OCX_EST_AGENTE_[c.estado] || c.estado)) + (c.total !== null ? ' · $' + Number(c.total).toFixed(2) : '') + (c.mensaje ? '<div class="ocx-auto-aviso">' + escapeHtml(c.mensaje) + '</div>' : '') + '</td><td>' + acc + '</td></tr>';
       }).join('');
@@ -22169,6 +22170,7 @@ function cargarCargaComercial_(){
       });
       caja.querySelectorAll('.ocx-auto-acc').forEach(function(b){
         b.addEventListener('click', function(){
+          if(b.dataset.acc === 'noEsta' && !confirm('¿La OC ' + b.dataset.serie + ' ' + b.dataset.folio + ' NO aparece en Comercial? Vuelve a la cola y el agente la crea otra vez (si ese folio ya es de otra OC, usa el siguiente libre). Revisa bien antes para no duplicarla.')) return;
           if(b.dataset.acc === 'liberar' && !confirm('¿Quitar la OC ' + b.dataset.serie + ' ' + b.dataset.folio + ' de la cola? Sus partidas vuelven a quedar pendientes y tomarán otro folio. Revisa antes en Comercial que NO se haya creado.')) return;
           b.disabled = true;
           google.script.run.withSuccessHandler(function(x){ if(!x || !x.success) alert((x && x.error) || 'No se pudo.'); cargarCargaComercial_(); cargarPartidasOcx_(false); })

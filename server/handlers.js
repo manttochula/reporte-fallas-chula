@@ -9143,6 +9143,12 @@ async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, a
   } else if (accion === 'liberar') {
     const [d] = await pool.query("DELETE FROM oc_exportaciones WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado IN ('error', 'pendiente')", args);
     n = d.affectedRows;
+  } else if (accion === 'noEsta') {
+    // Nov-2026: el agente la dio por cargada pero en Comercial no está (pasó
+    // con VER 100029). Vuelve a la cola con su folio; el agente revisa en
+    // Comercial y, si ese folio ya es de otra OC, toma el siguiente libre.
+    const [u] = await pool.query("UPDATE oc_exportaciones SET agente_estado = 'pendiente', agente_mensaje = 'Marcada como NO creada en Comercial; se vuelve a cargar.', agente_total = NULL WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'cargada'", args);
+    n = u.affectedRows;
   } else return { success: false, error: 'Acción no válida.' };
   if (!n) return { success: false, error: 'Esa OC ya cambió de estado. Actualiza la lista.' };
   await registrarAuditoria_('oc_exportaciones', args[1] + '-' + args[2], 'agente_' + accion, nombreUsuario, n + ' partida(s)');

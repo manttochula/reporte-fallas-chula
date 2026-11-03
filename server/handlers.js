@@ -10206,6 +10206,38 @@ async function getSolicitudesCotizacion(code, nombreUsuario) {
   }));
 }
 
+// Letrero arriba de Solicitudes de cotización (nov-2026, Carlos): órdenes de trabajo
+// ABIERTAS con refacciones necesarias que todavía no están en ninguna solicitud de
+// cotización (no cancelada) de esa orden, ni entregadas. Separadas en Agrícola y
+// Automotriz (reportes.es_automotriz). Las capturadas como texto libre (sin ligar al
+// catálogo) también cuentan: se marcan aparte porque hay que ligarlas para cotizar.
+async function getOrdenesPorCotizar(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  const [rows] = await pool.query(
+    `SELECT rp.orden, rp.unidad, rp.codigo_unidad, rp.es_automotriz, rp.fecha,
+            rn.refaccion_id, COALESCE(ref.descripcion, rn.texto_libre) AS pieza
+       FROM reportes rp
+       JOIN reportes_refacciones_necesarias rn ON rn.orden = rp.orden
+       LEFT JOIN refacciones ref ON ref.id = rn.refaccion_id
+      WHERE rp.fecha_salida IS NULL AND COALESCE(rn.entregado, 0) = 0
+        AND NOT (rn.refaccion_id IS NOT NULL AND EXISTS (
+              SELECT 1 FROM solicitudes_cotizacion s JOIN solicitud_cotizacion_items i ON i.solicitud_id = s.id
+               WHERE s.orden = rp.orden AND s.estado <> 'cancelada' AND i.refaccion_id = rn.refaccion_id))
+      ORDER BY rp.fecha, rp.orden`);
+  const porOrden = new Map();
+  for (const r of rows) {
+    let o = porOrden.get(r.orden);
+    if (!o) {
+      o = { orden: r.orden, unidad: r.unidad || r.codigo_unidad || '', automotriz: !!r.es_automotriz, fecha: isoOrNull(r.fecha), piezas: [], sinLigar: 0 };
+      porOrden.set(r.orden, o);
+    }
+    o.piezas.push(String(r.pieza || '').trim() || '(sin descripción)');
+    if (!r.refaccion_id) o.sinLigar++;
+  }
+  const lista = [...porOrden.values()];
+  return { success: true, agricola: lista.filter((o) => !o.automotriz), automotriz: lista.filter((o) => o.automotriz) };
+}
+
 // Columna "Comercial" de Solicitudes de cotización (nov-2026, Carlos): en qué va cada
 // solicitud con CONTPAQi, del paso más avanzado al menos avanzado:
 //   gasto convertido > gasto por convertir / con error > OC cargada > en cola / con error.
@@ -11515,6 +11547,7 @@ module.exports = {
   crearSolicitudCotizacion,
   crearSolicitudesCotizacion,
   getSolicitudesCotizacion,
+  getOrdenesPorCotizar,
   getSolicitudCotizacionPublica,
   responderCotizacion,
   aplicarPreciosCotizacion,

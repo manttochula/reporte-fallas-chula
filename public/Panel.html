@@ -560,6 +560,15 @@
   .status-pill.progress{ background: rgba(232,135,30,0.15); color: var(--amber); }
   .status-pill.danger{ background: rgba(194,75,63,0.15); color: var(--danger); }
   .status-pill.neutral{ background: var(--panel-2); color: var(--text-dim); }
+  .porcot-aviso{ border:1px solid rgba(214,158,46,0.55); background:rgba(214,158,46,0.10); border-radius:10px; padding:10px 14px; margin:0 0 14px; }
+  .porcot-aviso h4{ margin:0 0 6px; font-size:14px; }
+  .porcot-grupos{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px 18px; }
+  .porcot-grupo-titulo{ font-weight:600; font-size:12.5px; margin-bottom:4px; }
+  .porcot-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .porcot-chip{ border:1px solid var(--border, #ccc); background:var(--panel, #fff); color:inherit; border-radius:14px; padding:3px 10px; font-size:12px; cursor:pointer; text-align:left; }
+  .porcot-chip:hover{ border-color:rgba(214,158,46,0.9); }
+  .porcot-chip .porcot-n{ font-weight:600; }
+  .porcot-vacio{ font-size:12px; color:var(--text-dim); }
   .status-pill.info{ background: rgba(76,141,174,0.18); color: var(--steel); }
 
   /* Letrero de notificaciones: órdenes cuyo plazo de "días de atención"
@@ -3200,6 +3209,8 @@
 
     <div id="pview-refacciones" style="display:none;">
       <!-- Orden de las secciones pedido por Carlos (oct-2026): Solicitudes, Reporte, Proveedores, Catálogos de partes, Marcas, Categorías y al final el listado. -->
+      <!-- Letrero (nov-2026): órdenes de trabajo con refacciones por cotizar, Agrícola y Automotriz. -->
+      <div id="porcot-aviso" class="porcot-aviso" style="display:none;"></div>
       <h3 class="ref-reporte-titulo" style="margin-top:0;">Solicitudes de cotización</h3>
       <div class="toolbar">
         <button class="export-btn" id="cot-add">+ Nueva solicitud</button>
@@ -21279,7 +21290,52 @@ document.querySelectorAll('#cot-filtro-estatus .cot-filtro-chip').forEach(functi
   });
 });
 
+// Letrero: órdenes con refacciones por cotizar (clic = nueva solicitud con esa orden).
+function cargarOrdenesPorCotizar(){
+  const caja = document.getElementById('porcot-aviso');
+  if(!caja) return;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ caja.style.display = 'none'; return; }
+      const total = (r.agricola || []).length + (r.automotriz || []).length;
+      if(!total){ caja.style.display = 'none'; return; }
+      const grupo = function(titulo, lista){
+        const chips = (lista || []).map(function(o){
+          const n = o.piezas.length;
+          const tip = o.piezas.join(', ') + (o.sinLigar ? ' — ' + o.sinLigar + ' sin ligar al catálogo (hay que ligarla para cotizar)' : '');
+          return '<button type="button" class="porcot-chip" data-orden="' + escapeHtml(o.orden) + '" title="' + escapeHtml(tip) + '">' +
+            '<span class="porcot-n">' + escapeHtml(o.orden) + '</span> · ' + escapeHtml(o.unidad) + ' · ' + n + (n === 1 ? ' pieza' : ' piezas') +
+            (o.sinLigar ? ' <span style="color:var(--danger);">(' + o.sinLigar + ' sin ligar)</span>' : '') + '</button>';
+        }).join('');
+        return '<div><div class="porcot-grupo-titulo">' + titulo + ' (' + (lista || []).length + ')</div>' +
+          (chips ? '<div class="porcot-chips">' + chips + '</div>' : '<div class="porcot-vacio">Sin pendientes</div>') + '</div>';
+      };
+      caja.innerHTML = '<h4>⚠ ' + total + (total === 1 ? ' orden de trabajo tiene' : ' órdenes de trabajo tienen') + ' refacciones por cotizar</h4>' +
+        '<div class="porcot-grupos">' + grupo('🚜 Agrícola', r.agricola) + grupo('🚗 Automotriz', r.automotriz) + '</div>';
+      caja.style.display = '';
+      caja.querySelectorAll('.porcot-chip').forEach(function(b){
+        b.addEventListener('click', function(){
+          if(!puedeCapturarPestana('refacciones')) return;
+          abrirModalCotizacion();
+          const orden = b.dataset.orden;
+          document.getElementById('cot-f-orden-buscar').value = orden;
+          poblarSelectOrdenCot(orden);
+          const sel = document.getElementById('cot-f-orden');
+          if(![].some.call(sel.options, function(op){ return op.value === orden; })){
+            // La orden no está en la lista cargada del Panel: se agrega tal cual.
+            const op = document.createElement('option'); op.value = orden; op.textContent = b.textContent; sel.appendChild(op);
+          }
+          sel.value = orden;
+          precargarRefaccionesCotDesdeOrden_(orden);
+        });
+      });
+    })
+    .withFailureHandler(function(){ caja.style.display = 'none'; })
+    .getOrdenesPorCotizar(ACCESS_CODE, PANEL_USUARIO);
+}
+
 function cargarSolicitudesCotizacion(onListo){
+  cargarOrdenesPorCotizar();
   const tbody = document.getElementById('cot-table-body');
   tbody.innerHTML = '<tr><td colspan="8"><div class="empty">Cargando...</div></td></tr>';
   google.script.run

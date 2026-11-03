@@ -3173,6 +3173,9 @@ async function eliminarMovimiento(code, nombreUsuario, id) {
 // en Taller para esa unidad).
 // ---------------------------------------------------------------
 
+// Referencias de los gastos en Comercial (lista fija de Carlos, nov-2026).
+const REFERENCIAS_COMERCIAL_ = ['VRZ', 'PROV', 'MTY', 'LIMONES', 'CARIGE'];
+const FORMA_PAGO_COMERCIAL_DEFAULT_ = 'BAJIO SPEI';
 const MAQUINARIA_SELECT = `
   SELECT
     m.codigo_unidad   AS CodigoUnidad,
@@ -3197,6 +3200,7 @@ const MAQUINARIA_SELECT = `
     m.usuario_asignado_app AS UsuarioAsignadoApp,
     m.admite_terceros AS AdmiteTerceros,
     m.empresa_id      AS EmpresaId,
+    m.referencia_comercial AS ReferenciaComercial,
     emp.nombre        AS Empresa
   FROM maquinaria m
   LEFT JOIN empresas emp ON emp.id = m.empresa_id
@@ -3382,6 +3386,12 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
         empresaId || null,
       ]
     );
+    // "Referencia" del gasto en Comercial (nov-2026). Si no viene (Panel viejo), se conserva.
+    if (Object.prototype.hasOwnProperty.call(data, 'referenciaComercial')) {
+      const ref = String(data.referenciaComercial || '').trim().toUpperCase();
+      if (ref && REFERENCIAS_COMERCIAL_.indexOf(ref) === -1) return { success: false, error: 'Referencia en Comercial no válida: ' + ref + '.' };
+      await pool.query('UPDATE maquinaria SET referencia_comercial = ? WHERE codigo_unidad = ?', [ref || null, codigo]);
+    }
     return { success: true, codigoUnidad: codigo };
   } catch (err) {
     return { success: false, error: err.toString() };
@@ -9574,6 +9584,32 @@ async function marcarGastoComercial(code, nombreUsuario, id, hecho) {
 // ---- Conversión automática a GASTOS EN PESOS (agente, oct-2026) ----
 // OC de Comercial que se convierte: la que puso Carlos en el Panel, o la
 // única OC de gastos ligada a las partidas.
+// Datos de las pestañas "Información Adicional" y "Usuario" del gasto (nov-2026, Carlos):
+// referencia (catálogo de equipos), observaciones (equipo), quién elaboró (quien creó la
+// solicitud de cotización), forma de pago (catálogo de proveedores) y nombre de la póliza.
+async function datosAdicionalesGasto_(r) {
+  const [eq] = await pool.query(
+    `SELECT m.referencia_comercial AS ref FROM reportes rp JOIN maquinaria m ON m.codigo_unidad = rp.codigo_unidad WHERE rp.orden = ? LIMIT 1`, [r.orden || '']);
+  const [sol] = await pool.query(
+    `SELECT DISTINCT s.nombre_solicito AS nombre FROM ordenes_compra_items i
+       JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = i.respuesta_item_id
+       JOIN solicitud_cotizacion_respuestas sr ON sr.id = ri.respuesta_id
+       JOIN solicitudes_cotizacion s ON s.id = sr.solicitud_id
+      WHERE i.oc_id = ? AND s.nombre_solicito IS NOT NULL LIMIT 1`, [r.id]);
+  const [refs] = await pool.query(
+    `SELECT COALESCE(NULLIF(TRIM(rf.descripcion), ''), i.observaciones) AS d FROM ordenes_compra_items i
+       LEFT JOIN refacciones rf ON rf.id = i.refaccion_id WHERE i.oc_id = ? ORDER BY i.id`, [r.id]);
+  const [prov] = await pool.query('SELECT nombre, forma_pago_comercial AS fp FROM proveedores WHERE id = ?', [r.proveedor_id]);
+  const equipo = (r.observacion || '').trim();
+  return {
+    referencia: (eq.length && eq[0].ref) || '',
+    observaciones: equipo,
+    elaboro: (sol.length && sol[0].nombre) || '',
+    formaPago: (prov.length && prov[0].fp) || FORMA_PAGO_COMERCIAL_DEFAULT_,
+    poliza: ocProv.polizaGasto_({ folio: r.factura_folio, proveedor: prov.length ? prov[0].nombre : '', refacciones: refs.map((x) => x.d), equipo }),
+  };
+}
+
 async function gastosPorConvertir_() {
   const [rows] = await pool.query(
     `SELECT o.*, e.nombre AS e_nombre,
@@ -9595,7 +9631,9 @@ async function gastosPorConvertir_() {
     const fecha = fechaSoloOrNull(r.factura_fecha);
     if (!fecha) { await falla('La factura no trae fecha.'); continue; }
     if (!r.factura_folio) { await falla('La factura no trae folio.'); continue; }
+    const extra = await datosAdicionalesGasto_(r);
     out.push({
+      ...extra,
       id: r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
       ocSerie: serie || '', ocFolio: folio, facturaSerie: r.factura_serie || '', facturaFolio: r.factura_folio,
       fechaFactura: fecha, fechaRecepcion: fechaSoloOrNull(r.entrega) || fecha,
@@ -9698,7 +9736,7 @@ async function getProveedores(code, nombreUsuario) {
   const [rows] = await pool.query(`
     SELECT id AS Id, nombre AS Nombre, correo AS Correo, telefono AS Telefono,
            contacto AS Contacto, marcas AS Marcas, notas AS Notas, codigo_comercial AS CodigoComercial,
-           rfc AS Rfc, domicilio AS Domicilio
+           rfc AS Rfc, domicilio AS Domicilio, forma_pago_comercial AS FormaPagoComercial
     FROM proveedores
     ORDER BY nombre
   `);
@@ -9728,6 +9766,7 @@ async function getProveedores(code, nombreUsuario) {
     Marcas: r.Marcas || '',
     Notas: r.Notas || '',
     CodigoComercial: r.CodigoComercial || '',
+    FormaPagoComercial: r.FormaPagoComercial || '',
     Rfc: r.Rfc || '',
     Domicilio: r.Domicilio || '',
     Contactos: contactosPorProveedor[r.Id] || [],
@@ -9772,6 +9811,10 @@ async function guardarProveedor(code, nombreUsuario, id, data) {
         [nombre, correo, telefono, contacto, marcas, notas, codigoComercial, rfc, domicilio]
       );
       proveedorId = result.insertId;
+    }
+    // Forma de pago del gasto en Comercial (nov-2026; vacío = BAJIO SPEI). Si no viene (Panel viejo), se conserva.
+    if (Object.prototype.hasOwnProperty.call(data, 'formaPagoComercial')) {
+      await pool.query('UPDATE proveedores SET forma_pago_comercial = ? WHERE id = ?', [String(data.formaPagoComercial || '').trim().toUpperCase().slice(0, 60) || null, proveedorId]);
     }
 
     // Reemplaza por completo los contactos adicionales (borra y vuelve a

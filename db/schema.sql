@@ -3453,3 +3453,13 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'ordenes_compra' AND column_name = 'gasto_oc_folio');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE ordenes_compra ADD COLUMN gasto_oc_serie VARCHAR(10) DEFAULT NULL, ADD COLUMN gasto_oc_folio BIGINT DEFAULT NULL, ADD COLUMN gasto_paso VARCHAR(80) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Datos que el agente pone en el GASTOS EN PESOS de Comercial (nov-2026, Carlos):
+-- maquinaria.referencia_comercial: "Referencia" del gasto (lista fija: VRZ, PROV, MTY, LIMONES, CARIGE).
+-- proveedores.forma_pago_comercial: "Forma de Pago" del gasto (vacío = BAJIO SPEI).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'referencia_comercial');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE maquinaria ADD COLUMN referencia_comercial VARCHAR(20) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'proveedores' AND column_name = 'forma_pago_comercial');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE proveedores ADD COLUMN forma_pago_comercial VARCHAR(60) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

@@ -338,6 +338,25 @@ function nombreCortoProveedor_(nombre) {
   for (let i = 0; i < 6 && sufijos.test(n); i++) n = n.replace(sufijos, '').trim();
   return n || String(nombre || '').trim();
 }
+// "Nombre de la Póliza Contable" del gasto en Comercial (como lo capturan a mano):
+// "F-10389 SAMEI, RETEN, RODAMIENTO AF597" = F-folio factura, proveedor corto,
+// refacciones y equipo sin guion. Máximo 50 caracteres (campo de Comercial):
+// si no cabe, se recortan las refacciones, nunca el folio ni el equipo.
+function polizaGasto_({ folio, proveedor, refacciones, equipo, max = 50 }) {
+  const ini = ('F-' + String(folio || '').trim() + ' ' + nombreCortoProveedor_(proveedor)).trim();
+  const eq = String(equipo || '').toUpperCase().replace(/[\s-]+/g, '');
+  const refs = [...new Set((refacciones || []).map((r) => String(r || '').trim().toUpperCase()).filter(Boolean))];
+  const armar = (lista) => [ini].concat(lista.length ? [lista.join(', ')] : []).join(', ') + (eq ? ' ' + eq : '');
+  let lista = refs.slice();
+  while (lista.length > 1 && armar(lista).length > max) lista.pop();
+  let t = armar(lista);
+  if (t.length > max && lista.length === 1) {
+    const sobra = t.length - max;
+    lista = [lista[0].slice(0, Math.max(0, lista[0].length - sobra)).trim()];
+    t = armar(lista.filter(Boolean));
+  }
+  return t.slice(0, max);
+}
 function dineroArchivo_(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -389,7 +408,7 @@ function revisarCfdiContraOc(cfdi, oc) {
 
 module.exports = {
   rutaAlmacenFactura_,
-  nombreCortoProveedor_,
+  nombreCortoProveedor_, polizaGasto_,
   calcularTotales, importeConLetra, observacionDeUnidad, generarPdfOc, estamparNotaFactura, leerCfdi, revisarCfdiContraOc,
   fechaOc_, IVA_POR_OMISION,
 };

@@ -21311,7 +21311,7 @@ function renderSolicitudesCotizacion(){
   }
   tbody.innerHTML = visibles.map(function(s){
     const estadoMostrado = estadoMostradoCot(s);
-    const estadoCls = estadoMostrado === 'cancelada' ? 'danger' : (estadoMostrado === 'autorizada' ? 'info' : (estadoMostrado === 'respondida' ? 'done' : 'progress'));
+    const estadoCls = estadoMostrado === 'cancelada' ? 'danger' : (estadoMostrado === 'autorizada' ? 'done' : (estadoMostrado === 'respondida' ? 'info' : 'progress'));   // autorizada = verde, respondida = azul
     const numRespuestas = (s.Respuestas || []).length;
     const estadoLabel = estadoMostrado === 'cancelada'
       ? 'Cancelada'

@@ -3638,7 +3638,7 @@
           <ul id="cot-ref-lista" class="mnt-ref-lista"></ul>
         </div>
         <div class="maq-field"><label>Mensaje para el proveedor (opcional)</label><textarea id="cot-f-mensaje" placeholder="Ej. Favor de cotizar lo antes posible, entrega en..."></textarea></div>
-        <div class="maq-field"><label>Tu nombre *</label><input type="text" id="cot-f-nombre" placeholder="Quién genera la solicitud"></div>
+        <div class="maq-field"><label>Solicita (tu usuario del Panel)</label><input type="text" id="cot-f-nombre" readonly tabindex="-1" style="background:transparent;opacity:.8;" title="Se llena solo con el usuario del Panel: decide qué PC carga la compra a Comercial"></div>
         <div class="maq-modal-actions">
           <button class="maq-save-btn" id="cot-btn-generar">Generar solicitud</button>
         </div>
@@ -21807,7 +21807,7 @@ document.getElementById('cot-btn-generar').addEventListener('click', function(){
     return;
   }
   if(!nombreSolicito){
-    statusEl.textContent = 'Escribe quién genera la solicitud.';
+    statusEl.textContent = 'No sé qué usuario del Panel eres: vuelve a entrar con tu usuario.';
     statusEl.className = 'maq-modal-status show err';
     return;
   }

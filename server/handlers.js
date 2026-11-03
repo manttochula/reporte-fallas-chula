@@ -8849,12 +8849,22 @@ async function agenteDeClave_(token) {
   return { id: r[0].id, principal: false, nombre: r[0].nombre, usuarios: usuariosDeJson_(r[0].usuarios) };
 }
 // Filtro: ¿esta PC atiende la compra de este usuario?
+// Nov-2026: las solicitudes viejas traen el nombre escrito a mano ("EDITH DOMINGUEZ"):
+// cuenta como del usuario EDITH si empieza con ese usuario + espacio (el más largo gana).
+function usuarioDeDueno_(dueno, usuarios) {
+  const d = normUsuario_(dueno);
+  if (!d) return '';
+  if (usuarios.has(d)) return d;
+  let mejor = '';
+  usuarios.forEach((u) => { if (u && d.startsWith(u + ' ') && u.length > mejor.length) mejor = u; });
+  return mejor;
+}
 async function filtroAgente_(ag) {
   if (!ag) return () => true;   // uso interno / pruebas: todo
   const [rows] = await pool.query('SELECT usuarios FROM agentes_comercial WHERE activo = 1');
   const asignados = new Set(); rows.forEach((r) => usuariosDeJson_(r.usuarios).forEach((u) => asignados.add(u)));
   const mios = new Set(ag.usuarios || []);
-  return (dueno) => { const d = normUsuario_(dueno); return ag.principal ? !asignados.has(d) : mios.has(d); };
+  return (dueno) => { const u = usuarioDeDueno_(dueno, asignados); return ag.principal ? !u : mios.has(u); };
 }
 // Dueño de una OC al proveedor = quien hizo la solicitud de cotización de sus piezas.
 const SQL_DUENO_OC_ = `(SELECT s.nombre_solicito FROM ordenes_compra_items di
@@ -10153,7 +10163,9 @@ async function crearSolicitudCotizacion(code, nombreUsuario, data) {
   try {
     const proveedorId = Number(data.proveedorId);
     const items = Array.isArray(data.items) ? data.items : [];
-    const nombreSolicito = (data.nombreSolicito || '').toString().trim();
+    // Nov-2026: quien solicita = usuario del Panel que la genera (así el reparto entre PCs
+    // y la firma "Solicita" no dependen de lo que se escriba a mano).
+    const nombreSolicito = ((nombreUsuario || '').toString().trim() || (data.nombreSolicito || '').toString().trim()).toUpperCase();
     const orden = (data.orden || '').toString().trim();
 
     if (!orden) return { success: false, error: 'Selecciona la orden de trabajo relacionada.' };
@@ -10205,7 +10217,9 @@ async function crearSolicitudesCotizacion(code, nombreUsuario, data) {
   data = data || {};
   try {
     const items = Array.isArray(data.items) ? data.items : [];
-    const nombreSolicito = (data.nombreSolicito || '').toString().trim();
+    // Nov-2026: quien solicita = usuario del Panel que la genera (así el reparto entre PCs
+    // y la firma "Solicita" no dependen de lo que se escriba a mano).
+    const nombreSolicito = ((nombreUsuario || '').toString().trim() || (data.nombreSolicito || '').toString().trim()).toUpperCase();
     const orden = (data.orden || '').toString().trim();
 
     if (!orden) return { success: false, error: 'Selecciona la orden de trabajo relacionada.' };

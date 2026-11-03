@@ -9646,6 +9646,8 @@ async function gastosPorConvertir_() {
 // resultados: [{ id, ok, mensaje, paso }]
 async function agenteGastosResultado(token, resultados) {
   if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  // PowerShell 5.1 a veces manda el arreglo como { value: [...], Count: n } (2-nov: la OC quedó "pendiente").
+  if (resultados && !Array.isArray(resultados) && Array.isArray(resultados.value)) resultados = resultados.value;
   let ok = 0, err = 0;
   for (const r of (Array.isArray(resultados) ? resultados : [])) {
     const id = Number(r.id) || 0;

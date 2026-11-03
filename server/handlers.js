@@ -46,7 +46,9 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // Panel, ver requierePermisoAvanceHuerta_) para dejar calibrar el mapa
 // desde el celular -- no cualquier operador puede recalibrar, solo a quien
 // Carlos le dé este permiso.
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros'];
+// 'costo_refacciones' (nov-2026) no es pestaña: es el permiso para ver la columna
+// "Costo refacciones" en Órdenes (lo ya registrado como gasto en Comercial).
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'costo_refacciones'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -728,12 +730,14 @@ async function getReportesTaller(code, nombreUsuario) {
   // igual que siempre -- Taller.html no distingue secciones.
   const nombre = (nombreUsuario || '').toString().trim();
   let seccionesPermitidas = null;
+  let veCosto = false;
   if (nombre) {
     const [filaUsuario] = await pool.query(
       'SELECT panel_permisos FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
       [nombre]
     );
     if (filaUsuario.length > 0 && filaUsuario[0].panel_permisos) {
+      veCosto = tienePermisoPanel_(filaUsuario[0].panel_permisos, 'costo_refacciones', 'visualizar');
       seccionesPermitidas = ['principal', 'soldadura', 'automotriz', 'llantas', 'terceros'].filter((seccion) =>
         tienePermisoPanel_(filaUsuario[0].panel_permisos, permisoDeSeccionOrden_(seccion), 'visualizar')
       );
@@ -762,7 +766,33 @@ async function getReportesTaller(code, nombreUsuario) {
   }
   const where = condiciones.length ? ' WHERE ' + condiciones.join(' AND ') : '';
   const [rows] = await pool.query(REPORTE_SELECT + where + ' ORDER BY reportes.id DESC', params);
-  return normalizaFilas(rows);
+  const filas = normalizaFilas(rows);
+  // Costo de refacciones (nov-2026): solo a quien tiene el permiso; nunca sale del servidor si no.
+  if (veCosto) {
+    const costos = await costoRefaccionesPorOrden_();
+    filas.forEach((f) => { const c = costos[f.Orden]; f.CostoRefacciones = c ? c.total : null; f.CostoRefaccionesDetalle = c ? c.detalle : ''; });
+  }
+  return filas;
+}
+
+// Costo de refacciones por orden = total de las facturas de sus OC al proveedor que YA
+// quedaron registradas como GASTOS EN PESOS en Comercial (gasto_estado = 'convertido').
+async function costoRefaccionesPorOrden_() {
+  const [rows] = await pool.query(
+    `SELECT o.orden, o.serie, o.folio, o.factura_serie, o.factura_folio, COALESCE(o.factura_total, o.total) AS total, p.nombre AS proveedor
+       FROM ordenes_compra o LEFT JOIN proveedores p ON p.id = o.proveedor_id
+      WHERE o.gasto_estado = 'convertido' AND o.estado <> 'cancelada' AND o.orden IS NOT NULL
+      ORDER BY o.orden, o.id`);
+  const res = {};
+  for (const r of rows) {
+    const c = res[r.orden] || (res[r.orden] = { total: 0, detalle: [] });
+    const t = Number(r.total) || 0;
+    c.total = Math.round((c.total + t) * 100) / 100;
+    const fac = ((r.factura_serie || '') + ' ' + (r.factura_folio || '')).trim();
+    c.detalle.push('Gasto ' + (fac || (r.serie + ' ' + r.folio)) + ' · ' + (r.proveedor || '') + ' · $' + t.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  }
+  Object.values(res).forEach((c) => { c.detalle = c.detalle.join('\n'); });
+  return res;
 }
 
 async function actualizarOrden(code, nombreUsuario, orden, campos) {

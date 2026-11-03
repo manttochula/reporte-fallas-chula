@@ -1626,6 +1626,7 @@
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
                 <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
+                <th data-key="CostoRefacciones" data-col="costo_refacciones" title="Facturas de refacciones de esta orden ya registradas como gasto en Comercial">Costo refacciones <span class="arrow"></span></th>
               </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -1722,6 +1723,7 @@
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
                 <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
+                <th data-key="CostoRefacciones" data-col="costo_refacciones" title="Facturas de refacciones de esta orden ya registradas como gasto en Comercial">Costo refacciones <span class="arrow"></span></th>
               </tr>
             </thead>
             <tbody id="table-body-soldadura"></tbody>
@@ -1817,6 +1819,7 @@
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
                 <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
+                <th data-key="CostoRefacciones" data-col="costo_refacciones" title="Facturas de refacciones de esta orden ya registradas como gasto en Comercial">Costo refacciones <span class="arrow"></span></th>
               </tr>
             </thead>
             <tbody id="table-body-automotriz"></tbody>
@@ -1912,6 +1915,7 @@
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
                 <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
+                <th data-key="CostoRefacciones" data-col="costo_refacciones" title="Facturas de refacciones de esta orden ya registradas como gasto en Comercial">Costo refacciones <span class="arrow"></span></th>
               </tr>
             </thead>
             <tbody id="table-body-llantas"></tbody>
@@ -2007,6 +2011,7 @@
                 <th data-col="evidencia">Evidencia</th>
                 <th data-col="visto_bueno">Visto bueno</th>
                 <th data-col="reporte_claro" title="¿El reporte se entendía para que el área mecánica fuera preparada?">Reporte claro</th>
+                <th data-key="CostoRefacciones" data-col="costo_refacciones" title="Facturas de refacciones de esta orden ya registradas como gasto en Comercial">Costo refacciones <span class="arrow"></span></th>
               </tr>
             </thead>
             <tbody id="table-body-terceros"></tbody>
@@ -4500,6 +4505,7 @@
             <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
             <div class="usr-permiso-row"><label>Indicadores</label><select id="usr-perm-indicadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (catálogo de semanas)</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label title="Columna en Órdenes con el costo de las refacciones ya registradas como gasto en Comercial">Costo de refacciones (columna en Órdenes)</label><select id="usr-perm-costo_refacciones" class="usr-perm-select"><option value="">No lo ve</option><option value="visualizar">Lo ve</option></select></div>
           </div>
         </div>
         <div class="usr-permisos-panel" id="usr-huertas-ordenes-wrap">
@@ -4903,7 +4909,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'avance_huerta', 'indicadores', 'usuarios'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'avance_huerta', 'indicadores', 'usuarios', 'costo_refacciones'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -5913,6 +5919,7 @@ function filaOrdenHtml_(r){
     <td data-col="evidencia">${renderEvidenciaCelda(r)}</td>
     <td data-col="visto_bueno">${r.VistoBueno === 'Si' ? '<span class="vb-yes">Si</span>' : '<span class="vb-no">-</span>'}</td>
     <td data-col="reporte_claro" data-ord-claro-celda="${escapeHtml(orden)}">${ordClaroHtml_(r)}</td>
+    <td class="readonly-cell" data-col="costo_refacciones" style="text-align:right;white-space:nowrap;"${r.CostoRefaccionesDetalle ? ' title="' + escapeHtml(r.CostoRefaccionesDetalle) + '"' : ''}>${r.CostoRefacciones !== null && r.CostoRefacciones !== undefined ? '$' + Number(r.CostoRefacciones).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</td>
   </tr>
   `;
 }
@@ -6197,7 +6204,10 @@ const ORD_COLUMNAS = [
   { id: 'evidencia', label: 'Evidencia' },
   { id: 'visto_bueno', label: 'Visto bueno' },
   { id: 'reporte_claro', label: 'Reporte claro' },
+  // Solo con el permiso "Costo de refacciones" (Usuarios); el servidor tampoco manda el dato sin él.
+  { id: 'costo_refacciones', label: 'Costo refacciones', permiso: 'costo_refacciones' },
 ];
+function columnaOrdPermitida_(col){ return !col.permiso || puedeVerPestana(col.permiso); }
 const ORD_COL_LS_KEY = 'panel_columnas_ordenes_v1';
 const ORD_COL_DEFAULT = { ocultas: [], fijadas: ['orden'] };
 
@@ -6238,7 +6248,7 @@ function aplicarEstadoColumnasOrdEnTabla_(tableId){
   if(!table) return;
 
   ORD_COLUMNAS.forEach(function(col){
-    const oculta = ORD_COL_ESTADO.ocultas.has(col.id);
+    const oculta = ORD_COL_ESTADO.ocultas.has(col.id) || !columnaOrdPermitida_(col);
     table.querySelectorAll('[data-col="' + col.id + '"]').forEach(function(el){
       el.style.display = oculta ? 'none' : '';
     });
@@ -6255,7 +6265,7 @@ function aplicarEstadoColumnasOrdEnTabla_(tableId){
   let zIndex = 5;
   let ultimaFijadaId = null;
   ORD_COLUMNAS.forEach(function(col){
-    if(ORD_COL_ESTADO.ocultas.has(col.id)) return;
+    if(ORD_COL_ESTADO.ocultas.has(col.id) || !columnaOrdPermitida_(col)) return;
     if(ORD_COL_ESTADO.fijadas.indexOf(col.id) === -1) return;
     const headEl = table.querySelector('thead [data-col="' + col.id + '"]');
     if(!headEl) return;
@@ -6298,7 +6308,7 @@ function renderColumnasPanelOrd(sufijo){
   sufijo = sufijo || '';
   const cont = document.getElementById('ord-columnas' + sufijo + '-lista');
   if(!cont) return;
-  cont.innerHTML = ORD_COLUMNAS.map(function(col){
+  cont.innerHTML = ORD_COLUMNAS.filter(columnaOrdPermitida_).map(function(col){
     const visible = !ORD_COL_ESTADO.ocultas.has(col.id);
     const fijada = ORD_COL_ESTADO.fijadas.indexOf(col.id) !== -1;
     const etiqueta = etiquetaColumnaOrd_(col, sufijo);

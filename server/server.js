@@ -280,5 +280,8 @@ app.listen(PORT, () => {
   // (30/7/0 días; cada aviso una sola vez). Mismo ritmo que preventivos.
   const revisarSeguros = () => handlers.revisarAvisosSeguros_().catch((err) => console.error('[seguros] Falló la revisión de avisos:', err.message));
   setTimeout(revisarSeguros, 60 * 1000);
+
+  // Una sola vez (nov-2026): OC ya generadas → nota con 2 firmas (Solicita / Autoriza).
+  setTimeout(() => handlers.migrarDosFirmasOc_().catch((err) => console.error('[oc] Falló el cambio a 2 firmas:', err.message)), 20 * 1000);
   setInterval(revisarSeguros, INTERVALO_REVISION_PREVENTIVOS_MS);
 });

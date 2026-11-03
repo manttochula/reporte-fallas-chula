@@ -3463,3 +3463,10 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'proveedores' AND column_name = 'forma_pago_comercial');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE proveedores ADD COLUMN forma_pago_comercial VARCHAR(60) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nota contable con 2 firmas (nov-2026, Carlos): ordenes_compra.firma = quien SOLICITA
+-- (quien hizo la solicitud de cotización); firma_autoriza = quien AUTORIZÓ (usuario del
+-- Panel que dio "Aut"). Las OC anteriores (sin firma_autoriza) siguen con una sola "Firma".
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'ordenes_compra' AND column_name = 'firma_autoriza');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE ordenes_compra ADD COLUMN firma_autoriza VARCHAR(150) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

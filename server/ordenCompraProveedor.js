@@ -262,8 +262,10 @@ async function estamparNotaFactura(pdfBuffer, nota) {
     ['Segmento', texto_(nota.segmento), false],
     ['Observaciones:', texto_(nota.observacion), false, true],
     ['Empresa a contabilizar:', texto_(nota.empresaSiglas), false, true],
-    ['Firma:', texto_(nota.firma), false],
-  ];
+  ].concat(texto_(nota.firmaAutoriza)
+    // Dos firmas (nov-2026): quien solicita (hizo la cotización) y quien autoriza.
+    ? [['Solicita:', texto_(nota.firma), false], ['Autoriza:', texto_(nota.firmaAutoriza), false]]
+    : [['Firma:', texto_(nota.firma), false]]);
   const ALTO_FILA = 15;
   const ALTO_NOTA = filas.length * ALTO_FILA + 26;
   const paginas = pdf.getPages();

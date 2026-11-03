@@ -9094,7 +9094,7 @@ async function ultimoFolioOcProveedor_(empresaId) {
 async function partidasPendientesOcProveedor_(orden, proveedorId) {
   const [rows] = await pool.query(
     `SELECT ri.id AS respuestaItemId, sci.cantidad, ri.precio_cotizado AS precio, ri.iva_pct AS ivaPct, r.descuento_pct AS descuentoPct,
-            ri.autorizado_por AS autorizadoPor, ref.id AS refaccionId, ref.codigo, ref.no_parte AS noParte, ref.descripcion
+            ri.autorizado_por AS autorizadoPor, s.nombre_solicito AS solicito, ref.id AS refaccionId, ref.codigo, ref.no_parte AS noParte, ref.descripcion
      FROM solicitud_cotizacion_respuesta_items ri
      JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
      JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
@@ -9118,6 +9118,7 @@ async function partidasPendientesOcProveedor_(orden, proveedorId) {
     descuentoPct: x.descuentoPct === null ? null : Number(x.descuentoPct),
     ivaPct: x.ivaPct === null ? null : Number(x.ivaPct),
     autorizadoPor: x.autorizadoPor || '',
+    solicito: x.solicito || '',
   }));
 }
 
@@ -9180,8 +9181,10 @@ async function prepararOcProveedor(code, nombreUsuario, orden, proveedorId) {
   const [empresas] = await pool.query('SELECT id, nombre, siglas, rfc, domicilio FROM empresas ORDER BY nombre');
   const cuentas = await getCuentasContables(code, nombreUsuario);
   const [huertas] = await pool.query('SELECT nombre FROM huertas ORDER BY nombre');
-  const firmas = partidas.map((p) => p.autorizadoPor).filter(Boolean);
-  const firma = firmas.length ? firmas.sort((a, b) => firmas.filter((x) => x === b).length - firmas.filter((x) => x === a).length)[0] : (nombreUsuario || '');
+  // Nota con 2 firmas (nov-2026): Solicita = quien hizo la solicitud de cotización;
+  // Autoriza = usuario del Panel que dio "Aut" (el que más piezas autorizó).
+  const firmaAutoriza = masComun_(partidas.map((p) => p.autorizadoPor));
+  const firma = masComun_(partidas.map((p) => p.solicito)) || (nombreUsuario || '');
   const empresaId = ctx.empresaId || null;
   const prov = provRows[0];
   const totales = ocProv.calcularTotales(partidas.filter((p) => p.precio !== null));
@@ -9210,6 +9213,7 @@ async function prepararOcProveedor(code, nombreUsuario, orden, proveedorId) {
     huertas: [OCP_HUERTA_DEFAULT_].concat(huertas.map((h) => h.nombre).filter((h) => h !== OCP_HUERTA_DEFAULT_)),
     observacion: ocProv.observacionDeUnidad(ctx.unidad, ctx.codigoUnidad),
     firma,
+    firmaAutoriza,
     seriesPorEmpresa: Object.fromEntries(await Promise.all(empresas.map(async (e) => [e.id, { serie: await serieOcProveedor_(e.id), siguienteFolio: (await ultimoFolioOcProveedor_(e.id)) + 1 }]))),
     fecha: fechaHoyLocal_(),
   };
@@ -9232,6 +9236,7 @@ async function generarOcProveedor(code, nombreUsuario, data) {
   const huerta = t(data.huerta, 150).toUpperCase();
   const observacion = t(data.observacion, 255);
   const firma = t(data.firma, 150);
+  const firmaAutoriza = t(data.firmaAutoriza, 150);
   const fecha = t(data.fecha, 10) || fechaHoyLocal_();
   const serie = t(data.serie, 10) || OCP_SERIE_DEFAULT_;
   const folioPedido = data.folio === undefined || data.folio === null || data.folio === '' ? null : Number(data.folio);
@@ -9251,7 +9256,7 @@ async function generarOcProveedor(code, nombreUsuario, data) {
   const pe = await cuentaPorEmpresa_(cuentaId, empresaId);
   const segmento = t(data.segmento, 20) || (pe && pe.segmento) || cuenta.segmento || null;
   if (!huerta) return { success: false, error: 'Escribe la huerta de la nota (ej. PRORRATEABLES).' };
-  if (!firma) return { success: false, error: 'Escribe quién firma la nota.' };
+  if (!firma) return { success: false, error: 'Escribe quién solicita (firma de la nota).' };
 
   const pendientes = await partidasPendientesOcProveedor_(orden, proveedorId);
   const ids = Array.isArray(data.respuestaItemIds) && data.respuestaItemIds.length ? data.respuestaItemIds.map(Number) : null;
@@ -9275,10 +9280,10 @@ async function generarOcProveedor(code, nombreUsuario, data) {
     token = crypto.randomBytes(24).toString('hex');
     const [res] = await con.query(
       `INSERT INTO ordenes_compra (token, empresa_id, proveedor_id, orden, serie, folio, fecha, estado, cuenta_nombre, cuenta_numero, segmento, descripcion_oc,
-         huerta, observacion, empresa_siglas, firma, subtotal, descuento, iva, total, generado_por)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'generada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         huerta, observacion, empresa_siglas, firma, firma_autoriza, subtotal, descuento, iva, total, generado_por)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'generada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [token, empresaId, proveedorId, orden, serie, folio, fecha, cuenta.nombre, cuenta.numero, segmento, cuenta.descripcion_oc || ('SERVICIO ' + cuenta.nombre),
-        huerta, observacion || null, emp.siglas, firma, tot.subtotal, tot.descuento, tot.iva, tot.total, (nombreUsuario || '').toString().trim() || null]
+        huerta, observacion || null, emp.siglas, firma, firmaAutoriza || null, tot.subtotal, tot.descuento, tot.iva, tot.total, (nombreUsuario || '').toString().trim() || null]
     );
     ocId = res.insertId;
     for (const p of tot.partidas) {
@@ -9351,6 +9356,7 @@ async function listarOcsProveedor_(filtro) {
     huerta: r.huerta || '',
     observacion: r.observacion || '',
     firma: r.firma || '',
+    firmaAutoriza: r.firma_autoriza || '',
     subtotal: Number(r.subtotal), descuento: Number(r.descuento), iva: Number(r.iva), total: Number(r.total),
     partidas: Number(r.partidas) || 0,
     piezas: Number(r.piezas) || 0,
@@ -9424,7 +9430,7 @@ async function datosOcCompletos_(token) {
     empresa: { nombre: o.e_nombre, nombreCorto: (o.e_nombre || '').split(',')[0], rfc: o.e_rfc || '', razonSocial: o.e_razon || o.e_nombre, domicilio: o.e_domicilio || '', usoCfdi: o.e_uso || '', autoriza: o.e_autoriza || '' },
     proveedor: { nombre: o.p_nombre, rfc: o.p_rfc || '', domicilio: o.p_domicilio || '', telefono: o.p_telefono || '', correo: o.p_correo || '' },
     descripcionOc: o.descripcion_oc || '', segmento: o.segmento || '', observacion: o.observacion || '',
-    cuentaNombre: o.cuenta_nombre || '', cuentaNumero: o.cuenta_numero || '', huerta: o.huerta || '', empresaSiglas: o.empresa_siglas || '', firma: o.firma || '',
+    cuentaNombre: o.cuenta_nombre || '', cuentaNumero: o.cuenta_numero || '', huerta: o.huerta || '', empresaSiglas: o.empresa_siglas || '', firma: o.firma || '', firmaAutoriza: o.firma_autoriza || '',
     partidas: items.map((i) => ({ observaciones: i.observaciones || '', cantidad: Number(i.cantidad), precio: Number(i.precio), importe: Number(i.importe) })),
     piezas: items.reduce((s, i) => s + Number(i.cantidad), 0),
     subtotal: Number(o.subtotal), descuento: Number(o.descuento), iva: Number(o.iva), total: Number(o.total),
@@ -9679,6 +9685,54 @@ async function pedirGastoComercial(code, nombreUsuario, id, ocSerie, ocFolio) {
   return { success: true };
 }
 
+// Una sola vez (nov-2026, Carlos): las OC que ya estaban generadas pasan a la nota con
+// 2 firmas: Solicita = quien hizo la solicitud de cotización (si no se sabe, quien generó
+// la OC) y Autoriza = quien dio "Aut" a sus piezas. Las que ya tienen factura se vuelven a
+// sellar desde el PDF original del proveedor (la sellada anterior se reemplaza).
+async function migrarDosFirmasOc_() {
+  const MARCA = 'oc_dos_firmas_2026_11';
+  const [m] = await pool.query('SELECT valor FROM configuracion WHERE clave = ?', [MARCA]);
+  if (m.length) return { success: true, yaHecho: true };
+  const [ocs] = await pool.query('SELECT id, token, firma, generado_por, factura_pdf_url, factura_uuid, factura_en FROM ordenes_compra WHERE firma_autoriza IS NULL');
+  let cambiadas = 0, reselladas = 0; const errores = [];
+  for (const o of ocs) {
+    const [its] = await pool.query(
+      `SELECT ri.autorizado_por AS aut, s.nombre_solicito AS sol FROM ordenes_compra_items i
+         JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = i.respuesta_item_id
+         JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+         JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+        WHERE i.oc_id = ?`, [o.id]);
+    const autoriza = masComun_(its.map((x) => x.aut)) || o.firma || '';
+    const solicita = masComun_(its.map((x) => x.sol)) || o.generado_por || o.firma || '';
+    if (!autoriza || !solicita) continue;
+    await pool.query('UPDATE ordenes_compra SET firma = ?, firma_autoriza = ? WHERE id = ?', [solicita.slice(0, 150), autoriza.slice(0, 150), o.id]);
+    cambiadas++;
+    if (o.factura_pdf_url) {
+      try {
+        const oc = await datosOcCompletos_(o.token);
+        const pdf = await leerArchivoComoBuffer_(o.factura_pdf_url);
+        const fec = o.factura_en ? fechaSoloOrNull(o.factura_en) : null;
+        const sellada = await ocProv.estamparNotaFactura(pdf, {
+          cuentaNombre: oc.cuentaNombre, cuentaNumero: oc.cuentaNumero, huerta: oc.huerta, segmento: oc.segmento,
+          observacion: oc.observacion, empresaSiglas: oc.empresaSiglas, firma: oc.firma, firmaAutoriza: oc.firmaAutoriza, totalPiezas: Math.round(oc.piezas * 100) / 100,
+          ocTexto: 'OC ' + oc.serie + ' ' + oc.folio + (oc.orden ? ' · Orden ' + oc.orden : ''),
+          fechaTexto: 'Factura recibida ' + (fec ? ocProv.fechaOc_(fec) : '') + (o.factura_uuid ? ' · UUID ' + String(o.factura_uuid).slice(0, 8) + '…' : ''),
+        });
+        const url = await guardarArchivo_('data:application/pdf;base64,' + sellada.buffer.toString('base64'));
+        await pool.query('UPDATE ordenes_compra SET factura_sellada_url = ? WHERE id = ?', [url, o.id]);
+        reselladas++;
+      } catch (err) { errores.push('OC ' + o.id + ': ' + (err.message || err)); }
+    }
+  }
+  await pool.query('INSERT INTO configuracion (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)', [MARCA, JSON.stringify({ cambiadas, reselladas, errores, en: new Date().toISOString() }).slice(0, 2000)]);
+  if (cambiadas) console.log('[oc] Dos firmas: ' + cambiadas + ' OC actualizadas, ' + reselladas + ' facturas selladas de nuevo' + (errores.length ? '; errores: ' + errores.join(' | ') : ''));
+  return { success: true, cambiadas, reselladas, errores };
+}
+function masComun_(lista) {
+  const l = (lista || []).map((x) => (x || '').toString().trim()).filter(Boolean);
+  return l.length ? l.slice().sort((a, b) => l.filter((x) => x === b).length - l.filter((x) => x === a).length)[0] : '';
+}
+
 async function subirFacturaOc(token, data) {
   data = data || {};
   const oc = await datosOcCompletos_(token);
@@ -9705,7 +9759,7 @@ async function subirFacturaOc(token, data) {
   try {
     const sellada = await ocProv.estamparNotaFactura(pdf, {
       cuentaNombre: oc.cuentaNombre, cuentaNumero: oc.cuentaNumero, huerta: oc.huerta, segmento: oc.segmento,
-      observacion: oc.observacion, empresaSiglas: oc.empresaSiglas, firma: oc.firma, totalPiezas: Math.round(oc.piezas * 100) / 100,
+      observacion: oc.observacion, empresaSiglas: oc.empresaSiglas, firma: oc.firma, firmaAutoriza: oc.firmaAutoriza, totalPiezas: Math.round(oc.piezas * 100) / 100,
       ocTexto: 'OC ' + oc.serie + ' ' + oc.folio + (oc.orden ? ' · Orden ' + oc.orden : ''),
       fechaTexto: 'Factura recibida ' + ocProv.fechaOc_(fechaHoyLocal_()) + (cfdi.uuid ? ' · UUID ' + cfdi.uuid.slice(0, 8) + '…' : ''),
     });
@@ -11548,6 +11602,7 @@ module.exports = {
   crearSolicitudesCotizacion,
   getSolicitudesCotizacion,
   getOrdenesPorCotizar,
+  migrarDosFirmasOc_,
   getSolicitudCotizacionPublica,
   responderCotizacion,
   aplicarPreciosCotizacion,

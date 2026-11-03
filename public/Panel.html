@@ -21646,7 +21646,7 @@ function abrirModalCotizacion(){
   document.getElementById('cot-f-orden-buscar').value = '';
   poblarSelectOrdenCot('');
   document.getElementById('cot-f-mensaje').value = '';
-  document.getElementById('cot-f-nombre').value = '';
+  document.getElementById('cot-f-nombre').value = PANEL_USUARIO || '';   // quien solicita = usuario del Panel (firma "Solicita" de la nota)
   document.getElementById('cot-resultado').style.display = 'none';
   document.getElementById('cot-resultado-lista').innerHTML = '';
   const statusEl = document.getElementById('cot-modal-status');
@@ -22317,7 +22317,7 @@ function ocResumenHtml_(oc){
   return '<b>OC ' + escapeHtml(oc.serie + ' ' + oc.folio) + '</b> · ' + escapeHtml(oc.proveedor) + ' · ' + escapeHtml(oc.empresaSiglas || oc.empresa) +
     ' · ' + dineroOc_(oc.total) + ' · ' + oc.partidas + ' partida(s) <span class="ocp-estado ' + oc.estado + '">' + escapeHtml(OCP_ESTADOS_[oc.estado] || oc.estado) + '</span>' +
     '<div class="mnt-subtext">' + escapeHtml(fechaOcCorta_(oc.fecha)) + (oc.generadoPor ? ' · generó ' + escapeHtml(oc.generadoPor) : '') +
-    ' · Cuenta ' + escapeHtml(oc.cuentaNombre + ' ' + oc.cuentaNumero) + ' · Huerta ' + escapeHtml(oc.huerta) + ' · Firma ' + escapeHtml(oc.firma) +
+    ' · Cuenta ' + escapeHtml(oc.cuentaNombre + ' ' + oc.cuentaNumero) + ' · Huerta ' + escapeHtml(oc.huerta) + (oc.firmaAutoriza ? ' · Solicita ' + escapeHtml(oc.firma) + ' · Autoriza ' + escapeHtml(oc.firmaAutoriza) : ' · Firma ' + escapeHtml(oc.firma)) +
     (oc.facturaEn ? ' · factura ' + escapeHtml(new Date(oc.facturaEn).toLocaleString('es-MX')) + (oc.facturaNombre ? ' (' + escapeHtml(oc.facturaNombre) + ')' : '') : '') + '</div>';
 }
 
@@ -22392,7 +22392,8 @@ function pintarModalOcp_(d){
         '<span class="mnt-subtext">La orden dice: ' + escapeHtml(d.huertaOrden || '—') + '</span></div>' +
       '<div class="maq-field"><label>Segmento</label><input type="text" id="ocp-segmento" maxlength="20"></div>' +
       '<div class="maq-field"><label>Observaciones (nota)</label><input type="text" id="ocp-observacion" maxlength="255"></div>' +
-      '<div class="maq-field"><label>Firma (nota) *</label><input type="text" id="ocp-firma" maxlength="150"></div>' +
+      '<div class="maq-field"><label>Solicita (firma de la nota) *</label><input type="text" id="ocp-firma" maxlength="150" title="Quien hizo la solicitud de cotización"></div>' +
+      '<div class="maq-field"><label>Autoriza (firma de la nota)</label><input type="text" id="ocp-firma-autoriza" maxlength="150" title="Usuario del Panel que autorizó las piezas"></div>' +
     '</div>' +
     '<div class="maq-field-row">' +
       '<div class="maq-field"><label>Serie</label><input type="text" id="ocp-serie" maxlength="10"></div>' +
@@ -22409,6 +22410,7 @@ function pintarModalOcp_(d){
   document.getElementById('ocp-huerta').value = d.huerta || '';
   document.getElementById('ocp-observacion').value = d.observacion || '';
   document.getElementById('ocp-firma').value = d.firma || '';
+  document.getElementById('ocp-firma-autoriza').value = d.firmaAutoriza || '';
   document.getElementById('ocp-fecha').value = d.fecha;
   const aplicarEmpresa = function(){
     const e = d.empresas.find(function(x){ return String(x.id) === selEmp.value; });
@@ -22440,7 +22442,7 @@ function pintarModalOcp_(d){
       respuestaItemIds: d.partidas.map(function(p){ return p.respuestaItemId; }),
       empresaId: Number(selEmp.value) || 0, cuentaContableId: Number(selCta.value) || 0,
       huerta: document.getElementById('ocp-huerta').value, segmento: document.getElementById('ocp-segmento').value, observacion: document.getElementById('ocp-observacion').value,
-      firma: document.getElementById('ocp-firma').value, serie: document.getElementById('ocp-serie').value,
+      firma: document.getElementById('ocp-firma').value, firmaAutoriza: document.getElementById('ocp-firma-autoriza').value, serie: document.getElementById('ocp-serie').value,
       folio: document.getElementById('ocp-folio').value, fecha: document.getElementById('ocp-fecha').value,
     };
     btn.disabled = true; btn.textContent = 'Generando...';

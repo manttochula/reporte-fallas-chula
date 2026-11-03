@@ -3223,6 +3223,7 @@
               <th>Proveedor</th>
               <th>Refacciones</th>
               <th>Estatus</th>
+              <th>Comercial</th>
               <th>Fecha</th>
               <th>Acciones</th>
             </tr>
@@ -21247,6 +21248,13 @@ let ALL_SOLICITUDES_COTIZACION = [];
 let cotFormItems = []; // [{refaccionId, cantidad, proveedorIds}]
 const COT_FILTRO_ESTATUS = new Set(['pendiente', 'respondida', 'autorizada']); // 'cancelada' oculta por default
 
+// Columna "Comercial": en qué va la solicitud con CONTPAQi (OC cargada, factura, gasto).
+function comercialCotHtml_(c){
+  if(!c) return '<span class="mnt-subtext">—</span>';
+  const cls = c.estado === 'convertido' ? 'done' : (c.estado === 'error' ? 'danger' : (c.estado === 'cargada' || c.estado === 'facturada' ? 'info' : 'progress'));
+  return '<span class="status-pill ' + cls + '"' + (c.detalle ? ' title="' + escapeHtml(c.detalle) + '"' : '') + '>' + (c.estado === 'error' ? '⚠ ' : (c.estado === 'convertido' ? '✓ ' : '')) + escapeHtml(c.texto) + '</span>';
+}
+
 function estadoMostradoCot(s){
   if(s.Estado === 'cancelada') return 'cancelada';
   const tieneAutorizado = (s.Respuestas || []).some(function(r){
@@ -21273,7 +21281,7 @@ document.querySelectorAll('#cot-filtro-estatus .cot-filtro-chip').forEach(functi
 
 function cargarSolicitudesCotizacion(onListo){
   const tbody = document.getElementById('cot-table-body');
-  tbody.innerHTML = '<tr><td colspan="7"><div class="empty">Cargando...</div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
     .withSuccessHandler(function(records){
       SOLICITUDES_CARGADAS = true;
@@ -21282,7 +21290,7 @@ function cargarSolicitudesCotizacion(onListo){
       if(onListo) onListo();
     })
     .withFailureHandler(function(){
-      tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No se pudieron cargar las solicitudes de cotización.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty">No se pudieron cargar las solicitudes de cotización.</div></td></tr>';
     })
     .getSolicitudesCotizacion(ACCESS_CODE, PANEL_USUARIO);
 }
@@ -21294,11 +21302,11 @@ function renderSolicitudesCotizacion(){
     ALL_SOLICITUDES_COTIZACION.filter(function(s){ return estadoMostradoCot(s) === 'pendiente'; }).length + ' pendientes' +
     (visibles.length !== ALL_SOLICITUDES_COTIZACION.length ? ' · ' + visibles.length + ' visibles con el filtro actual' : '');
   if(ALL_SOLICITUDES_COTIZACION.length === 0){
-    tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No hay solicitudes de cotización todavía.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty">No hay solicitudes de cotización todavía.</div></td></tr>';
     return;
   }
   if(visibles.length === 0){
-    tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No hay solicitudes que coincidan con el filtro de estatus.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8"><div class="empty">No hay solicitudes que coincidan con el filtro de estatus.</div></td></tr>';
     return;
   }
   tbody.innerHTML = visibles.map(function(s){
@@ -21319,6 +21327,7 @@ function renderSolicitudesCotizacion(){
       <td>${escapeHtml(s.ProveedorNombre)}</td>
       <td>${s.Items.length}</td>
       <td><span class="status-pill ${estadoCls}">${estadoLabel}</span></td>
+      <td>${comercialCotHtml_(s.Comercial)}</td>
       <td>${escapeHtml(fecha)}</td>
       <td><button type="button" class="export-btn cot-btn-ver" data-id="${s.Id}" style="padding:6px 10px;font-size:11px;">Ver</button>${btnCancelarReactivar}</td>
     </tr>
@@ -22157,7 +22166,7 @@ function estadoFacturaOcHtml_(oc){
   if(oc.gastoEstado === 'convertido'){
     g += '<span style="color:var(--ok);">✓ OC ' + escapeHtml(ocCom || '') + ' convertida</span> <span class="mnt-subtext" style="display:inline;">' + escapeHtml(oc.gastoMensaje || '') + '</span> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="0">Deshacer</button>';
   } else if(oc.gastoEstado === 'pendiente'){
-    g += 'pendiente: OC <b>' + escapeHtml(ocCom || '¿?') + '</b> con ' + datos + '. (La conversión automática está en pruebas: mientras, hazla en Comercial y da "Ya lo convertí".)' + (oc.gastoMensaje ? ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(oc.gastoMensaje) + ')</span>' : '') +
+    g += 'pendiente: OC <b>' + escapeHtml(ocCom || '¿?') + '</b> con ' + datos + '. La convierte el agente en Comercial.' + (oc.gastoMensaje ? ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(oc.gastoMensaje) + ')</span>' : '') +
       ' <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="1">✓ Ya lo convertí</button>';
   } else if(oc.gastoEstado === 'error'){
     g += '<span style="color:var(--danger);">⚠ ' + (oc.gastoPaso ? 'Paso "' + escapeHtml(oc.gastoPaso) + '": ' : '') + escapeHtml(oc.gastoMensaje || '') + '</span> · OC ' + escapeHtml(ocCom || '¿?') + ' con ' + datos +

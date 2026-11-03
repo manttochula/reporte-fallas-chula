@@ -10185,6 +10185,7 @@ async function getSolicitudesCotizacion(code, nombreUsuario) {
     });
   });
 
+  const comercialPorSol = await estadoComercialSolicitudes_();
   return solicitudes.map((s) => ({
     Id: s.Id,
     Folio: s.Folio,
@@ -10201,7 +10202,41 @@ async function getSolicitudesCotizacion(code, nombreUsuario) {
     ProveedorCorreo: s.ProveedorCorreo || '',
     Items: itemsPorSolicitud[s.Id] || [],
     Respuestas: respuestasPorSolicitud[s.Id] || [],
+    Comercial: comercialPorSol[s.Id] || null,
   }));
+}
+
+// Columna "Comercial" de Solicitudes de cotización (nov-2026, Carlos): en qué va cada
+// solicitud con CONTPAQi, del paso más avanzado al menos avanzado:
+//   gasto convertido > gasto por convertir / con error > OC cargada > en cola / con error.
+async function estadoComercialSolicitudes_() {
+  const res = {};
+  const poner = (id, e) => { const a = res[id]; if (!a || e.orden > a.orden) res[id] = e; };
+  const [gastos] = await pool.query(
+    `SELECT DISTINCT sr.solicitud_id AS sid, o.id, o.serie, o.folio, o.estado, o.gasto_estado, o.gasto_mensaje, o.factura_serie, o.factura_folio
+       FROM ordenes_compra o JOIN ordenes_compra_items i ON i.oc_id = o.id
+       JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = i.respuesta_item_id
+       JOIN solicitud_cotizacion_respuestas sr ON sr.id = ri.respuesta_id
+      WHERE o.estado <> 'cancelada'`);
+  for (const g of gastos) {
+    const fac = ((g.factura_serie || '') + ' ' + (g.factura_folio || '')).trim();
+    if (g.gasto_estado === 'convertido') poner(g.sid, { orden: 6, estado: 'convertido', texto: 'Gasto ' + (fac || 'convertido'), detalle: g.gasto_mensaje || '' });
+    else if (g.gasto_estado === 'error') poner(g.sid, { orden: 5, estado: 'error', texto: 'Error al convertir', detalle: g.gasto_mensaje || '' });
+    else if (g.gasto_estado === 'pendiente') poner(g.sid, { orden: 4, estado: 'por_convertir', texto: 'Por convertir a gasto', detalle: (fac ? 'Factura ' + fac + '. ' : '') + (g.gasto_mensaje || '') });
+    else if (g.estado === 'facturada') poner(g.sid, { orden: 3.5, estado: 'facturada', texto: 'Factura recibida', detalle: fac ? 'Factura ' + fac : '' });
+  }
+  const [exps] = await pool.query(
+    `SELECT sr.solicitud_id AS sid, x.serie, x.folio, x.agente_estado, MAX(x.agente_mensaje) AS mensaje
+       FROM oc_exportaciones x JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
+       JOIN solicitud_cotizacion_respuestas sr ON sr.id = ri.respuesta_id
+      WHERE x.tipo = 'oc' GROUP BY sr.solicitud_id, x.serie, x.folio, x.agente_estado`);
+  for (const x of exps) {
+    const oc = ((x.serie || '') + ' ' + (x.folio || '')).trim();
+    if (x.agente_estado === 'cargada' || x.agente_estado === null) poner(x.sid, { orden: 3, estado: 'cargada', texto: 'OC ' + oc + ' en Comercial', detalle: '' });
+    else if (x.agente_estado === 'error') poner(x.sid, { orden: 2, estado: 'error', texto: 'Error al cargar OC', detalle: x.mensaje || '' });
+    else poner(x.sid, { orden: 1, estado: 'en_cola', texto: 'OC ' + oc + ' en cola', detalle: '' });
+  }
+  return res;
 }
 
 // Pública: sin clave de acceso — la abre el proveedor con el enlace que se

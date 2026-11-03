@@ -9597,7 +9597,7 @@ async function datosAdicionalesGasto_(r) {
        JOIN solicitudes_cotizacion s ON s.id = sr.solicitud_id
       WHERE i.oc_id = ? AND s.nombre_solicito IS NOT NULL LIMIT 1`, [r.id]);
   const [refs] = await pool.query(
-    `SELECT COALESCE(NULLIF(TRIM(rf.descripcion), ''), i.observaciones) AS d FROM ordenes_compra_items i
+    `SELECT COALESCE(NULLIF(TRIM(rf.descripcion), ''), i.observaciones) AS d, rf.no_parte AS np FROM ordenes_compra_items i
        LEFT JOIN refacciones rf ON rf.id = i.refaccion_id WHERE i.oc_id = ? ORDER BY i.id`, [r.id]);
   const [prov] = await pool.query('SELECT nombre, forma_pago_comercial AS fp FROM proveedores WHERE id = ?', [r.proveedor_id]);
   const equipo = (r.observacion || '').trim();
@@ -9606,7 +9606,7 @@ async function datosAdicionalesGasto_(r) {
     observaciones: equipo,
     elaboro: (sol.length && sol[0].nombre) || '',
     formaPago: (prov.length && prov[0].fp) || FORMA_PAGO_COMERCIAL_DEFAULT_,
-    poliza: ocProv.polizaGasto_({ folio: r.factura_folio, proveedor: prov.length ? prov[0].nombre : '', refacciones: refs.map((x) => x.d), equipo }),
+    poliza: ocProv.polizaGasto_({ folio: r.factura_folio, proveedor: prov.length ? prov[0].nombre : '', refacciones: refs.map((x) => ({ descripcion: x.d, noParte: x.np })), equipo }),
   };
 }
 

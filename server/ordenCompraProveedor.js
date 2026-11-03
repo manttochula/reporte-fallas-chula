@@ -342,10 +342,24 @@ function nombreCortoProveedor_(nombre) {
 // "F-10389 SAMEI, RETEN, RODAMIENTO AF597" = F-folio factura, proveedor corto,
 // refacciones y equipo sin guion. Máximo 50 caracteres (campo de Comercial):
 // si no cabe, se recortan las refacciones, nunca el folio ni el equipo.
+// Quita el número de parte de la descripción (como la capturan a mano: "CONJUNTO DE CADENA",
+// no "CONJUNTO DE CADENA TD069-39704"): el no_parte del catálogo y cualquier palabra que
+// parezca número de parte (letras y números con guion, o 6+ caracteres con números).
+function sinNumeroParte_(desc, noParte) {
+  let d = String(desc || '');
+  const np = String(noParte || '').trim();
+  if (np) d = d.split(np).join(' ');
+  d = d.split(/\s+/).filter((w) => {
+    const t = w.replace(/^[(\[]+|[)\],.;:]+$/g, '');
+    if (!/\d/.test(t)) return true;
+    return !(/-/.test(t) && /[A-Z]/i.test(t)) && t.length < 6;
+  }).join(' ');
+  return d.replace(/\s*[-–/,]\s*$/, '').replace(/\s+/g, ' ').trim();
+}
 function polizaGasto_({ folio, proveedor, refacciones, equipo, max = 50 }) {
   const ini = ('F-' + String(folio || '').trim() + ' ' + nombreCortoProveedor_(proveedor)).trim();
   const eq = String(equipo || '').toUpperCase().replace(/[\s-]+/g, '');
-  const refs = [...new Set((refacciones || []).map((r) => String(r || '').trim().toUpperCase()).filter(Boolean))];
+  const refs = [...new Set((refacciones || []).map((r) => (typeof r === 'object' && r ? sinNumeroParte_(r.descripcion, r.noParte) : sinNumeroParte_(r, '')).toUpperCase()).filter(Boolean))];
   const armar = (lista) => [ini].concat(lista.length ? [lista.join(', ')] : []).join(', ') + (eq ? ' ' + eq : '');
   let lista = refs.slice();
   while (lista.length > 1 && armar(lista).length > max) lista.pop();
@@ -408,7 +422,7 @@ function revisarCfdiContraOc(cfdi, oc) {
 
 module.exports = {
   rutaAlmacenFactura_,
-  nombreCortoProveedor_, polizaGasto_,
+  nombreCortoProveedor_, polizaGasto_, sinNumeroParte_,
   calcularTotales, importeConLetra, observacionDeUnidad, generarPdfOc, estamparNotaFactura, leerCfdi, revisarCfdiContraOc,
   fechaOc_, IVA_POR_OMISION,
 };

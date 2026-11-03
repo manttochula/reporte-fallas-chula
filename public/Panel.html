@@ -22356,11 +22356,14 @@ function estadoFacturaOcHtml_(oc){
   else a += 'sin guardar';
   if(arch !== 'pendiente') a += ' <button type="button" class="row-view ocp-btn-archivar" data-id="' + oc.id + '">' + (arch === 'archivada' ? 'Guardar otra vez' : 'Guardar en almacén') + '</button>';
   lineas.push(a);
-  const gastos = (oc.ocsComercial || []).filter(function(x){ return x.esGasto; });
+  // Nov-2026: OC GENERALES → GASTOS EN PESOS; OC VRZ (refacciones) → COMPRA EN PESOS.
+  const gastos = (oc.ocsComercial || []);
   const ocCom = oc.gastoOcFolio ? (oc.gastoOcSerie + ' ' + oc.gastoOcFolio) : (gastos.length ? gastos.map(function(x){ return x.serie + ' ' + x.folio; }).join(', ') : '');
   const datos = 'Serie <b>' + escapeHtml(oc.facturaSerie || '—') + '</b> · Folio <b>' + escapeHtml(oc.facturaFolio || '—') + '</b> · Fecha <b>' + escapeHtml(fechaF) + '</b>';
   const propuesta = oc.gastoOcFolio ? ocCom : (gastos.length === 1 ? gastos[0].serie + ' ' + gastos[0].folio : 'mtto ');
-  let g = '🧾 <b>Comercial (GASTOS EN PESOS):</b> ';
+  const ligada = oc.gastoOcFolio ? gastos.filter(function(x){ return String(x.serie).toUpperCase() === String(oc.gastoOcSerie).toUpperCase() && Number(x.folio) === Number(oc.gastoOcFolio); })[0] : (gastos.length === 1 ? gastos[0] : null);
+  const destinos = ligada ? [ligada.destino] : gastos.map(function(x){ return x.destino; }).filter(function(d, i, a){ return d && a.indexOf(d) === i; });
+  let g = '🧾 <b>Comercial (' + escapeHtml(destinos.join(' / ') || 'GASTOS EN PESOS') + '):</b> ';
   if(oc.gastoEstado === 'convertido'){
     g += '<span style="color:var(--ok);">✓ OC ' + escapeHtml(ocCom || '') + ' convertida</span> <span class="mnt-subtext" style="display:inline;">' + escapeHtml(oc.gastoMensaje || '') + '</span> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="0">Deshacer</button>';
   } else if(oc.gastoEstado === 'pendiente'){
@@ -22371,7 +22374,7 @@ function estadoFacturaOcHtml_(oc){
       ' <button type="button" class="row-view ocp-btn-pedir-gasto" data-id="' + oc.id + '" data-oc="' + escapeHtml(propuesta) + '">Reintentar</button> <button type="button" class="row-view ocp-btn-gasto" data-id="' + oc.id + '" data-hecho="1">✓ Ya lo convertí</button>';
   } else {
     g += 'sin pedir' + (ocCom ? ' (OC ' + escapeHtml(ocCom) + ')' : '') + ' · ' + datos +
-      ' <button type="button" class="row-view ocp-btn-pedir-gasto" data-id="' + oc.id + '" data-oc="' + escapeHtml(propuesta) + '">Convertir a gasto en Comercial</button>';
+      ' <button type="button" class="row-view ocp-btn-pedir-gasto" data-id="' + oc.id + '" data-oc="' + escapeHtml(propuesta) + '">Convertir en Comercial</button>';
   }
   lineas.push(g);
   return '<div class="ocp-factura-estado" style="margin-top:6px;font-size:12.5px;line-height:1.7;">' + lineas.join('<br>') + '</div>';
@@ -22420,7 +22423,7 @@ function enlazarAccionesOc_(cont, lista, alCambiar){
   });
   cont.querySelectorAll('.ocp-btn-pedir-gasto').forEach(function(btn){
     btn.addEventListener('click', function(){
-      const v = prompt('Serie y folio de la OC en Comercial que se convierte a GASTOS EN PESOS (ej. mtto 100000000):', btn.dataset.oc || 'mtto ');
+      const v = prompt('Serie y folio de la OC en Comercial que se convierte (mtto → GASTOS EN PESOS, VER → COMPRA EN PESOS). Ej. mtto 100000000:', btn.dataset.oc || 'mtto ');
       if(v === null) return;
       const m = /^\s*(\S+)\s+([\d,]+)\s*$/.exec(v);
       if(!m){ alert('Escribe la serie, un espacio y el folio. Ej.: mtto 100000000'); return; }
@@ -22434,7 +22437,7 @@ function enlazarAccionesOc_(cont, lista, alCambiar){
   cont.querySelectorAll('.ocp-btn-gasto').forEach(function(btn){
     btn.addEventListener('click', function(){
       const hecho = btn.dataset.hecho === '1';
-      if(hecho && !confirm('¿Ya convertiste en Comercial la OC a GASTOS EN PESOS con la serie, folio y fecha de la factura?')) return;
+      if(hecho && !confirm('¿Ya convertiste en Comercial la OC (a GASTOS EN PESOS o COMPRA EN PESOS) con la serie, folio y fecha de la factura?')) return;
       btn.disabled = true;
       google.script.run
         .withSuccessHandler(function(r){ if(!r || !r.success){ btn.disabled = false; alert((r && r.error) || 'No se pudo.'); return; } if(alCambiar) alCambiar(); })

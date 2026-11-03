@@ -9639,15 +9639,19 @@ async function ocsComercialDeOcsProveedor_(ids) {
     const esGasto = (!!r.concepto && !!g.concepto && r.concepto.toUpperCase() === String(g.concepto).toUpperCase()) || (!!g.serie && String(r.serie) === String(g.serie));
     const lista = res[r.oc_id] = res[r.oc_id] || [];
     if (!lista.some((y) => y.serie === r.serie && y.folio === r.folio)) {
-      lista.push({ serie: r.serie, folio: r.folio, concepto: r.concepto || '', esGasto, enComercial: r.agente_estado === 'cargada' || r.agente_estado === null });
+      // Nov-2026: OC de gastos (GENERALES) → GASTOS EN PESOS; OC de refacciones (VRZ) → COMPRA EN PESOS.
+      const concepto = r.concepto || (esGasto ? g.concepto : cfgs[r.empresa_id].concepto) || '';
+      lista.push({ serie: r.serie, folio: r.folio, concepto, esGasto, destino: destinoComercial_(esGasto), enComercial: r.agente_estado === 'cargada' || r.agente_estado === null });
     }
   }
   return res;
 }
 
+function destinoComercial_(esGasto) { return esGasto ? 'GASTOS EN PESOS' : 'COMPRA EN PESOS'; }
+
 async function marcarGastoPendienteSiAplica_(ocId) {
   const ocs = (await ocsComercialDeOcsProveedor_([ocId]))[ocId] || [];
-  if (ocs.some((x) => x.esGasto)) {
+  if (ocs.length) {
     await pool.query("UPDATE ordenes_compra SET gasto_estado = IF(gasto_estado = 'convertido', gasto_estado, 'pendiente'), gasto_mensaje = NULL WHERE id = ?", [ocId]);
   }
 }
@@ -9776,10 +9780,21 @@ async function gastosPorConvertir_(ag) {
     r = await completarDatosFactura_(r);
     const falla = async (m) => pool.query("UPDATE ordenes_compra SET gasto_estado = 'error', gasto_mensaje = ? WHERE id = ?", [m, r.id]);
     let serie = r.gasto_oc_serie, folio = r.gasto_oc_folio !== null ? Number(r.gasto_oc_folio) : null;
+    const lig = ligadas[r.id] || [];
+    let elegida = null;
     if (!folio) {
-      const g = (ligadas[r.id] || []).filter((x) => x.esGasto);
-      if (g.length !== 1) { await falla(g.length ? 'Hay varias OC de gastos en Comercial para esta factura: indica cuál en el Panel.' : 'No sé qué OC de Comercial es: indícala en el Panel.'); continue; }
-      serie = g[0].serie; folio = Number(g[0].folio);
+      if (lig.length !== 1) { await falla(lig.length ? 'Hay varias OC en Comercial para esta factura (' + lig.map((x) => x.serie + ' ' + x.folio).join(', ') + '): indica cuál en el Panel.' : 'No sé qué OC de Comercial es: indícala en el Panel.'); continue; }
+      elegida = lig[0]; serie = elegida.serie; folio = Number(elegida.folio);
+    } else {
+      elegida = lig.find((x) => String(x.serie).toUpperCase() === String(serie).toUpperCase() && Number(x.folio) === folio) || null;
+    }
+    // Lista y destino: los de la OC ligada; si se indicó a mano, por la serie configurada.
+    let ocConcepto = elegida ? elegida.concepto : '', destino = elegida ? elegida.destino : '';
+    if (!elegida) {
+      const cfg = await leerConfigOc_(r.empresa_id);
+      const esGasto = !(cfg.serie && String(serie).toUpperCase() === String(cfg.serie).toUpperCase());
+      ocConcepto = esGasto ? (cfg.gasto && cfg.gasto.concepto) || '' : cfg.concepto || '';
+      destino = destinoComercial_(esGasto);
     }
     const fecha = fechaSoloOrNull(r.factura_fecha);
     if (!fecha) { await falla('La factura no trae fecha.'); continue; }
@@ -9788,7 +9803,7 @@ async function gastosPorConvertir_(ag) {
     out.push({
       ...extra,
       id: r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
-      ocSerie: serie || '', ocFolio: folio, facturaSerie: r.factura_serie || '', facturaFolio: r.factura_folio,
+      ocSerie: serie || '', ocFolio: folio, ocConcepto: ocConcepto || '', destino, facturaSerie: r.factura_serie || '', facturaFolio: r.factura_folio,
       fechaFactura: fecha, fechaRecepcion: fechaSoloOrNull(r.entrega) || fecha,
       total: r.factura_total !== null ? Number(r.factura_total) : Number(r.total),
     });
@@ -10453,9 +10468,9 @@ async function estadoComercialSolicitudes_() {
       WHERE o.estado <> 'cancelada'`);
   for (const g of gastos) {
     const fac = ((g.factura_serie || '') + ' ' + (g.factura_folio || '')).trim();
-    if (g.gasto_estado === 'convertido') poner(g.sid, { orden: 6, estado: 'convertido', texto: 'Gasto ' + (fac || 'convertido'), detalle: g.gasto_mensaje || '' });
+    if (g.gasto_estado === 'convertido') poner(g.sid, { orden: 6, estado: 'convertido', texto: (/COMPRA EN PESOS/.test(g.gasto_mensaje || '') ? 'Compra ' : 'Gasto ') + (fac || 'convertido'), detalle: g.gasto_mensaje || '' });
     else if (g.gasto_estado === 'error') poner(g.sid, { orden: 5, estado: 'error', texto: 'Error al convertir', detalle: g.gasto_mensaje || '' });
-    else if (g.gasto_estado === 'pendiente') poner(g.sid, { orden: 4, estado: 'por_convertir', texto: 'Por convertir a gasto', detalle: (fac ? 'Factura ' + fac + '. ' : '') + (g.gasto_mensaje || '') });
+    else if (g.gasto_estado === 'pendiente') poner(g.sid, { orden: 4, estado: 'por_convertir', texto: 'Por convertir en Comercial', detalle: (fac ? 'Factura ' + fac + '. ' : '') + (g.gasto_mensaje || '') });
     else if (g.estado === 'facturada') poner(g.sid, { orden: 3.5, estado: 'facturada', texto: 'Factura recibida', detalle: fac ? 'Factura ' + fac : '' });
   }
   const [exps] = await pool.query(

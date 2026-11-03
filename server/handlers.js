@@ -412,7 +412,9 @@ function calcularPreciosCotizados(precioCotizado, descuentoPct, ivaPct) {
   const precioConDescuento = Number(precioCotizado) * (1 - desc / 100);
   const precioTotal = precioConDescuento * (1 + iva / 100);
   return {
-    PrecioConDescuento: Math.round(precioConDescuento * 100) / 100,
+    // Sin descuento se respeta el precio tal cual (hasta 4 decimales, nov-2026:
+    // al corregir el importe total se guarda un precio exacto como 90.9922).
+    PrecioConDescuento: desc ? Math.round(precioConDescuento * 100) / 100 : Math.round(precioConDescuento * 10000) / 10000,
     PrecioTotal: Math.round(precioTotal * 100) / 100,
   };
 }
@@ -10693,8 +10695,9 @@ async function corregirRespuestaItem(code, nombreUsuario, respuestaItemId, data)
     [id]
   );
   if (enOc.length) return { success: false, error: 'Esta pieza ya va en la OC ' + enOc[0].serie + ' ' + enOc[0].folio + '. Cancela esa OC para poder corregir el precio.' };
-  const precio = data.precio === '' || data.precio === null || data.precio === undefined ? null : Number(data.precio);
+  let precio = data.precio === '' || data.precio === null || data.precio === undefined ? null : Number(data.precio);
   if (precio === null || !Number.isFinite(precio) || precio < 0) return { success: false, error: 'Escribe el precio unitario (sin IVA).' };
+  precio = Math.round(precio * 10000) / 10000;
   let iva = data.ivaPct === '' || data.ivaPct === null || data.ivaPct === undefined ? null : Number(data.ivaPct);
   if (iva !== null && Number.isFinite(iva) && iva > 0 && iva <= 1) iva = Math.round(iva * 10000) / 100;
   if (iva !== null && (!Number.isFinite(iva) || iva < 0 || iva > 100)) return { success: false, error: 'El IVA es un porcentaje entre 0 y 100 (ej. 16).' };
@@ -10705,8 +10708,9 @@ async function corregirRespuestaItem(code, nombreUsuario, respuestaItemId, data)
     const { PrecioConDescuento } = calcularPreciosCotizados(precio, x.descuento_pct, null);
     await pool.query('UPDATE refacciones SET precio = ? WHERE id = ?', [PrecioConDescuento, x.refaccion_id]);
   }
-  const antes = '$' + (x.precio_cotizado === null ? '—' : Number(x.precio_cotizado).toFixed(2)) + ' IVA ' + (x.iva_pct === null ? '—' : Number(x.iva_pct)) + '%';
-  const despues = '$' + precio.toFixed(2) + ' IVA ' + (iva === null ? '—' : iva) + '%';
+  const fmtP = (v) => (Math.round(Number(v) * 10000) / 10000).toFixed(Math.round(Number(v) * 100) === Number(v) * 100 ? 2 : 4).replace(/(\.\d\d\d?)0+$/, '$1');
+  const antes = '$' + (x.precio_cotizado === null ? '—' : fmtP(x.precio_cotizado)) + ' IVA ' + (x.iva_pct === null ? '—' : Number(x.iva_pct)) + '%';
+  const despues = '$' + fmtP(precio) + ' IVA ' + (iva === null ? '—' : iva) + '%';
   await registrarAuditoria_('solicitud_cotizacion_respuesta_items', String(id), 'corregir', nombreUsuario,
     x.folio + ' · ' + x.descripcion + ' (' + x.nombre_responde + '): ' + antes + ' -> ' + despues);
   if (x.orden) await agregarObservacionOrden_(x.orden, (nombreUsuario || 'Alguien') + ' corrigió la cotización ' + x.folio + ' de ' + x.descripcion + ': ' + antes + ' → ' + despues + '.');

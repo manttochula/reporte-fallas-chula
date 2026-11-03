@@ -3484,3 +3484,7 @@ CREATE TABLE IF NOT EXISTS agentes_comercial (
   creado_por  VARCHAR(255) DEFAULT NULL,
   creado_en   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Nov-2026: precio de la cotización con hasta 4 decimales, para que al corregir
+-- el IMPORTE total (con IVA) en el comparativo quede exacto al centavo.
+ALTER TABLE solicitud_cotizacion_respuesta_items MODIFY COLUMN precio_cotizado DECIMAL(12,4) DEFAULT NULL;

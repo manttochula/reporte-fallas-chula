@@ -9163,6 +9163,18 @@ async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, a
     n = u.affectedRows;
   } else return { success: false, error: 'Acción no válida.' };
   if (!n) return { success: false, error: 'Esa OC ya cambió de estado. Actualiza la lista.' };
+  if (accion === 'noEsta' || accion === 'reintentar') {
+    // Nov-2026: se vuelve a cargar con el precio y cantidad ACTUALES de la cotización
+    // (p.ej. se corrigió el importe después de la primera carga).
+    await pool.query(
+      `UPDATE oc_exportaciones x
+         JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
+         JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+         JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+          SET x.cantidad = sci.cantidad,
+              x.precio = IF(COALESCE(r.descuento_pct, 0) > 0, ROUND(ri.precio_cotizado * (1 - r.descuento_pct / 100), 2), ri.precio_cotizado)
+        WHERE x.empresa_id = ? AND x.serie = ? AND x.folio = ? AND x.agente_estado = 'pendiente' AND ri.precio_cotizado IS NOT NULL`, args);
+  }
   await registrarAuditoria_('oc_exportaciones', args[1] + '-' + args[2], 'agente_' + accion, nombreUsuario, n + ' partida(s)');
   return { success: true, partidas: n };
 }

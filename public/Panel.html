@@ -6207,7 +6207,13 @@ const ORD_COLUMNAS = [
   // Solo con el permiso "Costo de refacciones" (Usuarios); el servidor tampoco manda el dato sin él.
   { id: 'costo_refacciones', label: 'Costo refacciones', permiso: 'costo_refacciones' },
 ];
-function columnaOrdPermitida_(col){ return !col.permiso || puedeVerPestana(col.permiso); }
+// Permitida si el usuario tiene el permiso, o si el servidor ya mandó el dato (el servidor solo lo
+// manda con permiso; así funciona aunque el permiso se haya dado después de entrar al Panel).
+function columnaOrdPermitida_(col){
+  if(!col.permiso) return true;
+  if(puedeVerPestana(col.permiso)) return true;
+  return col.id === 'costo_refacciones' && typeof ALL_RECORDS !== 'undefined' && ALL_RECORDS.some(function(r){ return r && r.CostoRefacciones !== undefined; });
+}
 const ORD_COL_LS_KEY = 'panel_columnas_ordenes_v1';
 const ORD_COL_DEFAULT = { ocultas: [], fijadas: ['orden'] };
 
@@ -6247,12 +6253,15 @@ function aplicarEstadoColumnasOrdEnTabla_(tableId){
   const table = document.getElementById(tableId);
   if(!table) return;
 
+  // Ocultar con una regla CSS (no con estilo en cada celda): así las filas que se pintan
+  // después también quedan igual que el encabezado y nunca se desalinean (nov-2026).
   ORD_COLUMNAS.forEach(function(col){
-    const oculta = ORD_COL_ESTADO.ocultas.has(col.id) || !columnaOrdPermitida_(col);
-    table.querySelectorAll('[data-col="' + col.id + '"]').forEach(function(el){
-      el.style.display = oculta ? 'none' : '';
-    });
+    table.querySelectorAll('[data-col="' + col.id + '"]').forEach(function(el){ el.style.display = ''; });
   });
+  let estilo = document.getElementById('ord-col-ocultas-' + tableId);
+  if(!estilo){ estilo = document.createElement('style'); estilo.id = 'ord-col-ocultas-' + tableId; document.head.appendChild(estilo); }
+  estilo.textContent = ORD_COLUMNAS.filter(function(col){ return ORD_COL_ESTADO.ocultas.has(col.id) || !columnaOrdPermitida_(col); })
+    .map(function(col){ return '#' + tableId + ' [data-col="' + col.id + '"]{display:none;}'; }).join('\n');
 
   table.querySelectorAll('[data-col]').forEach(function(el){
     el.classList.remove('ord-col-fijada', 'ord-col-fijada-borde');

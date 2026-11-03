@@ -22666,6 +22666,24 @@ function formatoPct_(n){
   return (Math.round(Number(n) * 100) / 100).toString();
 }
 
+// Importe con IVA → precio unitario sin IVA (2 decimales) que da ese importe con la misma
+// cuenta del comparativo: round(round(precio×(1-desc)) × cant) y luego × (1+IVA).
+function importeAPrecioCot_(importe, precioAct, precioDescAct, cant, ivaPct){
+  if(!Number.isFinite(importe) || importe <= 0 || !(cant > 0)) return null;
+  const r2 = function(x){ return Math.round(x * 100) / 100; };
+  const factorDesc = precioAct > 0 && Number.isFinite(precioDescAct) ? precioDescAct / precioAct : 1;
+  const cuenta = function(p){ return r2(r2(r2(p * factorDesc) * cant) * (1 + ivaPct / 100)); };
+  const base = r2(importe / (cant * factorDesc * (1 + ivaPct / 100)));
+  let mejor = null;
+  for(let d = -5; d <= 5; d++){
+    const p = r2(base + d / 100);
+    if(p < 0) continue;
+    const imp = cuenta(p), dif = Math.abs(imp - importe);
+    if(!mejor || dif < mejor.dif - 1e-9) mejor = { precio: p, importe: imp, dif: dif };
+  }
+  return { precio: mejor.precio, importe: mejor.importe, pedido: importe, exacto: mejor.dif < 0.005 };
+}
+
 function abrirModalVerCotizacion(sol){
   const link = armarEnlaceCotizacion(sol.Token);
   const fechaHora = function(iso){ return iso ? new Date(iso).toLocaleString('es-MX') : ''; };
@@ -22743,7 +22761,8 @@ function abrirModalVerCotizacion(sol){
           '<td>' + (ri.IvaPct !== null ? formatoPct_(ri.IvaPct) + '%' : '—') + (ri.IvaPct !== null && ri.IvaPct > 0 && ri.IvaPct < 1 ? ' <span class="cot-cmt-tag" title="¿El proveedor quiso poner 16%? Corrígelo con ✏️">⚠️</span>' : '') + '</td>' +
           '<td class="' + (esMejorPrecio ? 'cot-cmp-mejor' : '') + '">' + (ri.PrecioTotal !== null ? '$' + Number(ri.PrecioTotal).toFixed(2) : '—') + comentarioTag + '</td>' +
           // Importe como lo calcula el proveedor/CONTPAQi: (precio c/desc × cantidad) + IVA sobre ese subtotal.
-          '<td>' + (ri.PrecioConDescuento !== null && ri.PrecioConDescuento !== undefined ? '$' + (function(){ const sub = Math.round(Number(ri.PrecioConDescuento) * Number(it.Cantidad) * 100) / 100; return (Math.round(sub * (1 + (Number(ri.IvaPct) || 0) / 100) * 100) / 100).toFixed(2); })() : '—') + '</td>' +
+          '<td style="white-space:nowrap;">' + (ri.PrecioConDescuento !== null && ri.PrecioConDescuento !== undefined ? '$' + (function(){ const sub = Math.round(Number(ri.PrecioConDescuento) * Number(it.Cantidad) * 100) / 100; return (Math.round(sub * (1 + (Number(ri.IvaPct) || 0) / 100) * 100) / 100).toFixed(2); })()
+            + ' <button type="button" class="cot-corregir-importe-btn cot-corregir-btn" data-respuesta-item-id="' + ri.RespuestaItemId + '" data-precio="' + ri.PrecioCotizado + '" data-precio-desc="' + ri.PrecioConDescuento + '" data-cant="' + it.Cantidad + '" data-iva="' + (ri.IvaPct === null ? '' : ri.IvaPct) + '" data-desc="' + escapeHtml(it.Descripcion) + '" title="Corregir el importe total (con IVA): se recalcula el precio unitario">✏️</button>' : '—') + '</td>' +
           '<td class="' + (esMejorFecha ? 'cot-cmp-mejor' : '') + '">' + escapeHtml(fechaTexto) + '</td>' +
           '<td style="text-align:center;"><button type="button" class="cot-aut-btn' + (ri.Autorizado ? ' on' : '') + '" data-respuesta-item-id="' + ri.RespuestaItemId + '" title="' + (ri.Autorizado ? 'Autorizada — este es el precio que se aplicó al catálogo. Da clic para quitar la marca.' : 'Marcar esta cotización como la ganadora de esta pieza y aplicar su precio (con descuento) al catálogo') + '"></button></td>'
         );
@@ -22798,8 +22817,32 @@ function abrirModalVerCotizacion(sol){
   `;
   if(sol.Orden) cargarOcpDeOrden_(sol.Orden);
 
+  // Nov-2026: corregir el IMPORTE total (con IVA) → se recalcula el precio unitario sin IVA.
+  document.getElementById('cot-ver-contenido').querySelectorAll('.cot-corregir-importe-btn').forEach(function(b){
+    b.addEventListener('click', function(ev){
+      ev.stopImmediatePropagation();
+      const v = prompt('Importe TOTAL con IVA de ' + b.dataset.cant + ' × ' + b.dataset.desc + ' (como viene en la factura):');
+      if(v === null) return;
+      const r = importeAPrecioCot_(Number(String(v).replace(/[$,\s]/g, '')), Number(b.dataset.precio), Number(b.dataset.precioDesc), Number(b.dataset.cant), Number(b.dataset.iva) || 0);
+      if(!r){ alert('Escribe un importe válido (ej. 1055.48).'); return; }
+      const aviso = r.exacto ? '' : '\n\nOjo: con ' + b.dataset.cant + ' piezas no se puede llegar exacto a $' + r.pedido.toFixed(2) + '; lo más cercano es $' + r.importe.toFixed(2) + '.';
+      if(!confirm('Precio unitario sin IVA: $' + r.precio.toFixed(2) + ' → importe $' + r.importe.toFixed(2) + '.' + aviso + '\n\n¿Guardar?')) return;
+      b.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(x){
+          if(!x || !x.success){ b.disabled = false; alert((x && x.error) || 'No se pudo corregir.'); return; }
+          cargarSolicitudesCotizacion(function(){
+            const actualizada = ALL_SOLICITUDES_COTIZACION.find(function(s){ return s.Id === sol.Id; });
+            if(actualizada) abrirModalVerCotizacion(actualizada);
+          });
+        })
+        .withFailureHandler(function(e){ b.disabled = false; alert((e && e.message) || 'No se pudo corregir. Intenta de nuevo.'); })
+        .corregirRespuestaItem(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.respuestaItemId), { precio: r.precio.toFixed(2), ivaPct: b.dataset.iva });
+    });
+  });
+
   // Corregir lo que capturó el proveedor (oct-2026): precio unitario sin IVA e IVA %.
-  document.getElementById('cot-ver-contenido').querySelectorAll('.cot-corregir-btn').forEach(function(b){
+  document.getElementById('cot-ver-contenido').querySelectorAll('.cot-corregir-btn:not(.cot-corregir-importe-btn)').forEach(function(b){
     b.addEventListener('click', function(){
       const precio = prompt('Precio UNITARIO (de una pieza, sin IVA) para ' + b.dataset.desc + ':', b.dataset.precio);
       if(precio === null) return;

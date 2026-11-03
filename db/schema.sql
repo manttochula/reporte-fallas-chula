@@ -3470,3 +3470,17 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'ordenes_compra' AND column_name = 'firma_autoriza');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE ordenes_compra ADD COLUMN firma_autoriza VARCHAR(150) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Varias PCs con agente de Comercial (nov-2026, Carlos). Cada PC tiene su clave (se guarda
+-- solo el hash) y atiende las compras de SUS usuarios: los que hicieron la solicitud de
+-- cotización. La PC principal (clave OC_AGENTE_TOKEN de Render) atiende todo lo demás.
+CREATE TABLE IF NOT EXISTS agentes_comercial (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  nombre      VARCHAR(100) NOT NULL,
+  token_hash  CHAR(64)     NOT NULL UNIQUE,
+  usuarios    TEXT         DEFAULT NULL,      -- JSON: ["EDITH", "YAZMIN"]
+  activo      TINYINT(1)   NOT NULL DEFAULT 1,
+  visto       TEXT         DEFAULT NULL,      -- JSON: { en, version, equipo, error }
+  creado_por  VARCHAR(255) DEFAULT NULL,
+  creado_en   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -8804,6 +8804,35 @@ function tokenAgenteOcValido_(token) {
   return crypto.timingSafeEqual(Buffer.from(dado), Buffer.from(esperado));
 }
 
+// ---- Varias PCs con agente (nov-2026, Carlos) ----
+// Cada PC atiende las compras de sus usuarios (quien hizo la solicitud de cotización).
+// La principal (OC_AGENTE_TOKEN) atiende las de usuarios que no tiene ninguna otra PC.
+const normUsuario_ = (n) => (n || '').toString().trim().toUpperCase();
+const hashClaveAgente_ = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+function usuariosDeJson_(v) { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a.map(normUsuario_).filter(Boolean) : []; } catch (e) { return []; } }
+async function agenteDeClave_(token) {
+  if (tokenAgenteOcValido_(token)) return { id: 0, principal: true, nombre: 'Principal', usuarios: [] };
+  const t = (token || '').toString();
+  if (t.length < 20) return null;
+  const [r] = await pool.query('SELECT id, nombre, usuarios FROM agentes_comercial WHERE token_hash = ? AND activo = 1', [hashClaveAgente_(t)]);
+  if (!r.length) return null;
+  return { id: r[0].id, principal: false, nombre: r[0].nombre, usuarios: usuariosDeJson_(r[0].usuarios) };
+}
+// Filtro: ¿esta PC atiende la compra de este usuario?
+async function filtroAgente_(ag) {
+  if (!ag) return () => true;   // uso interno / pruebas: todo
+  const [rows] = await pool.query('SELECT usuarios FROM agentes_comercial WHERE activo = 1');
+  const asignados = new Set(); rows.forEach((r) => usuariosDeJson_(r.usuarios).forEach((u) => asignados.add(u)));
+  const mios = new Set(ag.usuarios || []);
+  return (dueno) => { const d = normUsuario_(dueno); return ag.principal ? !asignados.has(d) : mios.has(d); };
+}
+// Dueño de una OC al proveedor = quien hizo la solicitud de cotización de sus piezas.
+const SQL_DUENO_OC_ = `(SELECT s.nombre_solicito FROM ordenes_compra_items di
+    JOIN solicitud_cotizacion_respuesta_items dri ON dri.id = di.respuesta_item_id
+    JOIN solicitud_cotizacion_items dsci ON dsci.id = dri.item_id
+    JOIN solicitudes_cotizacion s ON s.id = dsci.solicitud_id
+   WHERE di.oc_id = o.id ORDER BY di.id LIMIT 1)`;
+
 function fechaMexico_() {
   // Fecha de hoy en México (Render corre en UTC).
   const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -8859,17 +8888,23 @@ async function encolarOcAutomaticas_() {
 // Solo de empresas con la carga prendida: si la pausan, lo que ya estaba en
 // la cola se queda esperando (no se le manda al agente) hasta que la prendan
 // o la quiten de la cola.
-async function ocsPendientesAgente_() {
+async function ocsPendientesAgente_(ag) {
   const cfgAg = await leerConfigAgente_();
   const [rows0] = await pool.query(
     `SELECT x.empresa_id, e.nombre AS empresa, x.serie, x.folio, x.fecha_oc, x.fecha_entrega, x.concepto, x.almacen, x.codigo_proveedor,
-            x.codigo_producto, x.cantidad, x.precio, x.respuesta_item_id, x.orden, ri.iva_pct
+            x.codigo_producto, x.cantidad, x.precio, x.respuesta_item_id, x.orden, ri.iva_pct, s.nombre_solicito AS dueno
      FROM oc_exportaciones x JOIN empresas e ON e.id = x.empresa_id
      LEFT JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
+     LEFT JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+     LEFT JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
      WHERE x.agente_estado = 'pendiente' AND x.tipo = 'oc'
      ORDER BY e.nombre, x.serie, x.folio, x.id`
   );
-  const rows = rows0.filter((r) => cfgAg['oc_auto_e' + r.empresa_id] === '1');
+  // Una OC de Comercial completa va a UNA sola PC: la del dueño de su primera partida.
+  const atiende = await filtroAgente_(ag);
+  const duenoOc = {};
+  rows0.forEach((r) => { const k = r.empresa_id + '|' + r.serie + '|' + r.folio; if (!(k in duenoOc)) duenoOc[k] = r.dueno; });
+  const rows = rows0.filter((r) => cfgAg['oc_auto_e' + r.empresa_id] === '1' && atiende(duenoOc[r.empresa_id + '|' + r.serie + '|' + r.folio]));
   const porEmpresa = {};
   rows.forEach((r) => {
     const emp = porEmpresa[r.empresa_id] || (porEmpresa[r.empresa_id] = { empresaId: r.empresa_id, empresa: r.empresa, ocs: {} });
@@ -8890,25 +8925,28 @@ async function ocsPendientesAgente_() {
 
 // Lo usa el instalador del agente para probar la clave (no encola nada).
 async function agenteOcPing(token) {
-  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida (revisa OC_AGENTE_TOKEN en Render).' };
+  const ag = await agenteDeClave_(token);
+  if (!ag) return { success: false, error: 'Clave del agente no válida (revísala en el Panel: Exportar OC → PCs con agente).' };
   const [emp] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
-  return { success: true, empresas: emp.map((e) => ({ id: e.id, nombre: e.nombre })) };
+  return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, usuarios: ag.usuarios, empresas: emp.map((e) => ({ id: e.id, nombre: e.nombre })) };
 }
 
 // Lo llama el AGENTE (no el Panel). info: { version, equipo, hojaComercialEmpresas }.
 async function agenteOcTrabajo(token, info) {
-  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  const ag = await agenteDeClave_(token);
+  if (!ag) return { success: false, error: 'Clave del agente no válida.' };
   info = info || {};
   const visto = JSON.stringify({ en: new Date().toISOString(), version: (info.version || '').toString().slice(0, 30), equipo: (info.equipo || '').toString().slice(0, 60),
     empresasHoja: Array.isArray(info.hojaComercialEmpresas) ? info.hojaComercialEmpresas.slice(0, 30).map((x) => String(x).slice(0, 80)) : [], error: (info.error || '').toString().slice(0, 500) });
-  await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
+  if (ag.principal) await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
+  else await pool.query('UPDATE agentes_comercial SET visto = ? WHERE id = ?', [visto, ag.id]);
   await encolarOcAutomaticas_();
-  return { success: true, empresas: await ocsPendientesAgente_(), facturas: await facturasPorArchivar_(), gastos: await gastosPorConvertir_() };
+  return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, empresas: await ocsPendientesAgente_(ag), facturas: await facturasPorArchivar_(ag), gastos: await gastosPorConvertir_(ag) };
 }
 
 // resultados: [{ empresaId, serie, folio, ok, mensaje, total }]
 async function agenteOcResultado(token, resultados) {
-  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  if (!(await agenteDeClave_(token))) return { success: false, error: 'Clave del agente no válida.' };
   const lista = Array.isArray(resultados) ? resultados.slice(0, 500) : [];
   let cargadas = 0, errores = 0;
   // 1) Primero se ubican las partidas de cada OC por el folio que les dio el
@@ -8981,6 +9019,75 @@ async function getCargaComercial(code, nombreUsuario) {
     cola: cola.map((c) => ({ empresaId: c.empresa_id, serie: c.serie, folio: c.folio, estado: c.agente_estado, mensaje: c.mensaje || '', total: c.total === null ? null : Number(c.total),
       en: isoOrNull(c.en), encolado: isoOrNull(c.encolado), partidas: Number(c.partidas), ordenes: c.ordenes || '', proveedor: c.proveedor || '' })),
   };
+}
+
+// ---- Panel: PCs con agente (nov-2026) ----
+function agenteVisto_(v) {
+  let a = null; try { a = v ? JSON.parse(v) : null; } catch (e) { a = null; }
+  return a ? { en: a.en, version: a.version || '', equipo: a.equipo || '', error: a.error || '', conectado: Date.now() - new Date(a.en).getTime() < AGENTE_OC_FUERA_MS_ } : null;
+}
+async function getAgentesComercial(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  const [ags] = await pool.query('SELECT id, nombre, usuarios, activo, visto, creado_por, creado_en FROM agentes_comercial ORDER BY nombre');
+  const [us] = await pool.query('SELECT nombre, modulos FROM usuarios ORDER BY nombre');
+  const v = await leerConfigAgente_();
+  return {
+    success: true,
+    principal: agenteVisto_(v.agente_oc_visto),
+    agentes: ags.map((a) => ({ id: a.id, nombre: a.nombre, usuarios: usuariosDeJson_(a.usuarios), activo: !!a.activo, visto: agenteVisto_(a.visto), creadoPor: a.creado_por || '', creadoEn: isoOrNull(a.creado_en) })),
+    usuariosPanel: us.filter((u) => tieneAccesoModulo_(u.modulos, 'Panel')).map((u) => u.nombre),
+  };
+}
+// data: { nombre, usuarios: [..] }. Al crear, regresa la clave UNA sola vez.
+async function guardarAgenteComercial(code, nombreUsuario, id, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  data = data || {};
+  const nombre = (data.nombre || '').toString().trim().slice(0, 100);
+  if (!nombre) return { success: false, error: 'Escribe el nombre de la PC (ej. PC de Edith).' };
+  const usuarios = [...new Set((Array.isArray(data.usuarios) ? data.usuarios : []).map(normUsuario_).filter(Boolean))];
+  if (!usuarios.length) return { success: false, error: 'Elige al menos un usuario: esta PC atiende las compras que solicitan esos usuarios.' };
+  const [otros] = await pool.query('SELECT id, nombre, usuarios FROM agentes_comercial WHERE activo = 1 AND id <> ?', [Number(id) || 0]);
+  for (const o of otros) {
+    const rep2 = usuariosDeJson_(o.usuarios).filter((u) => usuarios.includes(u));
+    if (rep2.length) return { success: false, error: rep2.join(', ') + ' ya lo atiende la PC "' + o.nombre + '". Un usuario solo puede estar en una PC.' };
+  }
+  if (Number(id)) {
+    const [u] = await pool.query('UPDATE agentes_comercial SET nombre = ?, usuarios = ? WHERE id = ?', [nombre, JSON.stringify(usuarios), Number(id)]);
+    if (!u.affectedRows) return { success: false, error: 'No se encontró esa PC.' };
+    await registrarAuditoria_('agentes_comercial', String(id), 'editar', nombreUsuario, nombre + ': ' + usuarios.join(', '));
+    return { success: true, id: Number(id) };
+  }
+  const clave = crypto.randomBytes(24).toString('hex');
+  const [r] = await pool.query('INSERT INTO agentes_comercial (nombre, token_hash, usuarios, creado_por) VALUES (?, ?, ?, ?)', [nombre, hashClaveAgente_(clave), JSON.stringify(usuarios), (nombreUsuario || '').toString().trim() || null]);
+  await registrarAuditoria_('agentes_comercial', String(r.insertId), 'crear', nombreUsuario, nombre + ': ' + usuarios.join(', '));
+  return { success: true, id: r.insertId, clave };
+}
+async function nuevaClaveAgenteComercial(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const clave = crypto.randomBytes(24).toString('hex');
+  const [u] = await pool.query('UPDATE agentes_comercial SET token_hash = ? WHERE id = ?', [hashClaveAgente_(clave), Number(id) || 0]);
+  if (!u.affectedRows) return { success: false, error: 'No se encontró esa PC.' };
+  await registrarAuditoria_('agentes_comercial', String(id), 'nueva_clave', nombreUsuario, '');
+  return { success: true, clave };
+}
+async function activarAgenteComercial(code, nombreUsuario, id, activo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  if (activo) {
+    const [a] = await pool.query('SELECT usuarios FROM agentes_comercial WHERE id = ?', [Number(id) || 0]);
+    if (!a.length) return { success: false, error: 'No se encontró esa PC.' };
+    const mios = usuariosDeJson_(a[0].usuarios);
+    const [otros] = await pool.query('SELECT nombre, usuarios FROM agentes_comercial WHERE activo = 1 AND id <> ?', [Number(id)]);
+    for (const o of otros) { const r2 = usuariosDeJson_(o.usuarios).filter((u) => mios.includes(u)); if (r2.length) return { success: false, error: r2.join(', ') + ' ya lo atiende la PC "' + o.nombre + '".' }; }
+  }
+  await pool.query('UPDATE agentes_comercial SET activo = ? WHERE id = ?', [activo ? 1 : 0, Number(id) || 0]);
+  await registrarAuditoria_('agentes_comercial', String(id), activo ? 'activar' : 'desactivar', nombreUsuario, '');
+  return { success: true };
+}
+async function eliminarAgenteComercial(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  await pool.query('DELETE FROM agentes_comercial WHERE id = ?', [Number(id) || 0]);
+  await registrarAuditoria_('agentes_comercial', String(id), 'eliminar', nombreUsuario, '');
+  return { success: true };
 }
 
 async function guardarCargaAutomatica(code, nombreUsuario, empresaId, activo) {
@@ -9527,11 +9634,13 @@ async function completarDatosFactura_(row) {
 }
 
 // Lo que el agente tiene que guardar en el almacén digital.
-async function facturasPorArchivar_() {
-  const [rows] = await pool.query(
-    `SELECT o.*, e.nombre AS e_nombre, p.nombre AS p_nombre FROM ordenes_compra o
+async function facturasPorArchivar_(ag) {
+  const [todas] = await pool.query(
+    `SELECT o.*, e.nombre AS e_nombre, p.nombre AS p_nombre, ${SQL_DUENO_OC_} AS dueno FROM ordenes_compra o
        JOIN empresas e ON e.id = o.empresa_id JOIN proveedores p ON p.id = o.proveedor_id
-      WHERE o.archivo_estado = 'pendiente' AND o.estado = 'facturada' ORDER BY o.factura_en LIMIT 30`);
+      WHERE o.archivo_estado = 'pendiente' AND o.estado = 'facturada' ORDER BY o.factura_en`);
+  const atiende = await filtroAgente_(ag);
+  const rows = todas.filter((r) => atiende(r.dueno)).slice(0, 30);
   const out = [];
   for (let r of rows) {
     r = await completarDatosFactura_(r);
@@ -9552,7 +9661,7 @@ async function facturasPorArchivar_() {
 
 // resultados: [{ id, ok, ruta, mensaje }]
 async function agenteFacturasResultado(token, resultados) {
-  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  if (!(await agenteDeClave_(token))) return { success: false, error: 'Clave del agente no válida.' };
   let ok = 0, err = 0;
   for (const r of (Array.isArray(resultados) ? resultados : [])) {
     const id = Number(r.id) || 0;
@@ -9616,12 +9725,14 @@ async function datosAdicionalesGasto_(r) {
   };
 }
 
-async function gastosPorConvertir_() {
-  const [rows] = await pool.query(
-    `SELECT o.*, e.nombre AS e_nombre,
+async function gastosPorConvertir_(ag) {
+  const [todas] = await pool.query(
+    `SELECT o.*, e.nombre AS e_nombre, ${SQL_DUENO_OC_} AS dueno,
             (SELECT MAX(ri.fecha_entrega) FROM ordenes_compra_items i JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = i.respuesta_item_id WHERE i.oc_id = o.id) AS entrega
        FROM ordenes_compra o JOIN empresas e ON e.id = o.empresa_id
-      WHERE o.gasto_estado = 'pendiente' AND o.estado = 'facturada' ORDER BY o.factura_en LIMIT 10`);
+      WHERE o.gasto_estado = 'pendiente' AND o.estado = 'facturada' ORDER BY o.factura_en`);
+  const atiende = await filtroAgente_(ag);
+  const rows = todas.filter((r) => atiende(r.dueno)).slice(0, 10);
   if (!rows.length) return [];
   const ligadas = await ocsComercialDeOcsProveedor_(rows.map((r) => r.id));
   const out = [];
@@ -9651,7 +9762,7 @@ async function gastosPorConvertir_() {
 
 // resultados: [{ id, ok, mensaje, paso }]
 async function agenteGastosResultado(token, resultados) {
-  if (!tokenAgenteOcValido_(token)) return { success: false, error: 'Clave del agente no válida.' };
+  if (!(await agenteDeClave_(token))) return { success: false, error: 'Clave del agente no válida.' };
   // PowerShell 5.1 a veces manda el arreglo como { value: [...], Count: n } (2-nov: la OC quedó "pendiente").
   if (resultados && !Array.isArray(resultados) && Array.isArray(resultados.value)) resultados = resultados.value;
   let ok = 0, err = 0;
@@ -11602,6 +11713,7 @@ module.exports = {
   crearSolicitudesCotizacion,
   getSolicitudesCotizacion,
   getOrdenesPorCotizar,
+  getAgentesComercial, guardarAgenteComercial, nuevaClaveAgenteComercial, activarAgenteComercial, eliminarAgenteComercial,
   migrarDosFirmasOc_,
   getSolicitudCotizacionPublica,
   responderCotizacion,

@@ -1449,6 +1449,23 @@
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
     </div>
 
+    <!-- PCs con agente de Comercial (nov-2026): cada PC atiende las compras de sus usuarios. -->
+    <div class="maq-modal-overlay" id="agc-overlay" style="z-index:1300;">
+      <div class="maq-modal" style="max-width:560px;">
+        <span class="maq-modal-close" id="agc-close">&times;</span>
+        <h3 style="margin-top:0;" id="agc-titulo">Agregar PC con agente</h3>
+        <input type="hidden" id="agc-id">
+        <div class="maq-field"><label>Nombre de la PC *</label><input type="text" id="agc-nombre" maxlength="100" placeholder="Ej. PC de Edith"></div>
+        <div class="maq-field"><label>Usuarios que atiende *</label>
+          <span class="mnt-subtext">Esta PC carga a Comercial, guarda en el almacén y convierte a gasto las compras cuya <b>solicitud de cotización</b> hizo alguno de estos usuarios. Lo de los demás lo hace la PC principal.</span>
+          <div id="agc-usuarios" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px 10px;margin-top:6px;max-height:220px;overflow:auto;"></div>
+        </div>
+        <div id="agc-clave" style="display:none;" class="ocx-auto-aviso"></div>
+        <div class="maq-modal-status" id="agc-status"></div>
+        <div class="maq-modal-actions"><button class="maq-save-btn" id="agc-guardar">Guardar</button></div>
+      </div>
+    </div>
+
     <div class="maq-modal-overlay" id="avisos-overlay">
       <div class="maq-modal" style="max-width:640px;">
         <span class="maq-modal-close" id="avisos-close">&times;</span>
@@ -21988,6 +22005,108 @@ document.getElementById('ocx-btn-guardar-folios').addEventListener('click', func
     .guardarFoliosOc(ACCESS_CODE, PANEL_USUARIO, empId, datos);
 });
 
+// --- PCs con agente de Comercial (nov-2026) ---
+let AGC_DATOS = null;
+function estadoPcAgente_(v){
+  if(!v) return '<span class="ocx-agente-mal">nunca se ha conectado</span>';
+  return (v.conectado ? '<span class="ocx-agente-ok">conectada</span>' : '<span class="ocx-agente-mal">sin conexión</span>') +
+    ' <span class="mnt-subtext" style="display:inline;">' + escapeHtml((v.equipo ? v.equipo + ' · ' : '') + 'última vez ' + new Date(v.en).toLocaleString('es-MX') + (v.version ? ' · v' + v.version : '')) + '</span>' +
+    (v.error ? '<div class="ocx-auto-aviso">' + escapeHtml(v.error) + '</div>' : '');
+}
+function cargarAgentesComercial_(){
+  const caja = document.getElementById('agc-lista');
+  if(!caja) return;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ caja.innerHTML = ''; return; }
+      AGC_DATOS = r;
+      const puede = puedeCapturarPestana('refacciones');
+      const filas = ['<tr><td><b>PC principal</b></td><td><span class="mnt-subtext">todos los demás usuarios</span></td><td>' + estadoPcAgente_(r.principal) + '</td><td></td></tr>']
+        .concat(r.agentes.map(function(a){
+          const acc = !puede ? '' :
+            '<button type="button" class="row-view agc-acc" data-acc="editar" data-id="' + a.id + '">Editar</button> ' +
+            '<button type="button" class="row-view agc-acc" data-acc="clave" data-id="' + a.id + '" title="Genera una clave nueva; la anterior deja de servir">Nueva clave</button> ' +
+            '<button type="button" class="row-view agc-acc" data-acc="' + (a.activo ? 'desactivar' : 'activar') + '" data-id="' + a.id + '">' + (a.activo ? 'Desactivar' : 'Activar') + '</button> ' +
+            '<button type="button" class="row-view agc-acc" data-acc="eliminar" data-id="' + a.id + '">Eliminar</button>';
+          return '<tr' + (a.activo ? '' : ' style="opacity:.55;"') + '><td><b>' + escapeHtml(a.nombre) + '</b>' + (a.activo ? '' : ' <span class="mnt-subtext" style="display:inline;">(desactivada)</span>') + '</td><td>' + escapeHtml(a.usuarios.join(', ')) + '</td><td>' + estadoPcAgente_(a.visto) + '</td><td>' + acc + '</td></tr>';
+        }));
+      caja.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><b>PCs con agente</b>' +
+        (puede ? '<button type="button" class="row-view" id="agc-agregar">+ Agregar PC</button>' : '') + '</div>' +
+        '<div class="mnt-subtext">Cada PC atiende las compras de sus usuarios (quien hizo la solicitud de cotización): las carga a Comercial, guarda la factura en el almacén y la convierte a gasto. La PC principal atiende lo de los demás.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>PC</th><th>Usuarios</th><th>Estado</th><th></th></tr></thead><tbody>' + filas.join('') + '</tbody></table></div>';
+      const ag = document.getElementById('agc-agregar');
+      if(ag) ag.addEventListener('click', function(){ abrirModalAgente_(null); });
+      caja.querySelectorAll('.agc-acc').forEach(function(b){
+        b.addEventListener('click', function(){
+          const id = Number(b.dataset.id);
+          const a = AGC_DATOS.agentes.find(function(x){ return x.id === id; });
+          if(b.dataset.acc === 'editar'){ abrirModalAgente_(a); return; }
+          if(b.dataset.acc === 'clave'){
+            if(!confirm('¿Generar una clave nueva para "' + a.nombre + '"? La anterior deja de servir: tendrás que capturar la nueva en esa PC (instalar_agente_oc.bat).')) return;
+            google.script.run.withSuccessHandler(function(x){
+              if(!x || !x.success){ alert((x && x.error) || 'No se pudo.'); return; }
+              abrirModalAgente_(a); mostrarClaveAgente_(x.clave);
+            }).nuevaClaveAgenteComercial(ACCESS_CODE, PANEL_USUARIO, id);
+            return;
+          }
+          if(b.dataset.acc === 'eliminar' && !confirm('¿Eliminar la PC "' + a.nombre + '"? Sus usuarios regresan a la PC principal.')) return;
+          const fn = b.dataset.acc === 'eliminar' ? 'eliminarAgenteComercial' : 'activarAgenteComercial';
+          const runner = google.script.run.withSuccessHandler(function(x){ if(!x || !x.success) alert((x && x.error) || 'No se pudo.'); cargarAgentesComercial_(); })
+            .withFailureHandler(function(){ alert('No se pudo.'); });
+          if(fn === 'eliminarAgenteComercial') runner.eliminarAgenteComercial(ACCESS_CODE, PANEL_USUARIO, id);
+          else runner.activarAgenteComercial(ACCESS_CODE, PANEL_USUARIO, id, b.dataset.acc === 'activar');
+        });
+      });
+    })
+    .withFailureHandler(function(){ caja.innerHTML = ''; })
+    .getAgentesComercial(ACCESS_CODE, PANEL_USUARIO);
+}
+function mostrarClaveAgente_(clave){
+  const box = document.getElementById('agc-clave');
+  box.style.display = '';
+  box.innerHTML = '<b>Clave de esta PC</b> (cópiala ahora: no se vuelve a mostrar):<div style="display:flex;gap:6px;align-items:center;margin:6px 0;"><input type="text" readonly id="agc-clave-txt" value="' + escapeHtml(clave) + '" style="flex:1;font-family:monospace;"><button type="button" class="row-view" id="agc-copiar">Copiar</button></div>' +
+    'En esa PC: copia la carpeta <b>agente_oc_comercial</b>, corre <b>instalar_agente_oc.bat</b> (como administrador) y pega esta clave cuando la pida. Ver LEEME_OTRA_PC.txt.';
+  document.getElementById('agc-copiar').addEventListener('click', function(){
+    const t = document.getElementById('agc-clave-txt'); t.select();
+    try { navigator.clipboard.writeText(t.value); } catch(e) { document.execCommand('copy'); }
+    this.textContent = 'Copiada';
+  });
+}
+function abrirModalAgente_(a){
+  document.getElementById('agc-titulo').textContent = a ? 'PC: ' + a.nombre : 'Agregar PC con agente';
+  document.getElementById('agc-id').value = a ? a.id : '';
+  document.getElementById('agc-nombre').value = a ? a.nombre : '';
+  document.getElementById('agc-clave').style.display = 'none';
+  const st = document.getElementById('agc-status'); st.textContent = ''; st.className = 'maq-modal-status';
+  const ocupados = {};
+  (AGC_DATOS.agentes || []).forEach(function(x){ if(x.activo && (!a || x.id !== a.id)) x.usuarios.forEach(function(u){ ocupados[u] = x.nombre; }); });
+  const mios = a ? a.usuarios : [];
+  document.getElementById('agc-usuarios').innerHTML = (AGC_DATOS.usuariosPanel || []).map(function(u){
+    const U = u.toUpperCase(); const otro = ocupados[U];
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;' + (otro ? 'opacity:.5;' : '') + '" title="' + (otro ? 'Ya lo atiende ' + escapeHtml(otro) : '') + '"><input type="checkbox" class="agc-u" value="' + escapeHtml(u) + '"' + (mios.indexOf(U) >= 0 ? ' checked' : '') + (otro ? ' disabled' : '') + ' style="width:auto;"> ' + escapeHtml(u) + (otro ? ' <span class="mnt-subtext" style="display:inline;">(' + escapeHtml(otro) + ')</span>' : '') + '</label>';
+  }).join('') || '<span class="mnt-subtext">No hay usuarios del Panel.</span>';
+  document.getElementById('agc-guardar').style.display = '';
+  document.getElementById('agc-overlay').classList.add('open');
+}
+document.getElementById('agc-close').addEventListener('click', function(){ document.getElementById('agc-overlay').classList.remove('open'); cargarAgentesComercial_(); });
+document.getElementById('agc-guardar').addEventListener('click', function(){
+  const id = Number(document.getElementById('agc-id').value) || null;
+  const datos = { nombre: document.getElementById('agc-nombre').value, usuarios: [].map.call(document.querySelectorAll('#agc-usuarios .agc-u:checked'), function(x){ return x.value; }) };
+  const st = document.getElementById('agc-status'); const btn = this;
+  btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+      st.textContent = 'Guardado.'; st.className = 'maq-modal-status show ok';
+      document.getElementById('agc-id').value = r.id;
+      if(r.clave){ mostrarClaveAgente_(r.clave); btn.style.display = 'none'; }
+      cargarAgentesComercial_();
+    })
+    .withFailureHandler(function(){ btn.disabled = false; st.textContent = 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+    .guardarAgenteComercial(ACCESS_CODE, PANEL_USUARIO, id, datos);
+});
+
 // --- Carga automática a Comercial (agente en la PC de Comercial) ---
 const OCX_EST_AGENTE_ = { pendiente: 'Esperando al agente', cargada: '✓ Cargada en Comercial', error: '⚠ Error' };
 function cargarCargaComercial_(){
@@ -22017,7 +22136,9 @@ function cargarCargaComercial_(){
       }).join('');
       caja.innerHTML = '<div style="margin-bottom:4px;"><b>Carga automática a Comercial</b> · ' + est + '</div>' + errAg
         + '<div class="mnt-subtext" style="margin-bottom:4px;">Con la empresa prendida, todo lo autorizado ("Aut") se carga solo en Comercial (refacciones y gastos aparte). El agente usa el siguiente folio <b>libre en Comercial</b>: si alguien ya capturó a mano ese folio, toma el que sigue y aquí se ve el folio real. Lo que no tiene código de producto se queda en "Gasto directo".</div>'
-        + emps + (filas ? '<div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Empresa</th><th>OC</th><th>Proveedor</th><th>Orden</th><th>Partidas</th><th>Estado</th><th></th></tr></thead><tbody>' + filas + '</tbody></table></div>' : '');
+        + emps + (filas ? '<div class="table-wrap" style="max-height:200px;overflow:auto;"><table><thead><tr><th>Empresa</th><th>OC</th><th>Proveedor</th><th>Orden</th><th>Partidas</th><th>Estado</th><th></th></tr></thead><tbody>' + filas + '</tbody></table></div>' : '')
+        + '<div id="agc-lista" style="margin-top:10px;"></div>';
+      cargarAgentesComercial_();
       caja.querySelectorAll('.ocx-auto-chk').forEach(function(chk){
         chk.addEventListener('change', function(){
           if(chk.checked && !confirm('Desde ahora, todo lo autorizado de esta empresa se cargará SOLO en CONTPAQi Comercial con el siguiente folio. ¿Prender la carga automática?')){ chk.checked = false; return; }

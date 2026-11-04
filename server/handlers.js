@@ -12,6 +12,7 @@ const { guardarArchivo_, leerArchivoComoBuffer_ } = require('./storage');
 const avisos = require('./avisos');
 const exportarOc = require('./exportarOcContpaqi');
 const ocProv = require('./ordenCompraProveedor');
+const facComb = require('./facturasCombustible.js');
 const {
   preguntarleAClaudeSobreImagen_,
   preguntarleAClaudeSobreImagenes_,
@@ -3868,6 +3869,140 @@ async function getReporteDieselCombinado(code, nombreUsuario, fechaInicio, fecha
   return { huertas, activos };
 }
 
+// ---- Facturas semanales de combustible (nov-2026, Carlos) ----
+// Se sube el CFDI (XML + PDF) de un proveedor por semana; su subtotal, IVA e
+// IEPS se reparten por litros entre lo de ese proveedor en esas fechas
+// (entregas de diesel a huertas + cargas de Combustible Automotriz) y salen en
+// el Reporte Combustible General. El reparto se calcula al consultar: si se
+// corrige una carga, el reparto se ajusta solo.
+const PESTANAS_COMBUSTIBLE_ = ['diesel', 'combustible_automotriz'];
+const nombreProvComb_ = (t) => (t || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+
+// Lo que se le compró al proveedor en [desde, hasta]: [{ clave, tipo, litros, folio, origen, fecha }]
+async function registrosProveedorCombustible_(proveedorId, desde, hasta) {
+  const [[prov]] = await pool.query('SELECT nombre FROM proveedores_combustible WHERE id = ?', [proveedorId]);
+  if (!prov) return [];
+  const ini = desde + ' 00:00:00', fin = hasta + ' 23:59:59';
+  const [ent] = await pool.query(
+    `SELECT de.folio, de.litros, de.fecha FROM diesel_entregas de JOIN huertas h ON h.nombre = de.huerta
+      WHERE de.eliminado = 0 AND h.proveedor_id = ? AND de.fecha BETWEEN ? AND ?`, [proveedorId, ini, fin]);
+  const [aut] = await pool.query(
+    `SELECT folio, litros, fecha, tipo_combustible, proveedor FROM combustible_automotriz
+      WHERE eliminado = 0 AND fecha BETWEEN ? AND ?`, [ini, fin]);
+  const nombre = nombreProvComb_(prov.nombre);
+  return ent.map((r) => ({ clave: 'H|' + r.folio, tipo: 'diesel', litros: Number(r.litros) || 0, folio: r.folio, origen: 'huerta', fecha: r.fecha }))
+    .concat(aut.filter((r) => nombreProvComb_(r.proveedor) === nombre)
+      .map((r) => ({ clave: 'A|' + r.folio, tipo: r.tipo_combustible === 'gasolina' ? 'gasolina' : 'diesel', litros: Number(r.litros) || 0, folio: r.folio, origen: 'automotriz', fecha: r.fecha })));
+}
+
+function filaFacturaCombustible_(f) {
+  let tipos = {}; try { tipos = JSON.parse(f.detalle || '{}'); } catch (e) { tipos = {}; }
+  return { id: f.id, proveedorId: f.proveedor_id, proveedor: f.proveedor || '', desde: fechaSoloOrNull(f.fecha_desde), hasta: fechaSoloOrNull(f.fecha_hasta),
+    uuid: f.uuid || '', serie: f.serie || '', folio: f.folio || '', fechaFactura: fechaSoloOrNull(f.fecha_factura), emisor: f.nombre_emisor || '',
+    subtotal: Number(f.subtotal), iva: Number(f.iva), ieps: Number(f.ieps), total: f.total === null ? null : Number(f.total),
+    tipos, xmlUrl: f.xml_url || '', pdfUrl: f.pdf_url || '', subidoPor: f.subido_por || '', subidoEn: isoOrNull(f.subido_en) };
+}
+
+// Revisión de una factura contra lo registrado: litros por tipo y lo que no se pudo repartir.
+async function revisarFacturaCombustible_(fac) {
+  const regs = await registrosProveedorCombustible_(fac.proveedorId, fac.desde, fac.hasta);
+  const rep = facComb.repartirFacturaCombustible({ tipos: fac.tipos }, regs);
+  const avisos = [];
+  ['diesel', 'gasolina'].forEach((t) => {
+    const lf = fac.tipos[t] ? Number(fac.tipos[t].litros) : 0;
+    const lr = Math.round((rep.litrosPorTipo[t] || 0) * 1000) / 1000;
+    if (lf || lr) {
+      if (Math.abs(lf - lr) > 0.5) avisos.push(t[0].toUpperCase() + t.slice(1) + ': la factura trae ' + lf.toLocaleString('es-MX') + ' L y en el sistema hay ' + lr.toLocaleString('es-MX') + ' L de ese proveedor en esas fechas.');
+    }
+  });
+  rep.sinAsignar.forEach((x) => avisos.push('No hay cargas de ' + (x.tipo === 'otro' ? 'combustible' : x.tipo) + ' para repartir $' + (x.subtotal + x.iva + x.ieps).toFixed(2) + ' de la factura.'));
+  return { registros: regs.length, litrosRegistrados: rep.litrosPorTipo, avisos };
+}
+
+async function subirFacturaCombustible(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_COMBUSTIBLE_, 'capturar');
+  data = data || {};
+  const desde = (data.desde || '').toString().slice(0, 10), hasta = (data.hasta || '').toString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta) || desde > hasta) return { success: false, error: 'Elige la semana (desde / hasta).' };
+  const [[prov]] = await pool.query('SELECT id, nombre FROM proveedores_combustible WHERE id = ? OR nombre = ? LIMIT 1', [Number(data.proveedorId) || 0, (data.proveedor || '').toString().trim()]);
+  if (!prov) return { success: false, error: 'Elige el proveedor de combustible.' };
+  const xml = bufferDeDataUrl_(data.xml), pdf = bufferDeDataUrl_(data.pdf);
+  if (!xml || !xml.length) return { success: false, error: 'Adjunta el XML de la factura.' };
+  if (!pdf || !pdf.length) return { success: false, error: 'Adjunta el PDF de la factura.' };
+  if (pdf.length > MAX_FACTURA_BYTES_ || xml.length > MAX_FACTURA_BYTES_) return { success: false, error: 'El archivo es demasiado grande (máximo 15 MB).' };
+  if (pdf.slice(0, 1024).toString('latin1').indexOf('%PDF') < 0) return { success: false, error: 'El archivo de la factura no es un PDF.' };
+  const cfdi = facComb.leerFacturaCombustible(xml.toString('utf8'));
+  if (!cfdi) return { success: false, error: 'El XML no es un CFDI (factura electrónica).' };
+  if (!cfdi.conceptos.length) return { success: false, error: 'El XML no trae conceptos.' };
+  if (cfdi.uuid) {
+    const [dup] = await pool.query('SELECT id, fecha_desde, fecha_hasta FROM combustible_facturas WHERE uuid = ? AND eliminado = 0', [cfdi.uuid]);
+    if (dup.length) return { success: false, error: 'Esa factura ya se subió (semana del ' + fechaSoloOrNull(dup[0].fecha_desde) + ' al ' + fechaSoloOrNull(dup[0].fecha_hasta) + ').' };
+  }
+  const [encima] = await pool.query(
+    'SELECT serie, folio, fecha_desde, fecha_hasta FROM combustible_facturas WHERE proveedor_id = ? AND eliminado = 0 AND fecha_desde <= ? AND fecha_hasta >= ?', [prov.id, hasta, desde]);
+  if (encima.length) {
+    const e = encima[0];
+    return { success: false, error: 'Ya hay una factura de ' + prov.nombre + ' (' + [e.serie, e.folio].filter(Boolean).join(' ') + ') del ' + fechaSoloOrNull(e.fecha_desde) + ' al ' + fechaSoloOrNull(e.fecha_hasta) + ': las fechas se enciman y las cargas se repartirían dos veces.' };
+  }
+  const xmlUrl = await guardarArchivo_('data:application/xml;base64,' + xml.toString('base64'));
+  const pdfUrl = await guardarArchivo_('data:application/pdf;base64,' + pdf.toString('base64'));
+  const [ins] = await pool.query(
+    `INSERT INTO combustible_facturas (proveedor_id, fecha_desde, fecha_hasta, uuid, serie, folio, fecha_factura, rfc_emisor, nombre_emisor, rfc_receptor,
+       subtotal, iva, ieps, total, detalle, xml_url, pdf_url, subido_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [prov.id, desde, hasta, cfdi.uuid || null, cfdi.serie.slice(0, 40) || null, cfdi.folio.slice(0, 40) || null, /^\d{4}-\d{2}-\d{2}$/.test(cfdi.fecha) ? cfdi.fecha : null,
+      cfdi.rfcEmisor.slice(0, 20) || null, cfdi.nombreEmisor.slice(0, 255) || null, cfdi.rfcReceptor.slice(0, 20) || null,
+      cfdi.subtotal, cfdi.iva, cfdi.ieps, cfdi.total, JSON.stringify(cfdi.tipos), xmlUrl, pdfUrl, nombreUsuario || null]);
+  const fac = { id: ins.insertId, proveedorId: prov.id, desde, hasta, tipos: cfdi.tipos };
+  const rev = await revisarFacturaCombustible_(fac);
+  if (!rev.registros) rev.avisos.unshift('No hay entregas a huertas ni cargas automotrices de ' + prov.nombre + ' en esas fechas.');
+  if (cfdi.total !== null && Math.abs(cfdi.subtotal + cfdi.iva + cfdi.ieps - cfdi.total) > 1) rev.avisos.push('Subtotal + IVA + IEPS ($' + (cfdi.subtotal + cfdi.iva + cfdi.ieps).toFixed(2) + ') no da el total de la factura ($' + cfdi.total.toFixed(2) + ').');
+  await registrarAuditoria_('combustible_facturas', String(ins.insertId), 'subir', nombreUsuario,
+    prov.nombre + ' ' + desde + '..' + hasta + ' ' + [cfdi.serie, cfdi.folio].filter(Boolean).join(' ') + ' $' + (cfdi.total || 0).toFixed(2));
+  return { success: true, id: ins.insertId, factura: { serie: cfdi.serie, folio: cfdi.folio, subtotal: cfdi.subtotal, iva: cfdi.iva, ieps: cfdi.ieps, total: cfdi.total, tipos: cfdi.tipos }, registros: rev.registros, avisos: rev.avisos };
+}
+
+async function getFacturasCombustible(code, nombreUsuario, fechaInicio, fechaFin) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_COMBUSTIBLE_, 'visualizar');
+  const cond = ['f.eliminado = 0'], params = [];
+  if (fechaInicio) { cond.push('f.fecha_hasta >= ?'); params.push(String(fechaInicio).slice(0, 10)); }
+  if (fechaFin) { cond.push('f.fecha_desde <= ?'); params.push(String(fechaFin).slice(0, 10)); }
+  const [rows] = await pool.query(
+    'SELECT f.*, p.nombre AS proveedor FROM combustible_facturas f LEFT JOIN proveedores_combustible p ON p.id = f.proveedor_id WHERE ' + cond.join(' AND ') + ' ORDER BY f.fecha_desde DESC, f.id DESC LIMIT 200', params);
+  const out = [];
+  for (const r of rows) {
+    const f = filaFacturaCombustible_(r);
+    const rev = await revisarFacturaCombustible_(f);
+    out.push(Object.assign(f, { registros: rev.registros, litrosRegistrados: rev.litrosRegistrados, avisos: rev.avisos }));
+  }
+  const [provs] = await pool.query('SELECT nombre FROM proveedores_combustible ORDER BY nombre');
+  return { facturas: out, proveedores: provs.map((p) => p.nombre) };
+}
+
+async function eliminarFacturaCombustible(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_COMBUSTIBLE_, 'capturar');
+  const [u] = await pool.query('UPDATE combustible_facturas SET eliminado = 1, eliminado_por = ?, eliminado_en = NOW() WHERE id = ? AND eliminado = 0', [nombreUsuario || null, Number(id) || 0]);
+  if (!u.affectedRows) return { success: false, error: 'Esa factura ya no existe.' };
+  await registrarAuditoria_('combustible_facturas', String(id), 'eliminar', nombreUsuario, '');
+  return { success: true };
+}
+
+// { 'H|folio' | 'A|folio': { subtotal, iva, ieps, total, factura } } de las facturas que tocan el rango.
+async function repartoFacturasCombustible_(fechaInicio, fechaFin) {
+  const cond = ['f.eliminado = 0'], params = [];
+  if (fechaInicio) { cond.push('f.fecha_hasta >= ?'); params.push(String(fechaInicio).slice(0, 10)); }
+  if (fechaFin) { cond.push('f.fecha_desde <= ?'); params.push(String(fechaFin).slice(0, 10)); }
+  const [rows] = await pool.query('SELECT f.* FROM combustible_facturas f WHERE ' + cond.join(' AND '), params);
+  const out = {};
+  for (const r of rows) {
+    const f = filaFacturaCombustible_(r);
+    const regs = await registrosProveedorCombustible_(f.proveedorId, f.desde, f.hasta);
+    const rep = facComb.repartirFacturaCombustible({ tipos: f.tipos }, regs);
+    const etiqueta = [f.serie, f.folio].filter(Boolean).join(' ') || ('#' + f.id);
+    Object.keys(rep.porRegistro).forEach((k) => { out[k] = Object.assign({ factura: etiqueta }, rep.porRegistro[k]); });
+  }
+  return out;
+}
+
 // Reporte general de combustible: lo mismo que getReporteDieselCombinado
 // (huertas + activos fijos), pero además de diesel también junta la
 // gasolina de Combustible Automotriz — pedido por Carlos para no tener que
@@ -3891,6 +4026,9 @@ async function getReporteCombustibleGeneral(code, nombreUsuario, fechaInicio, fe
     params.push(fechaFin + ' 23:59:59');
   }
   const whereSql = ' WHERE ' + condiciones.join(' AND ');
+  // Nov-2026: subtotal / IVA / IEPS repartidos de las facturas semanales.
+  const reparto = await repartoFacturasCombustible_(fechaInicio, fechaFin);
+  const deFactura = (clave) => { const x = reparto[clave]; return x ? { Subtotal: x.subtotal, Iva: x.iva, Ieps: x.ieps, TotalFactura: x.total, Factura: x.factura } : { Subtotal: null, Iva: null, Ieps: null, TotalFactura: null, Factura: null }; };
 
   const litrosValido_ = (v) => {
     const n = Number(v);
@@ -3909,7 +4047,7 @@ async function getReporteCombustibleGeneral(code, nombreUsuario, fechaInicio, fe
   );
   const huertas = huertasRows
     .filter((r) => litrosValido_(r.Litros) && huertaPermitida_(huertasRestringidas, r.Huerta))
-    .map((r) => ({
+    .map((r) => Object.assign({
       Folio: r.Folio,
       Huerta: (r.Huerta || '').trim(),
       Tipo: 'diesel',
@@ -3918,7 +4056,7 @@ async function getReporteCombustibleGeneral(code, nombreUsuario, fechaInicio, fe
       Fecha: r.Fecha,
       Empresa: r.Empresa || null,
       Proveedor: r.Proveedor || null,
-    }))
+    }, deFactura('H|' + r.Folio)))
     .sort((a, b) => a.Huerta.localeCompare(b.Huerta, 'es') || new Date(a.Fecha) - new Date(b.Fecha));
 
   const [dieselCrudas] = await pool.query(DIESEL_SELECT + ' WHERE d.eliminado = 0');
@@ -3964,7 +4102,7 @@ async function getReporteCombustibleGeneral(code, nombreUsuario, fechaInicio, fe
       };
     })
     .concat(
-      automotrizRows.map((r) => ({
+      automotrizRows.map((r) => Object.assign({
         Folio: r.Folio,
         CodigoUnidad: r.CodigoUnidad,
         Unidad: r.Unidad,
@@ -3980,7 +4118,7 @@ async function getReporteCombustibleGeneral(code, nombreUsuario, fechaInicio, fe
         Implemento: null,
         Empresa: r.Empresa || null,
         Proveedor: r.Proveedor || null,
-      }))
+      }, deFactura('A|' + r.Folio)))
     )
     .sort((a, b) => (a.Unidad || '').localeCompare(b.Unidad || '', 'es') || new Date(a.Fecha) - new Date(b.Fecha));
 
@@ -11639,6 +11777,10 @@ module.exports = {
   getDieselDisponiblePorHuerta,
   getReporteDieselCombinado,
   getReporteCombustibleGeneral,
+  subirFacturaCombustible,
+  getFacturasCombustible,
+  eliminarFacturaCombustible,
+  repartoFacturasCombustible_,
   getRendimientoMaquinaria,
   guardarRendimientoMaquinaria,
   getUnidadesDieselPermitidas,

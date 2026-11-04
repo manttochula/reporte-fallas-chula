@@ -3488,3 +3488,36 @@ CREATE TABLE IF NOT EXISTS agentes_comercial (
 -- Nov-2026: precio de la cotización con hasta 4 decimales, para que al corregir
 -- el IMPORTE total (con IVA) en el comparativo quede exacto al centavo.
 ALTER TABLE solicitud_cotizacion_respuesta_items MODIFY COLUMN precio_cotizado DECIMAL(12,4) DEFAULT NULL;
+
+-- ------------------------------------------------------------
+-- Facturas semanales de combustible (nov-2026): el CFDI de un proveedor por
+-- semana; su subtotal, IVA e IEPS se reparten por litros entre las entregas
+-- a huertas y las cargas automotrices de ese proveedor en esas fechas
+-- (el reparto se calcula al consultar el Reporte Combustible General).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS combustible_facturas (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  proveedor_id  INT NOT NULL,
+  fecha_desde   DATE NOT NULL,
+  fecha_hasta   DATE NOT NULL,
+  uuid          VARCHAR(40)  DEFAULT NULL,
+  serie         VARCHAR(40)  DEFAULT NULL,
+  folio         VARCHAR(40)  DEFAULT NULL,
+  fecha_factura DATE         DEFAULT NULL,
+  rfc_emisor    VARCHAR(20)  DEFAULT NULL,
+  nombre_emisor VARCHAR(255) DEFAULT NULL,
+  rfc_receptor  VARCHAR(20)  DEFAULT NULL,
+  subtotal      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  iva           DECIMAL(12,2) NOT NULL DEFAULT 0,
+  ieps          DECIMAL(12,2) NOT NULL DEFAULT 0,
+  total         DECIMAL(12,2) DEFAULT NULL,
+  detalle       TEXT          DEFAULT NULL,   -- JSON por tipo: { diesel: { litros, subtotal, iva, ieps }, gasolina: {...}, otro: {...} }
+  xml_url       VARCHAR(500)  DEFAULT NULL,
+  pdf_url       VARCHAR(500)  DEFAULT NULL,
+  subido_por    VARCHAR(255)  DEFAULT NULL,
+  subido_en     TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  eliminado     TINYINT(1)    NOT NULL DEFAULT 0,
+  eliminado_por VARCHAR(255)  DEFAULT NULL,
+  eliminado_en  DATETIME      DEFAULT NULL,
+  INDEX idx_cf_proveedor_fechas (proveedor_id, fecha_desde, fecha_hasta)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

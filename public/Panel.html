@@ -1450,6 +1450,19 @@
     </div>
 
     <!-- PCs con agente de Comercial (nov-2026): cada PC atiende las compras de sus usuarios. -->
+    <div class="maq-modal-overlay" id="cf-overlay">
+      <div class="maq-modal" style="max-width:560px;">
+        <span class="maq-modal-close" id="cf-close">&times;</span>
+        <h3 style="margin-top:0;">Factura semanal de combustible</h3>
+        <div class="maq-field"><label>Proveedor *</label><select id="cf-f-proveedor"><option value="">Elige el proveedor</option></select></div>
+        <div class="maq-field"><label>Semana que cubre la factura *</label>
+          <span class="toolbar-date-group"><input type="date" id="cf-f-desde"> <span class="mnt-subtext" style="display:inline;">a</span> <input type="date" id="cf-f-hasta"></span></div>
+        <div class="maq-field"><label>XML de la factura *</label><input type="file" id="cf-f-xml" accept=".xml,text/xml,application/xml"></div>
+        <div class="maq-field"><label>PDF de la factura *</label><input type="file" id="cf-f-pdf" accept=".pdf,application/pdf"></div>
+        <div class="maq-modal-status" id="cf-status"></div>
+        <div class="maq-modal-actions"><button class="maq-save-btn" id="cf-guardar">Subir y repartir</button></div>
+      </div>
+    </div>
     <div class="maq-modal-overlay" id="agc-overlay" style="z-index:1300;">
       <div class="maq-modal" style="max-width:560px;">
         <span class="maq-modal-close" id="agc-close">&times;</span>
@@ -2275,6 +2288,15 @@
     </div>
 
     <div id="pview-combustible-general" style="display:none;">
+      <div class="dz-resumen" id="cf-facturas" style="margin-bottom:14px;">
+        <div class="dz-resumen-header">Facturas semanales de combustible</div>
+        <div class="mnt-subtext" style="margin-bottom:8px;">Sube el XML y el PDF de la factura de cada proveedor por semana: su <b>subtotal, IVA e IEPS</b> se reparten <b>por litros</b> entre lo que se le compró en esas fechas (entregas de diesel a huertas y cargas de Combustible Automotriz) y salen en el reporte de abajo.</div>
+        <div class="toolbar" style="margin-bottom:8px;"><button class="btn-amber" id="cf-btn-subir">+ Subir factura de la semana</button></div>
+        <div class="table-wrap"><table style="min-width:0;">
+          <thead><tr><th>Proveedor</th><th>Semana</th><th>Factura</th><th>Litros factura</th><th>Litros registrados</th><th>Subtotal</th><th>IVA</th><th>IEPS</th><th>Total</th><th></th></tr></thead>
+          <tbody id="cf-table-body"><tr><td colspan="10"><div class="empty">Cargando...</div></td></tr></tbody>
+        </table></div>
+      </div>
       <div class="dz-resumen" id="rcg-container">
         <div id="rcg-print-header">
           <h2>Reporte general de combustible — diesel y gasolina</h2>
@@ -2304,19 +2326,19 @@
         <div class="table-wrap">
           <table style="min-width:0;">
             <thead>
-              <tr><th>Huerta</th><th>Entregas</th><th>Litros entregados</th><th>Costo</th></tr>
+              <tr><th>Huerta</th><th>Entregas</th><th>Litros entregados</th><th>Costo</th><th>Subtotal</th><th>IVA</th><th>IEPS</th></tr>
             </thead>
-            <tbody id="rcg-huertas-table-body"><tr><td colspan="4"><div class="empty">Cargando...</div></td></tr></tbody>
+            <tbody id="rcg-huertas-table-body"><tr><td colspan="7"><div class="empty">Cargando...</div></td></tr></tbody>
           </table>
         </div>
 
-        <div class="dz-resumen-header" style="font-size:13px;font-weight:600;margin:16px 0 8px;">Activos fijos y vehículos — combustible cargado (agrícola y automotriz, con costo capturado)</div>
+        <div class="dz-resumen-header" style="font-size:13px;font-weight:600;margin:16px 0 8px;">Activos fijos y vehículos — combustible cargado (agrícola y automotriz, con costo capturado o factura)</div>
         <div class="table-wrap">
           <table style="min-width:0;">
             <thead>
-              <tr><th>Folio</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Fecha</th><th>Litros cargados</th><th>Costo</th></tr>
+              <tr><th>Folio</th><th>Unidad</th><th>Tipo</th><th>Origen</th><th>Fecha</th><th>Litros cargados</th><th>Costo</th><th>Subtotal</th><th>IVA</th><th>IEPS</th></tr>
             </thead>
-            <tbody id="rcg-activos-table-body"><tr><td colspan="7"><div class="empty">Cargando...</div></td></tr></tbody>
+            <tbody id="rcg-activos-table-body"><tr><td colspan="10"><div class="empty">Cargando...</div></td></tr></tbody>
           </table>
         </div>
 
@@ -4630,7 +4652,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true,
+  guardarPolizaSeguro: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -5154,6 +5176,9 @@ function ocultarControlesSoloLectura(){
   if(!puedeCapturarPestana('diesel')){
     ocultar(['#ent-submit', '#dz-btn-add', '#dz-btn-bitacora', '.dz-btn-editar', '.dz-btn-eliminar', '.dz-btn-restaurar', '#dz-btn-save', '.ent-btn-editar', '.ent-btn-eliminar', '.ent-btn-restaurar', '#ent-btn-save', '.rend-btn-guardar', '#rend-th-acciones',
       '.dzh-btn-registrar-entrega', '.dzh-btn-add-carga', '.dzh-btn-bitacora', '.dzh-btn-editar-carga', '.dzh-btn-eliminar-carga', '.dzh-btn-restaurar-carga', '.dzh-btn-editar-entrega', '.dzh-btn-eliminar-entrega', '.dzh-btn-restaurar-entrega']);
+  }
+  if(!puedeCapturarPestana('diesel') && !puedeCapturarPestana('combustible_automotriz')){
+    ocultar(['#cf-btn-subir', '.cf-btn-eliminar']);
   }
   if(!puedeCapturarPestana('combustible_automotriz')){
     ocultar(['#ca-btn-add', '#ca-btn-tickets', '.ca-btn-editar', '.ca-btn-eliminar', '.ca-btn-restaurar', '#ca-btn-save', '#ca-tix-btn-guardar']);
@@ -7325,7 +7350,7 @@ ptabCombustibleAutomotriz.addEventListener('click', function(){
 });
 ptabCombustibleGeneral.addEventListener('click', function(){
   activarPanelTab(ptabCombustibleGeneral, pviewCombustibleGeneral);
-  if(!REPORTE_COMBUSTIBLE_GENERAL_CARGADO){ cargarReporteCombustibleGeneral(); }
+  if(!REPORTE_COMBUSTIBLE_GENERAL_CARGADO){ cargarReporteCombustibleGeneral(); cargarFacturasCombustible(); }
 });
 ptabMovimientos.addEventListener('click', function(){
   activarPanelTab(ptabMovimientos, pviewMovimientos);
@@ -14067,8 +14092,8 @@ let REPORTE_COMBUSTIBLE_GENERAL = { huertas: [], activos: [] };
 function cargarReporteCombustibleGeneral(){
   const tbodyH = document.getElementById('rcg-huertas-table-body');
   const tbodyA = document.getElementById('rcg-activos-table-body');
-  tbodyH.innerHTML = '<tr><td colspan="4"><div class="empty">Cargando...</div></td></tr>';
-  tbodyA.innerHTML = '<tr><td colspan="7"><div class="empty">Cargando...</div></td></tr>';
+  tbodyH.innerHTML = '<tr><td colspan="7"><div class="empty">Cargando...</div></td></tr>';
+  tbodyA.innerHTML = '<tr><td colspan="10"><div class="empty">Cargando...</div></td></tr>';
   const fechaDesde = document.getElementById('rcg-fecha-desde').value || null;
   const fechaHasta = document.getElementById('rcg-fecha-hasta').value || null;
   google.script.run
@@ -14078,8 +14103,8 @@ function cargarReporteCombustibleGeneral(){
       renderReporteCombustibleGeneral();
     })
     .withFailureHandler(function(){
-      tbodyH.innerHTML = '<tr><td colspan="4"><div class="empty">No se pudo cargar el reporte.</div></td></tr>';
-      tbodyA.innerHTML = '<tr><td colspan="7"><div class="empty">No se pudo cargar el reporte.</div></td></tr>';
+      tbodyH.innerHTML = '<tr><td colspan="7"><div class="empty">No se pudo cargar el reporte.</div></td></tr>';
+      tbodyA.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudo cargar el reporte.</div></td></tr>';
     })
     .getReporteCombustibleGeneral(ACCESS_CODE, PANEL_USUARIO, fechaDesde, fechaHasta);
 }
@@ -14087,6 +14112,15 @@ function cargarReporteCombustibleGeneral(){
 // Filtro de Empresa/Proveedor/Tipo: del lado del cliente, igual que
 // getReporteDieselFiltrado — no hace falta volver a pedirle al servidor
 // cada vez que cambian estos selects (solo las fechas sí recargan).
+// Nov-2026: subtotal / IVA / IEPS repartidos de las facturas semanales (null si ninguna fila tiene factura).
+function sumarFacturaRCG_(filas){
+  let subtotal = 0, iva = 0, ieps = 0, n = 0;
+  filas.forEach(function(r){ if(r.Subtotal !== null && r.Subtotal !== undefined){ subtotal += Number(r.Subtotal) || 0; iva += Number(r.Iva) || 0; ieps += Number(r.Ieps) || 0; n++; } });
+  return n ? { subtotal: Math.round(subtotal * 100) / 100, iva: Math.round(iva * 100) / 100, ieps: Math.round(ieps * 100) / 100, n: n } : { subtotal: null, iva: null, ieps: null, n: 0 };
+}
+function celdasFacturaRCG_(f){ return '<td>' + fmtMoneda_(f.subtotal) + '</td><td>' + fmtMoneda_(f.iva) + '</td><td>' + fmtMoneda_(f.ieps) + '</td>'; }
+function filasDeGrupoRCG_(filas, campo, nombre){ return filas.filter(function(r){ return ((r[campo] || '').toString().trim() || 'Sin asignar') === nombre; }); }
+
 function getReporteCombustibleGeneralFiltrado(){
   const empresa = document.getElementById('rcg-empresa').value;
   const proveedor = document.getElementById('rcg-proveedor').value;
@@ -14108,7 +14142,7 @@ function renderReporteCombustibleGeneral(){
   const { huertas, activos: activosFiltrados } = getReporteCombustibleGeneralFiltrado();
   const totH = sumarReporte_(huertas, 'Litros', 'Costo');
   if(huertas.length === 0){
-    tbodyH.innerHTML = '<tr><td colspan="4"><div class="empty">No hay entregas a huertas en ese rango.</div></td></tr>';
+    tbodyH.innerHTML = '<tr><td colspan="7"><div class="empty">No hay entregas a huertas en ese rango.</div></td></tr>';
   } else {
     const huertasAgrupadas = agruparYSumarRPD_(huertas, 'Huerta');
     tbodyH.innerHTML = huertasAgrupadas.map(function(g){
@@ -14118,6 +14152,7 @@ function renderReporteCombustibleGeneral(){
         <td>${g.count}</td>
         <td>${fmtLitros_(g.litros)}</td>
         <td>${fmtMoneda_(g.costo)}</td>
+        ${celdasFacturaRCG_(sumarFacturaRCG_(filasDeGrupoRCG_(huertas, 'Huerta', g.nombre)))}
       </tr>
       `;
     }).join('') + `
@@ -14125,6 +14160,7 @@ function renderReporteCombustibleGeneral(){
         <td colspan="2">TOTAL (${huertas.length} entrega${huertas.length === 1 ? '' : 's'} en ${huertasAgrupadas.length} huerta${huertasAgrupadas.length === 1 ? '' : 's'})</td>
         <td>${fmtLitros_(totH.litros)}</td>
         <td>${fmtMoneda_(totH.costo)}</td>
+        ${celdasFacturaRCG_(sumarFacturaRCG_(huertas))}
       </tr>
     `;
   }
@@ -14135,7 +14171,7 @@ function renderReporteCombustibleGeneral(){
   // Igual dinámica que el Reporte de diesel: solo se listan una por una las
   // que sí tienen costo capturado; las que no, solo suman sus litros en el
   // total general y en la suma por Empresa/Proveedor de abajo.
-  const conCosto = activos.filter(function(r){ return r.Costo !== null && r.Costo !== undefined; });
+  const conCosto = activos.filter(function(r){ return (r.Costo !== null && r.Costo !== undefined) || (r.Subtotal !== null && r.Subtotal !== undefined); });
 
   function filaActivo(r){
     return `
@@ -14147,21 +14183,23 @@ function renderReporteCombustibleGeneral(){
       <td>${fmtFechaReporte_(r.Fecha)}</td>
       <td>${fmtLitros_(r.Litros)}</td>
       <td>${fmtMoneda_(r.Costo)}</td>
+      ${celdasFacturaRCG_({ subtotal: r.Subtotal, iva: r.Iva, ieps: r.Ieps })}
     </tr>
     `;
   }
 
   if(activos.length === 0){
-    tbodyA.innerHTML = '<tr><td colspan="7"><div class="empty">No hay cargas en ese rango.</div></td></tr>';
+    tbodyA.innerHTML = '<tr><td colspan="10"><div class="empty">No hay cargas en ese rango.</div></td></tr>';
   } else if(conCosto.length === 0){
-    tbodyA.innerHTML = '<tr><td colspan="7"><div class="empty">Ninguna carga de este rango tiene costo capturado.</div></td></tr>';
+    tbodyA.innerHTML = '<tr><td colspan="10"><div class="empty">Ninguna carga de este rango tiene costo capturado ni factura.</div></td></tr>';
   } else {
     const totConCosto = sumarReporte_(conCosto, 'Litros', 'Costo');
     tbodyA.innerHTML = conCosto.map(filaActivo).join('') + `
       <tr class="rpd-total-row">
-        <td colspan="5">TOTAL con costo (${conCosto.length} carga${conCosto.length === 1 ? '' : 's'})</td>
+        <td colspan="5">TOTAL con costo o factura (${conCosto.length} carga${conCosto.length === 1 ? '' : 's'})</td>
         <td>${fmtLitros_(totConCosto.litros)}</td>
         <td>${fmtMoneda_(totConCosto.costo)}</td>
+        ${celdasFacturaRCG_(sumarFacturaRCG_(conCosto))}
       </tr>
     `;
   }
@@ -14171,8 +14209,10 @@ function renderReporteCombustibleGeneral(){
     ? null
     : (totH.costo || 0) + (totA.costo || 0);
   const costoGeneralTexto = costoGeneral === null ? '—' : '$' + fmtMoneda_(costoGeneral);
+  const facGeneral = sumarFacturaRCG_(huertas.concat(activos));
   document.getElementById('rcg-total-general').innerHTML =
-    'Total general (huertas + activos fijos y vehículos): <b>' + fmtLitros_(litrosGeneral) + ' L</b> · <b>' + costoGeneralTexto + '</b>';
+    'Total general (huertas + activos fijos y vehículos): <b>' + fmtLitros_(litrosGeneral) + ' L</b> · <b>' + costoGeneralTexto + '</b>'
+    + (facGeneral.n ? '<br>Según facturas: Subtotal <b>$' + fmtMoneda_(facGeneral.subtotal) + '</b> · IVA <b>$' + fmtMoneda_(facGeneral.iva) + '</b> · IEPS <b>$' + fmtMoneda_(facGeneral.ieps) + '</b> · Total <b>$' + fmtMoneda_(Math.round((facGeneral.subtotal + facGeneral.iva + facGeneral.ieps) * 100) / 100) + '</b>' : '');
 
   renderResumenEmpresaProveedorRCG_(huertas, activos);
 }
@@ -14188,10 +14228,10 @@ function renderResumenEmpresaProveedorRCG_(huertas, activos){
     const grupos = agruparYSumarRPD_(todas, campo);
     let html = '<div class="dz-resumen-header" style="font-size:13px;font-weight:600;margin:16px 0 8px;">' + titulo + '</div>';
     html += '<div class="table-wrap"><table style="min-width:0;"><thead><tr>'
-      + '<th>' + etiquetaColumna + '</th><th>Registros</th><th>Litros</th><th>Costo</th>'
+      + '<th>' + etiquetaColumna + '</th><th>Registros</th><th>Litros</th><th>Costo</th><th>Subtotal</th><th>IVA</th><th>IEPS</th>'
       + '</tr></thead><tbody>';
     grupos.forEach(function(g){
-      html += '<tr><td>' + escapeHtml(g.nombre) + '</td><td>' + g.count + '</td><td>' + fmtLitros_(g.litros) + '</td><td>' + fmtMoneda_(g.costo) + '</td></tr>';
+      html += '<tr><td>' + escapeHtml(g.nombre) + '</td><td>' + g.count + '</td><td>' + fmtLitros_(g.litros) + '</td><td>' + fmtMoneda_(g.costo) + '</td>' + celdasFacturaRCG_(sumarFacturaRCG_(filasDeGrupoRCG_(todas, campo, g.nombre))) + '</tr>';
     });
     html += '</tbody></table></div>';
     return html;
@@ -14223,16 +14263,19 @@ document.getElementById('rcg-export').addEventListener('click', function(){
       {header:'Entregas', key:'entregas', width:11, numFmt:'#,##0', align:'center'},
       {header:'Litros entregados', key:'litros', width:16, numFmt:'#,##0.00'},
       {header:'Costo', key:'costo', width:14, numFmt:'"$"#,##0.00'},
+      {header:'Subtotal', key:'subtotal', width:14, numFmt:'"$"#,##0.00'},
+      {header:'IVA', key:'iva', width:12, numFmt:'"$"#,##0.00'},
+      {header:'IEPS', key:'ieps', width:12, numFmt:'"$"#,##0.00'},
     ],
-    filas: huertasAgrupadasExp.map(function(g){ return { huerta: g.nombre, entregas: g.count, litros: g.litros, costo: g.costo }; }),
+    filas: huertasAgrupadasExp.map(function(g){ const f = sumarFacturaRCG_(filasDeGrupoRCG_(huertas, 'Huerta', g.nombre)); return { huerta: g.nombre, entregas: g.count, litros: g.litros, costo: g.costo, subtotal: f.subtotal, iva: f.iva, ieps: f.ieps }; }),
     mensajeVacio: 'No hay entregas a huertas en ese rango.',
     filaTotal: huertas.length ? {
       huerta: 'TOTAL (' + huertas.length + ' entrega' + (huertas.length === 1 ? '' : 's') + ' en ' + huertasAgrupadasExp.length + ' huerta' + (huertasAgrupadasExp.length === 1 ? '' : 's') + ')',
-      litros: totH.litros, costo: totH.costo,
+      litros: totH.litros, costo: totH.costo, subtotal: sumarFacturaRCG_(huertas).subtotal, iva: sumarFacturaRCG_(huertas).iva, ieps: sumarFacturaRCG_(huertas).ieps,
     } : null,
   };
 
-  const conCostoExp = activos.filter(function(r){ return r.Costo !== null && r.Costo !== undefined; });
+  const conCostoExp = activos.filter(function(r){ return (r.Costo !== null && r.Costo !== undefined) || (r.Subtotal !== null && r.Subtotal !== undefined); });
   const totConCostoExp = sumarReporte_(conCostoExp, 'Litros', 'Costo');
   const seccionActivos = {
     titulo: 'Activos fijos y vehículos — combustible cargado (con costo capturado)',
@@ -14244,13 +14287,18 @@ document.getElementById('rcg-export').addEventListener('click', function(){
       {header:'Fecha', key:'fecha', width:16},
       {header:'Litros cargados', key:'litros', width:15, numFmt:'#,##0.00'},
       {header:'Costo', key:'costo', width:14, numFmt:'"$"#,##0.00'},
+      {header:'Subtotal', key:'subtotal', width:14, numFmt:'"$"#,##0.00'},
+      {header:'IVA', key:'iva', width:12, numFmt:'"$"#,##0.00'},
+      {header:'IEPS', key:'ieps', width:12, numFmt:'"$"#,##0.00'},
+      {header:'Factura', key:'factura', width:14},
     ],
     filas: conCostoExp.map(function(r){
       return { folio: r.Folio, unidad: r.Unidad || r.CodigoUnidad, tipo: r.Tipo === 'gasolina' ? 'Gasolina' : 'Diesel',
-        origen: r.Origen === 'automotriz' ? 'Automotriz' : 'Agrícola', fecha: r.Fecha, litros: Number(r.Litros) || 0, costo: r.Costo };
+        origen: r.Origen === 'automotriz' ? 'Automotriz' : 'Agrícola', fecha: r.Fecha, litros: Number(r.Litros) || 0, costo: r.Costo,
+        subtotal: r.Subtotal, iva: r.Iva, ieps: r.Ieps, factura: r.Factura || '' };
     }),
-    mensajeVacio: 'Ninguna carga de este rango tiene costo capturado.',
-    filaTotal: conCostoExp.length ? { folio: 'TOTAL con costo (' + conCostoExp.length + ')', litros: totConCostoExp.litros, costo: totConCostoExp.costo } : null,
+    mensajeVacio: 'Ninguna carga de este rango tiene costo capturado ni factura.',
+    filaTotal: conCostoExp.length ? (function(){ const f = sumarFacturaRCG_(conCostoExp); return { folio: 'TOTAL con costo o factura (' + conCostoExp.length + ')', litros: totConCostoExp.litros, costo: totConCostoExp.costo, subtotal: f.subtotal, iva: f.iva, ieps: f.ieps }; })() : null,
   };
 
   const totA = sumarReporte_(activos, 'Litros', 'Costo');
@@ -14261,8 +14309,11 @@ document.getElementById('rcg-export').addEventListener('click', function(){
       {header:'Total general', key:'concepto', width:34},
       {header:'Litros', key:'litros', width:16, numFmt:'#,##0.00'},
       {header:'Costo', key:'costo', width:16, numFmt:'"$"#,##0.00'},
+      {header:'Subtotal', key:'subtotal', width:16, numFmt:'"$"#,##0.00'},
+      {header:'IVA', key:'iva', width:14, numFmt:'"$"#,##0.00'},
+      {header:'IEPS', key:'ieps', width:14, numFmt:'"$"#,##0.00'},
     ],
-    filas: [{ concepto: 'Huertas + activos fijos y vehículos', litros: litrosGeneral, costo: costoGeneral }],
+    filas: [(function(){ const f = sumarFacturaRCG_(huertas.concat(activos)); return { concepto: 'Huertas + activos fijos y vehículos', litros: litrosGeneral, costo: costoGeneral, subtotal: f.subtotal, iva: f.iva, ieps: f.ieps }; })()],
   };
 
   const tipoSel = document.getElementById('rcg-tipo');
@@ -14307,6 +14358,101 @@ document.getElementById('rcg-pdf').addEventListener('click', function(){
 });
 window.addEventListener('afterprint', function(){
   document.body.classList.remove('rcg-imprimiendo');
+});
+
+// --- Facturas semanales de combustible (nov-2026) ---
+let FACTURAS_COMBUSTIBLE = [];
+let PROVEEDORES_FACTURA_CF = [];
+function fmtFechaCorta_(iso){ return iso ? new Date(iso + 'T00:00:00').toLocaleDateString('es-MX') : '—'; }
+function cargarFacturasCombustible(){
+  const tbody = document.getElementById('cf-table-body');
+  google.script.run
+    .withSuccessHandler(function(r){ FACTURAS_COMBUSTIBLE = (r && r.facturas) || []; PROVEEDORES_FACTURA_CF = (r && r.proveedores) || []; renderFacturasCombustible(); })
+    .withFailureHandler(function(){ tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudieron cargar las facturas.</div></td></tr>'; })
+    .getFacturasCombustible(ACCESS_CODE, PANEL_USUARIO, null, null);
+}
+function renderFacturasCombustible(){
+  const tbody = document.getElementById('cf-table-body');
+  if(!FACTURAS_COMBUSTIBLE.length){ tbody.innerHTML = '<tr><td colspan="10"><div class="empty">Todavía no hay facturas semanales.</div></td></tr>'; return; }
+  const litrosTxt = function(obj, campo){
+    return ['diesel', 'gasolina'].filter(function(t){ const v = campo ? (obj[t] && obj[t][campo]) : obj[t]; return Number(v) > 0; })
+      .map(function(t){ const v = campo ? obj[t][campo] : obj[t]; return (t === 'diesel' ? 'Diesel ' : 'Gasolina ') + fmtLitros_(v); }).join('<br>') || '—';
+  };
+  tbody.innerHTML = FACTURAS_COMBUSTIBLE.map(function(f){
+    return '<tr><td>' + escapeHtml(f.proveedor) + '</td><td>' + fmtFechaCorta_(f.desde) + ' – ' + fmtFechaCorta_(f.hasta) + '</td>'
+      + '<td>' + escapeHtml([f.serie, f.folio].filter(Boolean).join(' ') || '—') + (f.pdfUrl ? ' <a href="' + escapeHtml(f.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '') + (f.xmlUrl ? ' · <a href="' + escapeHtml(f.xmlUrl) + '" target="_blank" rel="noopener">XML</a>' : '') + '</td>'
+      + '<td>' + litrosTxt(f.tipos || {}, 'litros') + '</td><td>' + litrosTxt(f.litrosRegistrados || {}, null) + ' <span class="mnt-subtext" style="display:inline;">(' + f.registros + ' reg.)</span></td>'
+      + '<td>' + fmtMoneda_(f.subtotal) + '</td><td>' + fmtMoneda_(f.iva) + '</td><td>' + fmtMoneda_(f.ieps) + '</td><td>' + fmtMoneda_(f.total) + '</td>'
+      + '<td><button type="button" class="export-btn cf-btn-eliminar" data-id="' + f.id + '" style="padding:6px 10px;font-size:11px;">Eliminar</button></td></tr>'
+      + (f.avisos && f.avisos.length ? '<tr><td colspan="10"><div class="ocx-auto-aviso">⚠ ' + f.avisos.map(escapeHtml).join('<br>⚠ ') + '</div></td></tr>' : '');
+  }).join('');
+  tbody.querySelectorAll('.cf-btn-eliminar').forEach(function(b){
+    b.addEventListener('click', function(){
+      if(!confirm('¿Eliminar esta factura? Su subtotal, IVA e IEPS dejan de salir en el reporte.')) return;
+      b.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo eliminar.'); return; } cargarFacturasCombustible(); cargarReporteCombustibleGeneral(); })
+        .withFailureHandler(function(){ b.disabled = false; alert('No se pudo eliminar.'); })
+        .eliminarFacturaCombustible(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.id));
+    });
+  });
+  if(typeof ocultarControlesSoloLectura === 'function') ocultarControlesSoloLectura();
+}
+// Semana anterior (lunes a domingo) para proponer en el modal.
+function semanaAnteriorCF_(){
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const dow = (hoy.getDay() + 6) % 7;   // 0 = lunes
+  const lunes = new Date(hoy); lunes.setDate(hoy.getDate() - dow - 7);
+  const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
+  const iso = function(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  return { desde: iso(lunes), hasta: iso(domingo) };
+}
+function leerArchivoCF_(input){
+  return new Promise(function(ok, mal){
+    const f = input.files && input.files[0];
+    if(!f){ ok(null); return; }
+    const reader = new FileReader();
+    reader.onload = function(){ ok(reader.result); };
+    reader.onerror = function(){ mal(new Error('No se pudo leer ' + f.name)); };
+    reader.readAsDataURL(f);
+  });
+}
+document.getElementById('cf-btn-subir').addEventListener('click', function(){
+  const sel = document.getElementById('cf-f-proveedor');
+  const provs = PROVEEDORES_FACTURA_CF.length ? PROVEEDORES_FACTURA_CF : PROVEEDORES_COMBUSTIBLE;
+  sel.innerHTML = '<option value="">Elige el proveedor</option>' + provs.map(function(n){ return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>'; }).join('');
+  if(provs.length === 1) sel.value = provs[0];
+  const sem = semanaAnteriorCF_();
+  document.getElementById('cf-f-desde').value = sem.desde;
+  document.getElementById('cf-f-hasta').value = sem.hasta;
+  document.getElementById('cf-f-xml').value = '';
+  document.getElementById('cf-f-pdf').value = '';
+  const st = document.getElementById('cf-status'); st.className = 'maq-modal-status'; st.textContent = '';
+  document.getElementById('cf-guardar').disabled = false;
+  document.getElementById('cf-overlay').classList.add('open');
+});
+document.getElementById('cf-close').addEventListener('click', function(){ document.getElementById('cf-overlay').classList.remove('open'); });
+document.getElementById('cf-guardar').addEventListener('click', function(){
+  const st = document.getElementById('cf-status');
+  const btn = document.getElementById('cf-guardar');
+  const datos = { proveedor: document.getElementById('cf-f-proveedor').value, desde: document.getElementById('cf-f-desde').value, hasta: document.getElementById('cf-f-hasta').value };
+  if(!datos.proveedor || !datos.desde || !datos.hasta){ st.textContent = 'Elige el proveedor y la semana.'; st.className = 'maq-modal-status show err'; return; }
+  btn.disabled = true; st.textContent = 'Subiendo...'; st.className = 'maq-modal-status show';
+  Promise.all([leerArchivoCF_(document.getElementById('cf-f-xml')), leerArchivoCF_(document.getElementById('cf-f-pdf'))]).then(function(a){
+    datos.xml = a[0]; datos.pdf = a[1];
+    if(!datos.xml || !datos.pdf){ btn.disabled = false; st.textContent = 'Adjunta el XML y el PDF de la factura.'; st.className = 'maq-modal-status show err'; return; }
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r || !r.success){ btn.disabled = false; st.textContent = (r && r.error) || 'No se pudo subir.'; st.className = 'maq-modal-status show err'; return; }
+        const f = r.factura;
+        st.innerHTML = '✓ Factura ' + escapeHtml([f.serie, f.folio].filter(Boolean).join(' ')) + ': subtotal $' + fmtMoneda_(f.subtotal) + ', IVA $' + fmtMoneda_(f.iva) + ', IEPS $' + fmtMoneda_(f.ieps)
+          + ' repartidos entre ' + r.registros + ' registro(s).' + (r.avisos && r.avisos.length ? '<br>⚠ ' + r.avisos.map(escapeHtml).join('<br>⚠ ') : '');
+        st.className = 'maq-modal-status show' + (r.avisos && r.avisos.length ? ' err' : ' ok');
+        cargarFacturasCombustible(); cargarReporteCombustibleGeneral();
+      })
+      .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo subir.'; st.className = 'maq-modal-status show err'; })
+      .subirFacturaCombustible(ACCESS_CODE, PANEL_USUARIO, datos);
+  }).catch(function(e){ btn.disabled = false; st.textContent = e.message; st.className = 'maq-modal-status show err'; });
 });
 
 // --- Diesel entregado a huertas (dentro de la pestaña Diesel) ---

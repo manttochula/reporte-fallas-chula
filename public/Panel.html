@@ -14206,14 +14206,21 @@ function renderReporteCombustibleGeneral(){
     `;
   }
 
-  const litrosGeneral = totH.litros + totA.litros;
-  const costoGeneral = (totH.costo === null && totA.costo === null)
+  // Nov-2026 (Carlos: "no coincide"): el total general es lo COMPRADO = entregas a
+  // huertas + cargas automotrices. Las cargas agrícolas salen del tanque de la
+  // huerta (ya contadas en lo entregado): se muestran aparte y no se suman.
+  const agricolas = activos.filter(function(r){ return r.Origen !== 'automotriz'; });
+  const totAut = sumarReporte_(activos.filter(function(r){ return r.Origen === 'automotriz'; }), 'Litros', 'Costo');
+  const totAgr = sumarReporte_(agricolas, 'Litros', 'Costo');
+  const litrosGeneral = totH.litros + totAut.litros;
+  const costoGeneral = (totH.costo === null && totAut.costo === null)
     ? null
-    : (totH.costo || 0) + (totA.costo || 0);
+    : (totH.costo || 0) + (totAut.costo || 0);
   const costoGeneralTexto = costoGeneral === null ? '—' : '$' + fmtMoneda_(costoGeneral);
   const facGeneral = sumarFacturaRCG_(huertas.concat(activos));
   document.getElementById('rcg-total-general').innerHTML =
-    'Total general (huertas + activos fijos y vehículos): <b>' + fmtLitros_(litrosGeneral) + ' L</b> · <b>' + costoGeneralTexto + '</b>'
+    'Total general comprado (entregas a huertas ' + fmtLitros_(totH.litros) + ' L + cargas automotrices ' + fmtLitros_(totAut.litros) + ' L): <b>' + fmtLitros_(litrosGeneral) + ' L</b> · <b>' + costoGeneralTexto + '</b>'
+    + (agricolas.length ? '<br><span class="mnt-subtext" style="display:inline;">Consumo de los tanques de huertas (bitácora agrícola, ' + agricolas.length + ' cargas): ' + fmtLitros_(totAgr.litros) + ' L — ya va incluido en lo entregado a huertas, por eso no se suma.</span>' : '')
     + (facGeneral.n ? '<br>Según facturas: Subtotal <b>$' + fmtMoneda_(facGeneral.subtotal) + '</b> · IVA <b>$' + fmtMoneda_(facGeneral.iva) + '</b> · IEPS <b>$' + fmtMoneda_(facGeneral.ieps) + '</b> · Total <b>$' + fmtMoneda_(Math.round((facGeneral.subtotal + facGeneral.iva + facGeneral.ieps) * 100) / 100) + '</b>' : '');
 
   renderResumenEmpresaProveedorRCG_(huertas, activos);
@@ -14303,7 +14310,7 @@ document.getElementById('rcg-export').addEventListener('click', function(){
     filaTotal: conCostoExp.length ? (function(){ const f = sumarFacturaRCG_(conCostoExp); return { folio: 'TOTAL con costo o factura (' + conCostoExp.length + ')', litros: totConCostoExp.litros, costo: totConCostoExp.costo, subtotal: f.subtotal, iva: f.iva, ieps: f.ieps }; })() : null,
   };
 
-  const totA = sumarReporte_(activos, 'Litros', 'Costo');
+  const totA = sumarReporte_(activos.filter(function(r){ return r.Origen === 'automotriz'; }), 'Litros', 'Costo');   // agrícola sale del tanque de la huerta: no se suma
   const litrosGeneral = totH.litros + totA.litros;
   const costoGeneral = (totH.costo === null && totA.costo === null) ? null : (totH.costo || 0) + (totA.costo || 0);
   const seccionTotalGeneral = {
@@ -14315,7 +14322,7 @@ document.getElementById('rcg-export').addEventListener('click', function(){
       {header:'IVA', key:'iva', width:14, numFmt:'"$"#,##0.00'},
       {header:'IEPS', key:'ieps', width:14, numFmt:'"$"#,##0.00'},
     ],
-    filas: [(function(){ const f = sumarFacturaRCG_(huertas.concat(activos)); return { concepto: 'Huertas + activos fijos y vehículos', litros: litrosGeneral, costo: costoGeneral, subtotal: f.subtotal, iva: f.iva, ieps: f.ieps }; })()],
+    filas: [(function(){ const f = sumarFacturaRCG_(huertas.concat(activos)); return { concepto: 'Comprado: entregas a huertas + cargas automotrices', litros: litrosGeneral, costo: costoGeneral, subtotal: f.subtotal, iva: f.iva, ieps: f.ieps }; })()],
   };
 
   const tipoSel = document.getElementById('rcg-tipo');

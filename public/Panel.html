@@ -1455,6 +1455,8 @@
         <span class="maq-modal-close" id="cf-close">&times;</span>
         <h3 style="margin-top:0;">Factura semanal de combustible</h3>
         <div class="maq-field"><label>Proveedor *</label><select id="cf-f-proveedor"><option value="">Elige el proveedor</option></select></div>
+        <div class="maq-field"><label>Empresa</label><select id="cf-f-empresa"><option value="">La del RFC de la factura</option></select>
+          <span class="mnt-subtext">El proveedor factura por empresa: la factura se reparte solo entre lo de esa empresa. Se toma del RFC receptor del XML; elígela solo si la empresa no tiene RFC en el catálogo.</span></div>
         <div class="maq-field"><label>Semana que cubre la factura *</label>
           <span class="toolbar-date-group"><input type="date" id="cf-f-desde"> <span class="mnt-subtext" style="display:inline;">a</span> <input type="date" id="cf-f-hasta"></span></div>
         <div class="maq-field"><label>XML de la factura *</label><input type="file" id="cf-f-xml" accept=".xml,text/xml,application/xml"></div>
@@ -2293,8 +2295,8 @@
         <div class="mnt-subtext" style="margin-bottom:8px;">Sube el XML y el PDF de la factura de cada proveedor por semana: su <b>subtotal, IVA e IEPS</b> se reparten <b>por litros</b> entre lo que se le compró en esas fechas (entregas de diesel a huertas y cargas de Combustible Automotriz) y salen en el reporte de abajo.</div>
         <div class="toolbar" style="margin-bottom:8px;"><button class="btn-amber" id="cf-btn-subir">+ Subir factura de la semana</button></div>
         <div class="table-wrap"><table style="min-width:0;">
-          <thead><tr><th>Proveedor</th><th>Semana</th><th>Factura</th><th>Litros factura</th><th>Litros registrados</th><th>Subtotal</th><th>IVA</th><th>IEPS</th><th>Total</th><th></th></tr></thead>
-          <tbody id="cf-table-body"><tr><td colspan="10"><div class="empty">Cargando...</div></td></tr></tbody>
+          <thead><tr><th>Proveedor</th><th>Empresa</th><th>Semana</th><th>Factura</th><th>Litros factura</th><th>Litros registrados</th><th>Subtotal</th><th>IVA</th><th>IEPS</th><th>Total</th><th></th></tr></thead>
+          <tbody id="cf-table-body"><tr><td colspan="11"><div class="empty">Cargando...</div></td></tr></tbody>
         </table></div>
       </div>
       <div class="dz-resumen" id="rcg-container">
@@ -14363,28 +14365,29 @@ window.addEventListener('afterprint', function(){
 // --- Facturas semanales de combustible (nov-2026) ---
 let FACTURAS_COMBUSTIBLE = [];
 let PROVEEDORES_FACTURA_CF = [];
+let EMPRESAS_FACTURA_CF = [];
 function fmtFechaCorta_(iso){ return iso ? new Date(iso + 'T00:00:00').toLocaleDateString('es-MX') : '—'; }
 function cargarFacturasCombustible(){
   const tbody = document.getElementById('cf-table-body');
   google.script.run
-    .withSuccessHandler(function(r){ FACTURAS_COMBUSTIBLE = (r && r.facturas) || []; PROVEEDORES_FACTURA_CF = (r && r.proveedores) || []; renderFacturasCombustible(); })
-    .withFailureHandler(function(){ tbody.innerHTML = '<tr><td colspan="10"><div class="empty">No se pudieron cargar las facturas.</div></td></tr>'; })
+    .withSuccessHandler(function(r){ FACTURAS_COMBUSTIBLE = (r && r.facturas) || []; PROVEEDORES_FACTURA_CF = (r && r.proveedores) || []; EMPRESAS_FACTURA_CF = (r && r.empresas) || []; renderFacturasCombustible(); })
+    .withFailureHandler(function(){ tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudieron cargar las facturas.</div></td></tr>'; })
     .getFacturasCombustible(ACCESS_CODE, PANEL_USUARIO, null, null);
 }
 function renderFacturasCombustible(){
   const tbody = document.getElementById('cf-table-body');
-  if(!FACTURAS_COMBUSTIBLE.length){ tbody.innerHTML = '<tr><td colspan="10"><div class="empty">Todavía no hay facturas semanales.</div></td></tr>'; return; }
+  if(!FACTURAS_COMBUSTIBLE.length){ tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Todavía no hay facturas semanales.</div></td></tr>'; return; }
   const litrosTxt = function(obj, campo){
     return ['diesel', 'gasolina'].filter(function(t){ const v = campo ? (obj[t] && obj[t][campo]) : obj[t]; return Number(v) > 0; })
       .map(function(t){ const v = campo ? obj[t][campo] : obj[t]; return (t === 'diesel' ? 'Diesel ' : 'Gasolina ') + fmtLitros_(v); }).join('<br>') || '—';
   };
   tbody.innerHTML = FACTURAS_COMBUSTIBLE.map(function(f){
-    return '<tr><td>' + escapeHtml(f.proveedor) + '</td><td>' + fmtFechaCorta_(f.desde) + ' – ' + fmtFechaCorta_(f.hasta) + '</td>'
+    return '<tr><td>' + escapeHtml(f.proveedor) + '</td><td>' + escapeHtml((f.empresa || '—').split(',')[0]) + '</td><td>' + fmtFechaCorta_(f.desde) + ' – ' + fmtFechaCorta_(f.hasta) + '</td>'
       + '<td>' + escapeHtml([f.serie, f.folio].filter(Boolean).join(' ') || '—') + (f.pdfUrl ? ' <a href="' + escapeHtml(f.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '') + (f.xmlUrl ? ' · <a href="' + escapeHtml(f.xmlUrl) + '" target="_blank" rel="noopener">XML</a>' : '') + '</td>'
       + '<td>' + litrosTxt(f.tipos || {}, 'litros') + '</td><td>' + litrosTxt(f.litrosRegistrados || {}, null) + ' <span class="mnt-subtext" style="display:inline;">(' + f.registros + ' reg.)</span></td>'
       + '<td>' + fmtMoneda_(f.subtotal) + '</td><td>' + fmtMoneda_(f.iva) + '</td><td>' + fmtMoneda_(f.ieps) + '</td><td>' + fmtMoneda_(f.total) + '</td>'
       + '<td><button type="button" class="export-btn cf-btn-eliminar" data-id="' + f.id + '" style="padding:6px 10px;font-size:11px;">Eliminar</button></td></tr>'
-      + (f.avisos && f.avisos.length ? '<tr><td colspan="10"><div class="ocx-auto-aviso">⚠ ' + f.avisos.map(escapeHtml).join('<br>⚠ ') + '</div></td></tr>' : '');
+      + (f.avisos && f.avisos.length ? '<tr><td colspan="11"><div class="ocx-auto-aviso">⚠ ' + f.avisos.map(escapeHtml).join('<br>⚠ ') + '</div></td></tr>' : '');
   }).join('');
   tbody.querySelectorAll('.cf-btn-eliminar').forEach(function(b){
     b.addEventListener('click', function(){
@@ -14422,6 +14425,7 @@ document.getElementById('cf-btn-subir').addEventListener('click', function(){
   const provs = PROVEEDORES_FACTURA_CF.length ? PROVEEDORES_FACTURA_CF : PROVEEDORES_COMBUSTIBLE;
   sel.innerHTML = '<option value="">Elige el proveedor</option>' + provs.map(function(n){ return '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>'; }).join('');
   if(provs.length === 1) sel.value = provs[0];
+  document.getElementById('cf-f-empresa').innerHTML = '<option value="">La del RFC de la factura</option>' + EMPRESAS_FACTURA_CF.map(function(e){ return '<option value="' + e.id + '">' + escapeHtml(e.nombre.split(',')[0]) + (e.rfc ? ' (' + escapeHtml(e.rfc) + ')' : ' — sin RFC') + '</option>'; }).join('');
   const sem = semanaAnteriorCF_();
   document.getElementById('cf-f-desde').value = sem.desde;
   document.getElementById('cf-f-hasta').value = sem.hasta;
@@ -14435,7 +14439,7 @@ document.getElementById('cf-close').addEventListener('click', function(){ docume
 document.getElementById('cf-guardar').addEventListener('click', function(){
   const st = document.getElementById('cf-status');
   const btn = document.getElementById('cf-guardar');
-  const datos = { proveedor: document.getElementById('cf-f-proveedor').value, desde: document.getElementById('cf-f-desde').value, hasta: document.getElementById('cf-f-hasta').value };
+  const datos = { proveedor: document.getElementById('cf-f-proveedor').value, empresa: document.getElementById('cf-f-empresa').value, desde: document.getElementById('cf-f-desde').value, hasta: document.getElementById('cf-f-hasta').value };
   if(!datos.proveedor || !datos.desde || !datos.hasta){ st.textContent = 'Elige el proveedor y la semana.'; st.className = 'maq-modal-status show err'; return; }
   btn.disabled = true; st.textContent = 'Subiendo...'; st.className = 'maq-modal-status show';
   Promise.all([leerArchivoCF_(document.getElementById('cf-f-xml')), leerArchivoCF_(document.getElementById('cf-f-pdf'))]).then(function(a){
@@ -14445,7 +14449,7 @@ document.getElementById('cf-guardar').addEventListener('click', function(){
       .withSuccessHandler(function(r){
         if(!r || !r.success){ btn.disabled = false; st.textContent = (r && r.error) || 'No se pudo subir.'; st.className = 'maq-modal-status show err'; return; }
         const f = r.factura;
-        st.innerHTML = '✓ Factura ' + escapeHtml([f.serie, f.folio].filter(Boolean).join(' ')) + ': subtotal $' + fmtMoneda_(f.subtotal) + ', IVA $' + fmtMoneda_(f.iva) + ', IEPS $' + fmtMoneda_(f.ieps)
+        st.innerHTML = '✓ Factura ' + escapeHtml([f.serie, f.folio].filter(Boolean).join(' ')) + ' de ' + escapeHtml((r.empresa || '').split(',')[0]) + ': subtotal $' + fmtMoneda_(f.subtotal) + ', IVA $' + fmtMoneda_(f.iva) + ', IEPS $' + fmtMoneda_(f.ieps)
           + ' repartidos entre ' + r.registros + ' registro(s).' + (r.avisos && r.avisos.length ? '<br>⚠ ' + r.avisos.map(escapeHtml).join('<br>⚠ ') : '');
         st.className = 'maq-modal-status show' + (r.avisos && r.avisos.length ? ' err' : ' ok');
         cargarFacturasCombustible(); cargarReporteCombustibleGeneral();

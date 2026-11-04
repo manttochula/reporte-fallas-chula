@@ -3521,3 +3521,16 @@ CREATE TABLE IF NOT EXISTS combustible_facturas (
   eliminado_en  DATETIME      DEFAULT NULL,
   INDEX idx_cf_proveedor_fechas (proveedor_id, fecha_desde, fecha_hasta)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Nov-2026: el proveedor factura POR EMPRESA (RFC receptor): cada factura se
+-- reparte solo entre lo de su empresa (huerta → empresa; automotriz → empresa).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'combustible_facturas' AND column_name = 'empresa_id'
+);
+SET @sql_alter = IF(@col_exists = 0,
+  'ALTER TABLE combustible_facturas ADD COLUMN empresa_id INT DEFAULT NULL AFTER proveedor_id',
+  'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

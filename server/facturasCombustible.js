@@ -25,7 +25,7 @@ function tipoConcepto_(clave, descripcion) {
   return 'otro';
 }
 
-// CFDI → { uuid, serie, folio, fecha, rfcEmisor, nombreEmisor, rfcReceptor, subtotal, descuento, iva, ieps, total,
+// CFDI → { uuid, serie, folio, fecha, rfcEmisor, nombreEmisor, rfcReceptor, subtotal (base sin IEPS), iva, ieps, total,
 //          tipos: { diesel: { litros, subtotal, iva, ieps }, gasolina: {...}, otro: {...} }, conceptos: [...] }
 function leerFacturaCombustible(xmlTexto) {
   const xml = String(xmlTexto || '').replace(/^﻿/, '');
@@ -42,19 +42,27 @@ function leerFacturaCombustible(xmlTexto) {
   while ((m = rc.exec(xml))) {
     const a = attrs_(m[1]);
     const cuerpo = m[2] || '';
-    let iva = 0, ieps = 0;
+    let iva = 0, ieps = 0, tasaIva = 0, iepsDesglosado = false;
     const rt = /<(?:[\w-]+:)?Traslado\b([^>]*?)\/?>/gi;
     let t;
     while ((t = rt.exec(cuerpo))) {
       const ta = attrs_(t[1]);
-      if (ta.Impuesto === '002') iva += num_(ta.Importe);
-      else if (ta.Impuesto === '003') ieps += num_(ta.Importe);
+      if (ta.Impuesto === '002') { iva += num_(ta.Importe); if (num_(ta.TasaOCuota) > 0) tasaIva = num_(ta.TasaOCuota); }
+      else if (ta.Impuesto === '003') { ieps += num_(ta.Importe); iepsDesglosado = true; }
     }
     const tipo = tipoConcepto_(a.ClaveProdServ, a.Descripcion);
+    let subtotal = r2_(num_(a.Importe) - num_(a.Descuento));
+    // Nov-2026 (Carlos): el proveedor NO desglosa el IEPS en el XML; viene dentro
+    // del importe. El IVA se calcula solo sobre el combustible "base":
+    // base = IVA / 0.16 y IEPS = importe − base (ej. CRE 10818: diesel 494.48 / 0.16 = 3,090.50 → IEPS 66.39).
+    if (tipo !== 'otro' && !iepsDesglosado && iva > 0) {
+      const base = r2_(iva / (tasaIva || 0.16));
+      if (subtotal - base > 0.005) { ieps = r2_(subtotal - base); subtotal = base; }
+    }
     conceptos.push({
       tipo, clave: a.ClaveProdServ || '', descripcion: a.Descripcion || '', unidad: a.ClaveUnidad || '',
       litros: tipo === 'otro' ? 0 : num_(a.Cantidad),
-      subtotal: r2_(num_(a.Importe) - num_(a.Descuento)), iva: r2_(iva), ieps: r2_(ieps),
+      subtotal, iva: r2_(iva), ieps: r2_(ieps), iepsCalculado: tipo !== 'otro' && !iepsDesglosado && ieps > 0,
     });
   }
   const tipos = {};

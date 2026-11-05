@@ -2190,7 +2190,7 @@
                 <th>Lectura anterior</th><th>Lectura actual</th><th>Horas de labor</th><th>Rendimiento (L/h)</th>
               </tr>
             </thead>
-            <tbody id="dz-notif-table-body"><tr><td colspan="11"><div class="empty">Cargando...</div></td></tr></tbody>
+            <tbody id="dz-notif-table-body"><tr><td colspan="12"><div class="empty">Cargando...</div></td></tr></tbody>
           </table>
         </div>
       </div>
@@ -2295,8 +2295,8 @@
         <div class="mnt-subtext" style="margin-bottom:8px;">Sube el XML y el PDF de la factura de cada proveedor por semana: su <b>subtotal, IVA e IEPS</b> se reparten <b>por litros</b> entre lo que se le compró en esas fechas (entregas de diesel a huertas y cargas de Combustible Automotriz) y salen en el reporte de abajo.</div>
         <div class="toolbar" style="margin-bottom:8px;"><button class="btn-amber" id="cf-btn-subir">+ Subir factura de la semana</button></div>
         <div class="table-wrap"><table style="min-width:0;">
-          <thead><tr><th>Proveedor</th><th>Empresa</th><th>Semana</th><th>Factura</th><th>Litros factura</th><th>Litros registrados</th><th>Subtotal</th><th>IVA</th><th>IEPS</th><th>Total</th><th></th></tr></thead>
-          <tbody id="cf-table-body"><tr><td colspan="11"><div class="empty">Cargando...</div></td></tr></tbody>
+          <thead><tr><th>Proveedor</th><th>Empresa</th><th>Semana</th><th>Factura</th><th>Litros factura</th><th>Litros registrados</th><th>Subtotal</th><th>IVA</th><th>IEPS</th><th>Total</th><th>Almacén digital</th><th></th></tr></thead>
+          <tbody id="cf-table-body"><tr><td colspan="12"><div class="empty">Cargando...</div></td></tr></tbody>
         </table></div>
       </div>
       <div class="dz-resumen" id="rcg-container">
@@ -4654,7 +4654,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true,
+  guardarPolizaSeguro: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -5180,7 +5180,7 @@ function ocultarControlesSoloLectura(){
       '.dzh-btn-registrar-entrega', '.dzh-btn-add-carga', '.dzh-btn-bitacora', '.dzh-btn-editar-carga', '.dzh-btn-eliminar-carga', '.dzh-btn-restaurar-carga', '.dzh-btn-editar-entrega', '.dzh-btn-eliminar-entrega', '.dzh-btn-restaurar-entrega']);
   }
   if(!puedeCapturarPestana('diesel') && !puedeCapturarPestana('combustible_automotriz')){
-    ocultar(['#cf-btn-subir', '.cf-btn-eliminar']);
+    ocultar(['#cf-btn-subir', '.cf-btn-eliminar', '.cf-btn-sellar']);
   }
   if(!puedeCapturarPestana('combustible_automotriz')){
     ocultar(['#ca-btn-add', '#ca-btn-tickets', '.ca-btn-editar', '.ca-btn-eliminar', '.ca-btn-restaurar', '#ca-btn-save', '#ca-tix-btn-guardar']);
@@ -10204,7 +10204,7 @@ function renderNotificacionesDiesel(){
     statusEl.className = 'maq-modal-status show';
   }
   if(notificaciones.length === 0){
-    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Sin notificaciones en este rango de fechas.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12"><div class="empty">Sin notificaciones en este rango de fechas.</div></td></tr>';
     return;
   }
   tbody.innerHTML = notificaciones.map(function(item){
@@ -10797,7 +10797,7 @@ let mvSortDir = -1;
 
 function cargarMovimientosHistorial(){
   const tbody = document.getElementById('mv-table-body');
-  tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Cargando...</div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="12"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
     .withSuccessHandler(function(records){
       MOVIMIENTOS_CARGADOS = true;
@@ -10805,7 +10805,7 @@ function cargarMovimientosHistorial(){
       renderMovimientos();
     })
     .withFailureHandler(function(){
-      tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudieron cargar los movimientos.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12"><div class="empty">No se pudieron cargar los movimientos.</div></td></tr>';
     })
     .getMovimientosHistorial(ACCESS_CODE, PANEL_USUARIO);
 }
@@ -10854,7 +10854,7 @@ function renderMovimientos(){
   if(activeTh){ activeTh.textContent = mvSortDir === 1 ? '▲' : '▼'; }
 
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No hay movimientos que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12"><div class="empty">No hay movimientos que coincidan.</div></td></tr>';
     return;
   }
 
@@ -14378,12 +14378,12 @@ function cargarFacturasCombustible(){
   const tbody = document.getElementById('cf-table-body');
   google.script.run
     .withSuccessHandler(function(r){ FACTURAS_COMBUSTIBLE = (r && r.facturas) || []; PROVEEDORES_FACTURA_CF = (r && r.proveedores) || []; EMPRESAS_FACTURA_CF = (r && r.empresas) || []; renderFacturasCombustible(); })
-    .withFailureHandler(function(){ tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudieron cargar las facturas.</div></td></tr>'; })
+    .withFailureHandler(function(){ tbody.innerHTML = '<tr><td colspan="12"><div class="empty">No se pudieron cargar las facturas.</div></td></tr>'; })
     .getFacturasCombustible(ACCESS_CODE, PANEL_USUARIO, null, null);
 }
 function renderFacturasCombustible(){
   const tbody = document.getElementById('cf-table-body');
-  if(!FACTURAS_COMBUSTIBLE.length){ tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Todavía no hay facturas semanales.</div></td></tr>'; return; }
+  if(!FACTURAS_COMBUSTIBLE.length){ tbody.innerHTML = '<tr><td colspan="12"><div class="empty">Todavía no hay facturas semanales.</div></td></tr>'; return; }
   const litrosTxt = function(obj, campo){
     return ['diesel', 'gasolina'].filter(function(t){ const v = campo ? (obj[t] && obj[t][campo]) : obj[t]; return Number(v) > 0; })
       .map(function(t){ const v = campo ? obj[t][campo] : obj[t]; return (t === 'diesel' ? 'Diesel ' : 'Gasolina ') + fmtLitros_(v); }).join('<br>') || '—';
@@ -14392,10 +14392,24 @@ function renderFacturasCombustible(){
     return '<tr><td>' + escapeHtml(f.proveedor) + '</td><td>' + escapeHtml((f.empresa || '—').split(',')[0]) + '</td><td>' + fmtFechaCorta_(f.desde) + ' – ' + fmtFechaCorta_(f.hasta) + '</td>'
       + '<td>' + escapeHtml([f.serie, f.folio].filter(Boolean).join(' ') || '—') + (f.pdfUrl ? ' <a href="' + escapeHtml(f.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '') + (f.xmlUrl ? ' · <a href="' + escapeHtml(f.xmlUrl) + '" target="_blank" rel="noopener">XML</a>' : '') + '</td>'
       + '<td>' + litrosTxt(f.tipos || {}, 'litros') + '</td><td>' + litrosTxt(f.litrosRegistrados || {}, null) + ' <span class="mnt-subtext" style="display:inline;">(' + f.registros + ' reg.)</span></td>'
-      + '<td>' + fmtMoneda_(f.subtotal) + '</td><td>' + fmtMoneda_(f.iva) + '</td><td>' + fmtMoneda_(f.ieps) + '</td><td>' + fmtMoneda_(f.total) + '</td>'
-      + '<td><button type="button" class="export-btn cf-btn-eliminar" data-id="' + f.id + '" style="padding:6px 10px;font-size:11px;">Eliminar</button></td></tr>'
-      + (f.avisos && f.avisos.length ? '<tr><td colspan="11"><div class="ocx-auto-aviso">⚠ ' + f.avisos.map(escapeHtml).join('<br>⚠ ') + '</div></td></tr>' : '');
+ + '<td>' + fmtMoneda_(f.subtotal) + '</td><td>' + fmtMoneda_(f.iva) + '</td><td>' + fmtMoneda_(f.ieps) + '</td><td>' + fmtMoneda_(f.total) + '</td>'
+      + '<td style="font-size:12px;">' + (f.archivoEstado === 'archivada' ? '<span style="color:var(--ok);">✓ guardada</span><span class="mnt-subtext">' + escapeHtml(f.archivoRuta) + '</span>'
+          : f.archivoEstado === 'pendiente' ? 'esperando a la PC de Comercial'
+          : f.archivoEstado === 'error' ? '<span style="color:var(--danger);">⚠ ' + escapeHtml(f.archivoMensaje) + '</span>' : '—')
+        + (f.selladaUrl ? '<br><a href="' + escapeHtml(f.selladaUrl) + '" target="_blank" rel="noopener">PDF sellado</a>' : '') + '</td>'
+      + '<td><button type="button" class="export-btn cf-btn-sellar" data-id="' + f.id + '" style="padding:6px 10px;font-size:11px;" title="Vuelve a poner la nota contable (con las cuentas actuales) y la manda otra vez al almacén digital">Sellar otra vez</button> '
+      + '<button type="button" class="export-btn cf-btn-eliminar" data-id="' + f.id + '" style="padding:6px 10px;font-size:11px;">Eliminar</button></td></tr>'
+      + ((f.avisos && f.avisos.length) || (f.faltanCuentas && f.faltanCuentas.length) ? '<tr><td colspan="12"><div class="ocx-auto-aviso">⚠ ' + (f.avisos || []).concat(f.faltanCuentas && f.faltanCuentas.length ? ['Nota contable: faltan número o segmento de ' + f.faltanCuentas.join(', ') + ' para esta empresa (Catálogo → Cuentas contables); captúralos y dale "Sellar otra vez".'] : []).map(escapeHtml).join('<br>⚠ ') + '</div></td></tr>' : '');
   }).join('');
+  tbody.querySelectorAll('.cf-btn-sellar').forEach(function(b){
+    b.addEventListener('click', function(){
+      b.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo sellar.'); return; } cargarFacturasCombustible(); })
+        .withFailureHandler(function(){ b.disabled = false; alert('No se pudo sellar.'); })
+        .sellarFacturaCombustible(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.id));
+    });
+  });
   tbody.querySelectorAll('.cf-btn-eliminar').forEach(function(b){
     b.addEventListener('click', function(){
       if(!confirm('¿Eliminar esta factura? Su subtotal, IVA e IEPS dejan de salir en el reporte.')) return;
@@ -18895,7 +18909,7 @@ function renderRefacciones(){
   const records = getRefaccionesFiltradas();
   document.getElementById('ref-summary').textContent = records.length + ' de ' + ALL_REFACCIONES.length + ' refacciones';
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No hay refacciones que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12"><div class="empty">No hay refacciones que coincidan.</div></td></tr>';
     return;
   }
   tbody.innerHTML = records.map(function(r){
@@ -19738,7 +19752,7 @@ function cargarCatalogoInsumos(){
 
 function cargarInsumos(){
   const tbody = document.getElementById('ins-table-body');
-  tbody.innerHTML = '<tr><td colspan="11"><div class="empty">Cargando...</div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="12"><div class="empty">Cargando...</div></td></tr>';
   const incluirEliminados = document.getElementById('ins-mostrar-eliminados').checked;
   google.script.run
     .withSuccessHandler(function(records){
@@ -19747,7 +19761,7 @@ function cargarInsumos(){
       renderInsumos();
     })
     .withFailureHandler(function(){
-      tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudieron cargar las solicitudes de insumos.</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12"><div class="empty">No se pudieron cargar las solicitudes de insumos.</div></td></tr>';
     })
     .getInsumos(ACCESS_CODE, PANEL_USUARIO, incluirEliminados);
 }
@@ -19807,7 +19821,7 @@ function renderInsumos(){
   if(activeTh){ activeTh.textContent = insSortDir === 1 ? '▲' : '▼'; }
 
   if(records.length === 0){
-    tbody.innerHTML = '<tr><td colspan="11"><div class="empty">No hay solicitudes de insumos que coincidan.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12"><div class="empty">No hay solicitudes de insumos que coincidan.</div></td></tr>';
     return;
   }
 
@@ -22040,10 +22054,10 @@ function abrirModalOcx(){
 
 function cargarPartidasOcx_(conConfig){
   const body = document.getElementById('ocx-body');
-  body.innerHTML = '<tr><td colspan="11"><div class="empty">Cargando...</div></td></tr>';
+  body.innerHTML = '<tr><td colspan="12"><div class="empty">Cargando...</div></td></tr>';
   google.script.run
     .withSuccessHandler(function(r){
-      if(!r || !r.success){ body.innerHTML = '<tr><td colspan="11"><div class="empty">' + escapeHtml((r && r.error) || 'No se pudo cargar.') + '</div></td></tr>'; return; }
+      if(!r || !r.success){ body.innerHTML = '<tr><td colspan="12"><div class="empty">' + escapeHtml((r && r.error) || 'No se pudo cargar.') + '</div></td></tr>'; return; }
       OCX_DATOS = r;
       OCX_PARTIDAS_TODAS = r.partidas || [];
       // Empresa: la que ya estaba elegida o la que más partidas pendientes tiene.
@@ -22058,7 +22072,7 @@ function cargarPartidasOcx_(conConfig){
       selEmp.value = (previa && (r.empresas || []).some(function(e){ return String(e.id) === previa; })) ? previa : (mejor || (r.empresas && r.empresas[0] ? String(r.empresas[0].id) : ''));
       aplicarEmpresaOcx_(conConfig);
     })
-    .withFailureHandler(function(){ body.innerHTML = '<tr><td colspan="11"><div class="empty">No se pudo cargar. Revisa tu conexión.</div></td></tr>'; })
+    .withFailureHandler(function(){ body.innerHTML = '<tr><td colspan="12"><div class="empty">No se pudo cargar. Revisa tu conexión.</div></td></tr>'; })
     .getPartidasParaOC(ACCESS_CODE, PANEL_USUARIO, document.getElementById('ocx-incluir-exportadas').checked);
 }
 
@@ -22097,7 +22111,7 @@ document.getElementById('ocx-empresa').addEventListener('change', function(){ ap
 function renderPartidasOcx_(){
   const body = document.getElementById('ocx-body');
   if(!OCX_PARTIDAS.length){
-    body.innerHTML = '<tr><td colspan="11"><div class="empty">No hay refacciones con precio autorizado pendientes de exportar. Autoriza precios en las cotizaciones ("Aut").</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="12"><div class="empty">No hay refacciones con precio autorizado pendientes de exportar. Autoriza precios en las cotizaciones ("Aut").</div></td></tr>';
     renderResumenOcx_();
     return;
   }

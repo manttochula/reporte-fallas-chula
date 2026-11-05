@@ -313,6 +313,76 @@ async function estamparNotaFactura(pdfBuffer, nota) {
   return { buffer, modo };
 }
 
+// Nota contable de la factura semanal de COMBUSTIBLE (nov-2026, Carlos): igual que la
+// de refacciones (franja agregada abajo de la 1a hoja), pero con una línea por
+// cuenta: Diesel, Gasolina e IEPS (el IVA no lleva cuenta).
+// nota: { filas: [{ concepto, cuenta, numero, huerta, segmento, importe }], empresaSiglas,
+//         semanaTexto, litrosTexto, elaboro, autoriza, fechaTexto }
+async function estamparNotaCombustible(pdfBuffer, nota) {
+  const pdf = await PdfLibDoc.load(pdfBuffer, { ignoreEncryption: true, updateMetadata: false });
+  const fuente = await pdf.embedFont(StandardFonts.Helvetica);
+  const negrita = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const filas = (nota.filas || []);
+  const ALTO = 15;
+  const pie = [['Empresa a contabilizar:', texto_(nota.empresaSiglas), true], ['Elaboró:', texto_(nota.elaboro), false]]
+    .concat(texto_(nota.autoriza) ? [['Autoriza:', texto_(nota.autoriza), false]] : []);
+  const ALTO_NOTA = (filas.length + 2) * ALTO + pie.length * ALTO + 40;
+  const paginas = pdf.getPages();
+  let pagina = paginas[0];
+  let x0, y0;
+  const rot = pagina ? (pagina.getRotation().angle % 360 + 360) % 360 : 0;
+  if (!pagina || rot !== 0) {
+    pagina = pdf.addPage([612, 792]);
+    x0 = 30; y0 = 792 - 36 - ALTO_NOTA;
+  } else {
+    const mb = pagina.getMediaBox();
+    const cb = pagina.getCropBox();
+    const extra = ALTO_NOTA + 16;
+    pagina.setMediaBox(mb.x, mb.y - extra, mb.width, mb.height + extra);
+    pagina.setCropBox(cb.x, cb.y - extra, cb.width, cb.height + extra);
+    try { pagina.setTrimBox(cb.x, cb.y - extra, cb.width, cb.height + extra); } catch (e) { /* opcional */ }
+    try { pagina.setBleedBox(cb.x, cb.y - extra, cb.width, cb.height + extra); } catch (e) { /* opcional */ }
+    pagina.drawRectangle({ x: cb.x, y: cb.y - extra, width: cb.width, height: extra, color: rgb(1, 1, 1) });
+    pagina.drawLine({ start: { x: cb.x + 20, y: cb.y - 3 }, end: { x: cb.x + cb.width - 20, y: cb.y - 3 }, thickness: 0.6, color: rgb(0.3, 0.3, 0.3) });
+    x0 = cb.x + 20; y0 = cb.y - extra + 8;
+  }
+  const NEGRO = rgb(0, 0, 0), ROJO = rgb(0.85, 0, 0), AMBAR = rgb(1, 0.76, 0.03), GRIS = rgb(0.3, 0.3, 0.3);
+  // Columnas: Concepto | Nombre de la cuenta | No. de cuenta | Huerta | Segmento | Importe
+  const cols = [{ t: 'Concepto', w: 62 }, { t: 'Nombre de la Cuenta', w: 140 }, { t: 'No. De Cuenta', w: 82 }, { t: 'Huerta', w: 92 }, { t: 'Segmento', w: 52 }, { t: 'Importe', w: 70, der: true }];
+  let y = y0 + ALTO_NOTA - 30;
+  pagina.drawText(limpiarWinAnsi_('NOTA CONTABLE - COMBUSTIBLE' + (nota.semanaTexto ? '  ·  ' + nota.semanaTexto : '')), { x: x0, y: y + 6, size: 9.5, font: negrita, color: NEGRO });
+  const celda = (x, w, yy, txt, opts) => {
+    pagina.drawRectangle({ x, y: yy, width: w, height: ALTO, borderColor: NEGRO, borderWidth: 0.8, color: opts.fondo || rgb(1, 1, 1) });
+    const t = limpiarWinAnsi_(txt).slice(0, Math.floor(w / 4.4));
+    const f = opts.bold ? negrita : fuente;
+    const tx = opts.der ? x + w - 3 - f.widthOfTextAtSize(t, 8) : x + 3;
+    pagina.drawText(t, { x: tx, y: yy + 4, size: 8, font: f, color: opts.color || NEGRO });
+  };
+  y -= ALTO;
+  let x = x0;
+  cols.forEach((c) => { celda(x, c.w, y, c.t, { bold: true, fondo: rgb(0.92, 0.92, 0.92), der: c.der }); x += c.w; });
+  let total = 0;
+  filas.forEach((f) => {
+    y -= ALTO; x = x0;
+    total += Number(f.importe) || 0;
+    const vals = [f.concepto, f.cuenta, f.numero, f.huerta, f.segmento, '$' + dinero_(f.importe)];
+    cols.forEach((c, i) => { celda(x, c.w, y, texto_(vals[i]) || (i === 1 ? 'FALTA CUENTA' : ''), { der: c.der, bold: i === 1, fondo: i === 1 ? AMBAR : null, color: (i === 1 && !texto_(vals[i])) ? ROJO : NEGRO }); x += c.w; });
+  });
+  y -= ALTO; x = x0;
+  const anchoAntes = cols.slice(0, 5).reduce((s, c) => s + c.w, 0);
+  celda(x, anchoAntes, y, 'Total sin IVA' + (nota.litrosTexto ? '   (' + nota.litrosTexto + ')' : ''), { bold: true });
+  celda(x + anchoAntes, cols[5].w, y, '$' + dinero_(Math.round(total * 100) / 100), { bold: true, der: true });
+  y -= 10;
+  pie.forEach(([et, val, rojo]) => {
+    y -= ALTO;
+    celda(x0, 128, y, et, { bold: true, color: rojo ? ROJO : NEGRO });
+    celda(x0 + 128, 170, y, val, { bold: rojo, color: rojo ? ROJO : NEGRO });
+  });
+  if (nota.fechaTexto) pagina.drawText(limpiarWinAnsi_(nota.fechaTexto), { x: x0 + 320, y: y + 4, size: 8, font: fuente, color: GRIS });
+  const buffer = Buffer.from(await pdf.save());
+  return { buffer };
+}
+
 // Las fuentes estándar de PDF solo traen WinAnsi: se quitan caracteres que
 // truenan (emojis, etc.) sin perder acentos ni ñ.
 function limpiarWinAnsi_(t) {
@@ -425,6 +495,6 @@ function revisarCfdiContraOc(cfdi, oc) {
 module.exports = {
   rutaAlmacenFactura_,
   nombreCortoProveedor_, polizaGasto_, sinNumeroParte_,
-  calcularTotales, importeConLetra, observacionDeUnidad, generarPdfOc, estamparNotaFactura, leerCfdi, revisarCfdiContraOc,
+  calcularTotales, importeConLetra, observacionDeUnidad, generarPdfOc, estamparNotaFactura, estamparNotaCombustible, leerCfdi, revisarCfdiContraOc,
   fechaOc_, IVA_POR_OMISION,
 };

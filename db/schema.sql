@@ -3534,3 +3534,13 @@ SET @sql_alter = IF(@col_exists = 0,
 PREPARE stmt_alter FROM @sql_alter;
 EXECUTE stmt_alter;
 DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026: la factura de combustible lleva su nota contable (sello) y se guarda
+-- en el almacén digital (DIGITALIZACION) igual que las de refacciones.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'combustible_facturas' AND column_name = 'sellada_url');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE combustible_facturas ADD COLUMN sellada_url VARCHAR(500) DEFAULT NULL, ADD COLUMN archivo_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN archivo_ruta VARCHAR(500) DEFAULT NULL, ADD COLUMN archivo_mensaje TEXT DEFAULT NULL, ADD COLUMN archivo_en DATETIME DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Cuentas de la nota de combustible: número, huerta y segmento por empresa se
+-- capturan en Catálogo → Cuentas contables (el IVA no lleva cuenta).
+INSERT IGNORE INTO cuentas_contables (nombre) VALUES ('COMBUSTIBLE DIESEL'), ('COMBUSTIBLE GASOLINA'), ('IEPS COMBUSTIBLE');

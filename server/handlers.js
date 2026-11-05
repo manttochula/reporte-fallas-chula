@@ -3908,7 +3908,8 @@ function filaFacturaCombustible_(f) {
   return { id: f.id, proveedorId: f.proveedor_id, proveedor: f.proveedor || '', empresaId: f.empresa_id || null, empresa: f.empresa || '', desde: fechaSoloOrNull(f.fecha_desde), hasta: fechaSoloOrNull(f.fecha_hasta),
     uuid: f.uuid || '', serie: f.serie || '', folio: f.folio || '', fechaFactura: fechaSoloOrNull(f.fecha_factura), emisor: f.nombre_emisor || '',
     subtotal: Number(f.subtotal), iva: Number(f.iva), ieps: Number(f.ieps), total: f.total === null ? null : Number(f.total),
-    tipos, xmlUrl: f.xml_url || '', pdfUrl: f.pdf_url || '', subidoPor: f.subido_por || '', subidoEn: isoOrNull(f.subido_en) };
+    tipos, xmlUrl: f.xml_url || '', pdfUrl: f.pdf_url || '', selladaUrl: f.sellada_url || '', subidoPor: f.subido_por || '', subidoEn: isoOrNull(f.subido_en),
+    archivoEstado: f.archivo_estado || '', archivoRuta: f.archivo_ruta || '', archivoMensaje: f.archivo_mensaje || '' };
 }
 
 // Revisión de una factura contra lo registrado: litros por tipo y lo que no se pudo repartir.
@@ -3925,6 +3926,59 @@ async function revisarFacturaCombustible_(fac) {
   });
   rep.sinAsignar.forEach((x) => avisos.push('No hay cargas de ' + (x.tipo === 'otro' ? 'combustible' : x.tipo) + ' para repartir $' + (x.subtotal + x.iva + x.ieps).toFixed(2) + ' de la factura.'));
   return { registros: regs.length, litrosRegistrados: rep.litrosPorTipo, avisos };
+}
+
+// Nota contable de la factura de combustible (nov-2026): una línea por cuenta
+// (Diesel, Gasolina, IEPS) con número, huerta y segmento de la empresa.
+const CUENTAS_COMBUSTIBLE_ = { diesel: 'COMBUSTIBLE DIESEL', gasolina: 'COMBUSTIBLE GASOLINA', ieps: 'IEPS COMBUSTIBLE' };
+async function notaFacturaCombustible_(f) {
+  const [[emp]] = f.empresaId ? await pool.query('SELECT nombre, siglas, autoriza_oc FROM empresas WHERE id = ?', [f.empresaId]) : [[]];
+  const cuenta = async (nombre) => {
+    const [[c]] = await pool.query('SELECT id, nombre, numero, segmento FROM cuentas_contables WHERE nombre = ?', [nombre]);
+    if (!c) return { cuenta: nombre, numero: '', huerta: '', segmento: '' };
+    const pe = f.empresaId ? await cuentaPorEmpresa_(c.id, f.empresaId) : null;
+    return { cuenta: c.nombre, numero: c.numero || '', huerta: (pe && pe.huerta) || '', segmento: (pe && pe.segmento) || c.segmento || '' };
+  };
+  const t = f.tipos || {};
+  const filas = [];
+  if (t.diesel && t.diesel.subtotal) filas.push(Object.assign({ concepto: 'Diesel', importe: t.diesel.subtotal }, await cuenta(CUENTAS_COMBUSTIBLE_.diesel)));
+  if (t.gasolina && t.gasolina.subtotal) filas.push(Object.assign({ concepto: 'Gasolina', importe: t.gasolina.subtotal }, await cuenta(CUENTAS_COMBUSTIBLE_.gasolina)));
+  const ieps = Math.round(Object.values(t).reduce((x, g) => x + (Number(g.ieps) || 0), 0) * 100) / 100;
+  if (ieps) filas.push(Object.assign({ concepto: 'IEPS', importe: ieps }, await cuenta(CUENTAS_COMBUSTIBLE_.ieps)));
+  if (t.otro && t.otro.subtotal) filas.push({ concepto: 'Otros', cuenta: '', numero: '', huerta: '', segmento: '', importe: t.otro.subtotal });
+  const fmtF = (iso) => (iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '');
+  const lit = ['diesel', 'gasolina'].filter((k) => t[k] && t[k].litros).map((k) => (k === 'diesel' ? 'Diesel ' : 'Gasolina ') + Number(t[k].litros).toLocaleString('es-MX') + ' L').join(' · ');
+  return {
+    filas, empresaSiglas: (emp && (emp.siglas || emp.nombre.split(',')[0])) || '', autoriza: (emp && emp.autoriza_oc) || '', elaboro: f.subidoPor || '',
+    semanaTexto: 'Semana ' + fmtF(f.desde) + ' al ' + fmtF(f.hasta), litrosTexto: lit,
+    fechaTexto: 'Factura ' + [f.serie, f.folio].filter(Boolean).join(' ') + (f.uuid ? ' · UUID ' + f.uuid.slice(0, 8) + '…' : ''),
+    faltan: filas.filter((x) => x.concepto !== 'Otros' && (!x.numero || !x.segmento)).map((x) => x.cuenta),
+  };
+}
+// Genera (o vuelve a generar) la factura sellada y la manda al almacén digital.
+async function sellarFacturaCombustible_(id, pdfBuffer) {
+  const [[r]] = await pool.query('SELECT f.*, p.nombre AS proveedor, e.nombre AS empresa FROM combustible_facturas f LEFT JOIN proveedores_combustible p ON p.id = f.proveedor_id LEFT JOIN empresas e ON e.id = f.empresa_id WHERE f.id = ?', [id]);
+  if (!r) return { ok: false, error: 'No existe la factura.' };
+  const f = filaFacturaCombustible_(r);
+  const nota = await notaFacturaCombustible_(f);
+  try {
+    const pdf = pdfBuffer || await leerArchivoComoBuffer_(r.pdf_url);
+    const sellada = await ocProv.estamparNotaCombustible(pdf, nota);
+    const url = await guardarArchivo_('data:application/pdf;base64,' + sellada.buffer.toString('base64'));
+    await pool.query("UPDATE combustible_facturas SET sellada_url = ?, archivo_estado = 'pendiente', archivo_mensaje = NULL WHERE id = ?", [url, id]);
+    return { ok: true, url, faltan: nota.faltan };
+  } catch (err) {
+    await pool.query("UPDATE combustible_facturas SET archivo_estado = 'pendiente', archivo_mensaje = ? WHERE id = ?", ['No se pudo agregar la nota contable al PDF: ' + (err.message || err), id]);
+    return { ok: false, error: 'No se pudo agregar la nota contable al PDF (' + (err.message || err) + '); se guarda sin sello.', faltan: nota.faltan };
+  }
+}
+// Panel: volver a sellar (p. ej. después de capturar las cuentas) y mandar otra vez al almacén.
+async function sellarFacturaCombustible(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_COMBUSTIBLE_, 'capturar');
+  const [[x]] = await pool.query('SELECT id FROM combustible_facturas WHERE id = ? AND eliminado = 0', [Number(id) || 0]);
+  if (!x) return { success: false, error: 'Esa factura ya no existe.' };
+  const s1 = await sellarFacturaCombustible_(x.id);
+  return s1.ok ? { success: true, faltan: s1.faltan } : { success: false, error: s1.error };
 }
 
 async function subirFacturaCombustible(code, nombreUsuario, data) {
@@ -3965,7 +4019,10 @@ async function subirFacturaCombustible(code, nombreUsuario, data) {
       cfdi.rfcEmisor.slice(0, 20) || null, cfdi.nombreEmisor.slice(0, 255) || null, cfdi.rfcReceptor.slice(0, 20) || null,
       cfdi.subtotal, cfdi.iva, cfdi.ieps, cfdi.total, JSON.stringify(cfdi.tipos), xmlUrl, pdfUrl, nombreUsuario || null]);
   const fac = { id: ins.insertId, proveedorId: prov.id, empresaId: emp.id, empresa: emp.nombre, desde, hasta, tipos: cfdi.tipos };
+  const sello = await sellarFacturaCombustible_(ins.insertId, pdf);
   const rev = await revisarFacturaCombustible_(fac);
+  if (!sello.ok) rev.avisos.push(sello.error);
+  if (sello.faltan && sello.faltan.length) rev.avisos.push('Faltan número o segmento de ' + sello.faltan.join(', ') + ' para ' + emp.nombre.split(',')[0] + ' (Catálogo → Cuentas contables); captúralos y dale "Sellar otra vez".');
   if (!rev.registros) rev.avisos.unshift('No hay entregas a huertas ni cargas automotrices de ' + prov.nombre + ' para ' + emp.nombre.split(',')[0] + ' en esas fechas.');
   if (cfdi.total !== null && Math.abs(cfdi.subtotal + cfdi.iva + cfdi.ieps - cfdi.total) > 1) rev.avisos.push('Subtotal + IVA + IEPS ($' + (cfdi.subtotal + cfdi.iva + cfdi.ieps).toFixed(2) + ') no da el total de la factura ($' + cfdi.total.toFixed(2) + ').');
   await registrarAuditoria_('combustible_facturas', String(ins.insertId), 'subir', nombreUsuario,
@@ -3984,7 +4041,7 @@ async function getFacturasCombustible(code, nombreUsuario, fechaInicio, fechaFin
   for (const r of rows) {
     const f = filaFacturaCombustible_(r);
     const rev = await revisarFacturaCombustible_(f);
-    out.push(Object.assign(f, { registros: rev.registros, litrosRegistrados: rev.litrosRegistrados, avisos: rev.avisos }));
+    out.push(Object.assign(f, { registros: rev.registros, litrosRegistrados: rev.litrosRegistrados, avisos: rev.avisos, faltanCuentas: (await notaFacturaCombustible_(f)).faltan }));
   }
   const [provs] = await pool.query('SELECT nombre FROM proveedores_combustible ORDER BY nombre');
   const [emps] = await pool.query('SELECT id, nombre, rfc FROM empresas ORDER BY nombre');
@@ -9871,14 +9928,38 @@ async function facturasPorArchivar_(ag) {
       await pool.query("UPDATE ordenes_compra SET archivo_estado = 'error', archivo_mensaje = ? WHERE id = ?", [err.message, r.id]);
     }
   }
+  // Nov-2026: facturas semanales de combustible (id "C<n>"); las guarda la PC de quien la subió.
+  const [comb] = await pool.query(
+    `SELECT f.*, e.nombre AS e_nombre, p.nombre AS p_nombre FROM combustible_facturas f
+       LEFT JOIN empresas e ON e.id = f.empresa_id LEFT JOIN proveedores_combustible p ON p.id = f.proveedor_id
+      WHERE f.archivo_estado = 'pendiente' AND f.eliminado = 0 ORDER BY f.subido_en`);
+  for (const r of comb.filter((x) => atiende(x.subido_por)).slice(0, 30)) {
+    try {
+      const ruta = ocProv.rutaAlmacenFactura_({
+        empresaCarpeta: (r.e_nombre || '').split(',')[0].trim().toUpperCase(), fecha: fechaSoloOrNull(r.fecha_factura) || fechaSoloOrNull(r.fecha_hasta),
+        proveedor: r.p_nombre || r.nombre_emisor, folio: r.folio, serie: r.serie, total: Number(r.total),
+      });
+      if (!r.e_nombre) throw new Error('La factura no tiene empresa.');
+      out.push({ id: 'C' + r.id, oc: 'combustible ' + [r.serie, r.folio].filter(Boolean).join(' '), carpeta: ruta.carpeta, archivo: ruta.archivo, url: r.sellada_url || r.pdf_url, sellada: !!r.sellada_url });
+    } catch (err) {
+      await pool.query("UPDATE combustible_facturas SET archivo_estado = 'error', archivo_mensaje = ? WHERE id = ?", [err.message, r.id]);
+    }
+  }
   return out;
 }
 
 // resultados: [{ id, ok, ruta, mensaje }]
 async function agenteFacturasResultado(token, resultados) {
   if (!(await agenteDeClave_(token))) return { success: false, error: 'Clave del agente no válida.' };
+  if (resultados && !Array.isArray(resultados) && Array.isArray(resultados.value)) resultados = resultados.value;
   let ok = 0, err = 0;
   for (const r of (Array.isArray(resultados) ? resultados : [])) {
+    const mc = /^C(\d+)$/.exec(String(r.id || ''));
+    if (mc) {   // factura semanal de combustible
+      if (r.ok) { ok++; await pool.query("UPDATE combustible_facturas SET archivo_estado = 'archivada', archivo_ruta = ?, archivo_mensaje = NULL, archivo_en = NOW() WHERE id = ?", [String(r.ruta || '').slice(0, 500), Number(mc[1])]); }
+      else { err++; await pool.query("UPDATE combustible_facturas SET archivo_estado = 'error', archivo_mensaje = ?, archivo_en = NOW() WHERE id = ?", [String(r.mensaje || 'sin detalle').slice(0, 2000), Number(mc[1])]); }
+      continue;
+    }
     const id = Number(r.id) || 0;
     if (!id) continue;
     if (r.ok) {
@@ -11791,6 +11872,7 @@ module.exports = {
   getReporteDieselCombinado,
   getReporteCombustibleGeneral,
   subirFacturaCombustible,
+  sellarFacturaCombustible,
   getFacturasCombustible,
   eliminarFacturaCombustible,
   repartoFacturasCombustible_,

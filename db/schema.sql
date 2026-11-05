@@ -3541,6 +3541,16 @@ SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_s
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE combustible_facturas ADD COLUMN sellada_url VARCHAR(500) DEFAULT NULL, ADD COLUMN archivo_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN archivo_ruta VARCHAR(500) DEFAULT NULL, ADD COLUMN archivo_mensaje TEXT DEFAULT NULL, ADD COLUMN archivo_en DATETIME DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
 
--- Cuentas de la nota de combustible: número, huerta y segmento por empresa se
--- capturan en Catálogo → Cuentas contables (el IVA no lleva cuenta).
-INSERT IGNORE INTO cuentas_contables (nombre) VALUES ('COMBUSTIBLE DIESEL'), ('COMBUSTIBLE GASOLINA'), ('IEPS COMBUSTIBLE');
+-- Nov-2026: la cuenta de combustible se marca en Cuentas contables (campo
+-- "Combustible": diesel / gasolina / ieps) y la huerta + segmento de cada
+-- recuadro de la nota salen de la huerta (entregas) o de la unidad (cargas
+-- automotrices). El IVA no lleva cuenta.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables' AND column_name = 'uso_combustible');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE cuentas_contables ADD COLUMN uso_combustible VARCHAR(10) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'huertas' AND column_name = 'huerta_contable');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE huertas ADD COLUMN huerta_contable VARCHAR(150) DEFAULT NULL, ADD COLUMN segmento VARCHAR(20) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'huerta_contable');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE maquinaria ADD COLUMN huerta_contable VARCHAR(150) DEFAULT NULL, ADD COLUMN segmento VARCHAR(20) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

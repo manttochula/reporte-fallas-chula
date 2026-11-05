@@ -313,27 +313,26 @@ async function estamparNotaFactura(pdfBuffer, nota) {
   return { buffer, modo };
 }
 
-// Nota contable de la factura semanal de COMBUSTIBLE (nov-2026, Carlos): igual que la
-// de refacciones (franja agregada abajo de la 1a hoja), pero con una línea por
-// cuenta: Diesel, Gasolina e IEPS (el IVA no lleva cuenta).
-// nota: { filas: [{ concepto, cuenta, numero, huerta, segmento, importe }], empresaSiglas,
-//         semanaTexto, litrosTexto, elaboro, autoriza, fechaTexto }
+// Nota contable de la factura semanal de COMBUSTIBLE (nov-2026, Carlos; formato de su
+// ejemplo CRE 10819): un recuadro por cuenta y huerta/segmento (Diesel NL AF VTA,
+// IEPS NL AF VTA, Diesel PRORRATEABLES…), de 2 en 2, en una franja agregada
+// abajo de la 1a hoja. El IVA no lleva cuenta.
+// nota: { cajas: [{ cuenta, numero, huerta, segmento, importe }], empresaSiglas, firma, pieTexto }
 async function estamparNotaCombustible(pdfBuffer, nota) {
   const pdf = await PdfLibDoc.load(pdfBuffer, { ignoreEncryption: true, updateMetadata: false });
   const fuente = await pdf.embedFont(StandardFonts.Helvetica);
   const negrita = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const filas = (nota.filas || []);
-  const ALTO = 15;
-  const pie = [['Empresa a contabilizar:', texto_(nota.empresaSiglas), true], ['Elaboró:', texto_(nota.elaboro), false]]
-    .concat(texto_(nota.autoriza) ? [['Autoriza:', texto_(nota.autoriza), false]] : []);
-  const ALTO_NOTA = (filas.length + 2) * ALTO + pie.length * ALTO + 40;
-  const paginas = pdf.getPages();
-  let pagina = paginas[0];
-  let x0, y0;
+  const cajas = nota.cajas || [];
+  const ALTO = 14, FILAS = 7, ET = 108, VAL = 168, SEP_X = 16, SEP_Y = 12;
+  const altoCaja = FILAS * ALTO;
+  const renglones = Math.max(1, Math.ceil(cajas.length / 2));
+  const ALTO_NOTA = renglones * (altoCaja + SEP_Y) + 18;
+  let pagina = pdf.getPages()[0];
+  let x0, yTop;
   const rot = pagina ? (pagina.getRotation().angle % 360 + 360) % 360 : 0;
   if (!pagina || rot !== 0) {
-    pagina = pdf.addPage([612, 792]);
-    x0 = 30; y0 = 792 - 36 - ALTO_NOTA;
+    pagina = pdf.addPage([612, Math.max(792, ALTO_NOTA + 72)]);
+    x0 = 24; yTop = pagina.getHeight() - 36;
   } else {
     const mb = pagina.getMediaBox();
     const cb = pagina.getCropBox();
@@ -344,41 +343,33 @@ async function estamparNotaCombustible(pdfBuffer, nota) {
     try { pagina.setBleedBox(cb.x, cb.y - extra, cb.width, cb.height + extra); } catch (e) { /* opcional */ }
     pagina.drawRectangle({ x: cb.x, y: cb.y - extra, width: cb.width, height: extra, color: rgb(1, 1, 1) });
     pagina.drawLine({ start: { x: cb.x + 20, y: cb.y - 3 }, end: { x: cb.x + cb.width - 20, y: cb.y - 3 }, thickness: 0.6, color: rgb(0.3, 0.3, 0.3) });
-    x0 = cb.x + 20; y0 = cb.y - extra + 8;
+    x0 = cb.x + Math.max(14, (cb.width - (2 * (ET + VAL) + SEP_X)) / 2); yTop = cb.y - 10;
   }
-  const NEGRO = rgb(0, 0, 0), ROJO = rgb(0.85, 0, 0), AMBAR = rgb(1, 0.76, 0.03), GRIS = rgb(0.3, 0.3, 0.3);
-  // Columnas: Concepto | Nombre de la cuenta | No. de cuenta | Huerta | Segmento | Importe
-  const cols = [{ t: 'Concepto', w: 62 }, { t: 'Nombre de la Cuenta', w: 140 }, { t: 'No. De Cuenta', w: 82 }, { t: 'Huerta', w: 92 }, { t: 'Segmento', w: 52 }, { t: 'Importe', w: 70, der: true }];
-  let y = y0 + ALTO_NOTA - 30;
-  pagina.drawText(limpiarWinAnsi_('NOTA CONTABLE - COMBUSTIBLE' + (nota.semanaTexto ? '  ·  ' + nota.semanaTexto : '')), { x: x0, y: y + 6, size: 9.5, font: negrita, color: NEGRO });
-  const celda = (x, w, yy, txt, opts) => {
-    pagina.drawRectangle({ x, y: yy, width: w, height: ALTO, borderColor: NEGRO, borderWidth: 0.8, color: opts.fondo || rgb(1, 1, 1) });
-    const t = limpiarWinAnsi_(txt).slice(0, Math.floor(w / 4.4));
-    const f = opts.bold ? negrita : fuente;
-    const tx = opts.der ? x + w - 3 - f.widthOfTextAtSize(t, 8) : x + 3;
-    pagina.drawText(t, { x: tx, y: yy + 4, size: 8, font: f, color: opts.color || NEGRO });
-  };
-  y -= ALTO;
-  let x = x0;
-  cols.forEach((c) => { celda(x, c.w, y, c.t, { bold: true, fondo: rgb(0.92, 0.92, 0.92), der: c.der }); x += c.w; });
-  let total = 0;
-  filas.forEach((f) => {
-    y -= ALTO; x = x0;
-    total += Number(f.importe) || 0;
-    const vals = [f.concepto, f.cuenta, f.numero, f.huerta, f.segmento, '$' + dinero_(f.importe)];
-    cols.forEach((c, i) => { celda(x, c.w, y, texto_(vals[i]) || (i === 1 ? 'FALTA CUENTA' : ''), { der: c.der, bold: i === 1, fondo: i === 1 ? AMBAR : null, color: (i === 1 && !texto_(vals[i])) ? ROJO : NEGRO }); x += c.w; });
+  const NEGRO = rgb(0, 0, 0), ROJO = rgb(0.85, 0, 0), AMBAR = rgb(1, 0.76, 0.03);
+  cajas.forEach((c, i) => {
+    const cx = x0 + (i % 2) * (ET + VAL + SEP_X);
+    const cy = yTop - Math.floor(i / 2) * (altoCaja + SEP_Y);
+    const filas = [
+      ['Nombre de la Cuenta:', texto_(c.cuenta) || 'FALTA CUENTA', true, !texto_(c.cuenta)],
+      ['No. De Cuenta:', texto_(c.numero), false, false],
+      ['Huerta:', texto_(c.huerta), true, false],
+      ['Segmento', texto_(c.segmento), false, false],
+      ['Observaciones:', '$' + dinero_(c.importe), false, true, true],
+      ['Empresa a contabilizar:', texto_(nota.empresaSiglas), false, true],
+      ['Firma:', texto_(nota.firma), false, false],
+    ];
+    filas.forEach(([et, val, ambar, rojo, derecha], k) => {
+      const yy = cy - (k + 1) * ALTO;
+      pagina.drawRectangle({ x: cx, y: yy, width: ET, height: ALTO, borderColor: NEGRO, borderWidth: 0.8, color: rgb(1, 1, 1) });
+      pagina.drawRectangle({ x: cx + ET, y: yy, width: VAL, height: ALTO, borderColor: NEGRO, borderWidth: 0.8, color: ambar ? AMBAR : rgb(1, 1, 1) });
+      pagina.drawText(et, { x: cx + 3, y: yy + 4, size: 8.5, font: negrita, color: (rojo && k >= 4) ? ROJO : NEGRO });
+      const t = limpiarWinAnsi_(val).slice(0, 38);
+      const f = rojo ? negrita : fuente;
+      const tx = derecha ? cx + ET + VAL - 3 - f.widthOfTextAtSize(t, 8.5) : cx + ET + 3;
+      pagina.drawText(t, { x: tx, y: yy + 4, size: 8.5, font: f, color: rojo ? ROJO : NEGRO });
+    });
   });
-  y -= ALTO; x = x0;
-  const anchoAntes = cols.slice(0, 5).reduce((s, c) => s + c.w, 0);
-  celda(x, anchoAntes, y, 'Total sin IVA' + (nota.litrosTexto ? '   (' + nota.litrosTexto + ')' : ''), { bold: true });
-  celda(x + anchoAntes, cols[5].w, y, '$' + dinero_(Math.round(total * 100) / 100), { bold: true, der: true });
-  y -= 10;
-  pie.forEach(([et, val, rojo]) => {
-    y -= ALTO;
-    celda(x0, 128, y, et, { bold: true, color: rojo ? ROJO : NEGRO });
-    celda(x0 + 128, 170, y, val, { bold: rojo, color: rojo ? ROJO : NEGRO });
-  });
-  if (nota.fechaTexto) pagina.drawText(limpiarWinAnsi_(nota.fechaTexto), { x: x0 + 320, y: y + 4, size: 8, font: fuente, color: GRIS });
+  if (nota.pieTexto) pagina.drawText(limpiarWinAnsi_(nota.pieTexto), { x: x0, y: yTop - renglones * (altoCaja + SEP_Y) + 2, size: 7.5, font: fuente, color: rgb(0.35, 0.35, 0.35) });
   const buffer = Buffer.from(await pdf.save());
   return { buffer };
 }

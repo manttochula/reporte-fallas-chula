@@ -3233,7 +3233,7 @@ const MAQUINARIA_SELECT = `
     m.usuario_asignado_app AS UsuarioAsignadoApp,
     m.admite_terceros AS AdmiteTerceros,
     m.empresa_id      AS EmpresaId,
-    m.referencia_comercial AS ReferenciaComercial,
+    m.referencia_comercial AS ReferenciaComercial, m.huerta_contable AS HuertaContable, m.segmento AS SegmentoContable,
     emp.nombre        AS Empresa
   FROM maquinaria m
   LEFT JOIN empresas emp ON emp.id = m.empresa_id
@@ -3424,6 +3424,11 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
       const ref = String(data.referenciaComercial || '').trim().toUpperCase();
       if (ref && REFERENCIAS_COMERCIAL_.indexOf(ref) === -1) return { success: false, error: 'Referencia en Comercial no válida: ' + ref + '.' };
       await pool.query('UPDATE maquinaria SET referencia_comercial = ? WHERE codigo_unidad = ?', [ref || null, codigo]);
+    }
+    // Huerta y segmento de la nota contable de combustible (nov-2026).
+    if (Object.prototype.hasOwnProperty.call(data, 'huertaContable') || Object.prototype.hasOwnProperty.call(data, 'segmentoContable')) {
+      await pool.query('UPDATE maquinaria SET huerta_contable = ?, segmento = ? WHERE codigo_unidad = ?',
+        [String(data.huertaContable || '').trim().toUpperCase().slice(0, 150) || null, String(data.segmentoContable || '').trim().slice(0, 20) || null, codigo]);
     }
     return { success: true, codigoUnidad: codigo };
   } catch (err) {
@@ -3892,15 +3897,19 @@ async function registrosProveedorCombustible_(proveedorId, desde, hasta, empresa
   if (empresaId) { const [[e]] = await pool.query('SELECT id, nombre FROM empresas WHERE id = ?', [empresaId]); empresa = e || null; }
   const ini = desde + ' 00:00:00', fin = hasta + ' 23:59:59';
   const [ent] = await pool.query(
-    `SELECT de.folio, de.litros, de.fecha FROM diesel_entregas de JOIN huertas h ON h.nombre = de.huerta
+    `SELECT de.folio, de.litros, de.fecha, de.huerta, h.huerta_contable, h.segmento FROM diesel_entregas de JOIN huertas h ON h.nombre = de.huerta
       WHERE de.eliminado = 0 AND h.proveedor_id = ? AND de.fecha BETWEEN ? AND ?` + (empresa ? ' AND h.empresa_id = ' + Number(empresa.id) : ''), [proveedorId, ini, fin]);
   const [aut] = await pool.query(
-    `SELECT folio, litros, fecha, tipo_combustible, proveedor, empresa FROM combustible_automotriz
-      WHERE eliminado = 0 AND fecha BETWEEN ? AND ?`, [ini, fin]);
+    `SELECT ca.folio, ca.litros, ca.fecha, ca.tipo_combustible, ca.proveedor, ca.empresa, ca.codigo_unidad, m.huerta_contable, m.segmento
+       FROM combustible_automotriz ca LEFT JOIN maquinaria m ON m.codigo_unidad = ca.codigo_unidad
+      WHERE ca.eliminado = 0 AND ca.fecha BETWEEN ? AND ?`, [ini, fin]);
   const nombre = nombreProvComb_(prov.nombre);
-  return ent.map((r) => ({ clave: 'H|' + r.folio, tipo: 'diesel', litros: Number(r.litros) || 0, folio: r.folio, origen: 'huerta', fecha: r.fecha }))
+  // huertaContable/segmento: de la huerta (entregas) o de la unidad (cargas automotrices); para el sello.
+  return ent.map((r) => ({ clave: 'H|' + r.folio, tipo: 'diesel', litros: Number(r.litros) || 0, folio: r.folio, origen: 'huerta', fecha: r.fecha,
+    huertaContable: (r.huerta_contable || '').trim(), segmento: (r.segmento || '').trim() }))
     .concat(aut.filter((r) => nombreProvComb_(r.proveedor) === nombre && (!empresa || mismaEmpresaComb_(r.empresa, empresa.nombre)))
-      .map((r) => ({ clave: 'A|' + r.folio, tipo: r.tipo_combustible === 'gasolina' ? 'gasolina' : 'diesel', litros: Number(r.litros) || 0, folio: r.folio, origen: 'automotriz', fecha: r.fecha })));
+      .map((r) => ({ clave: 'A|' + r.folio, tipo: r.tipo_combustible === 'gasolina' ? 'gasolina' : 'diesel', litros: Number(r.litros) || 0, folio: r.folio, origen: 'automotriz', fecha: r.fecha,
+        huertaContable: (r.huerta_contable || '').trim(), segmento: (r.segmento || '').trim() })));
 }
 
 function filaFacturaCombustible_(f) {
@@ -3928,31 +3937,61 @@ async function revisarFacturaCombustible_(fac) {
   return { registros: regs.length, litrosRegistrados: rep.litrosPorTipo, avisos };
 }
 
-// Nota contable de la factura de combustible (nov-2026): una línea por cuenta
-// (Diesel, Gasolina, IEPS) con número, huerta y segmento de la empresa.
-const CUENTAS_COMBUSTIBLE_ = { diesel: 'COMBUSTIBLE DIESEL', gasolina: 'COMBUSTIBLE GASOLINA', ieps: 'IEPS COMBUSTIBLE' };
+// Nota contable de la factura de combustible (nov-2026, formato del ejemplo CRE 10819):
+// un recuadro por cuenta y huerta/segmento. La cuenta es la marcada en Cuentas
+// contables como "Combustible" (diesel / gasolina / ieps); la huerta y el segmento
+// salen de la huerta (diesel entregado) o de la unidad (carga automotriz) y, si no
+// tienen, de la cuenta para esa empresa (ej. PRORRATEABLES / 29).
 async function notaFacturaCombustible_(f) {
-  const [[emp]] = f.empresaId ? await pool.query('SELECT nombre, siglas, autoriza_oc FROM empresas WHERE id = ?', [f.empresaId]) : [[]];
-  const cuenta = async (nombre) => {
-    const [[c]] = await pool.query('SELECT id, nombre, numero, segmento FROM cuentas_contables WHERE nombre = ?', [nombre]);
-    if (!c) return { cuenta: nombre, numero: '', huerta: '', segmento: '' };
-    const pe = f.empresaId ? await cuentaPorEmpresa_(c.id, f.empresaId) : null;
-    return { cuenta: c.nombre, numero: c.numero || '', huerta: (pe && pe.huerta) || '', segmento: (pe && pe.segmento) || c.segmento || '' };
+  const [[emp]] = f.empresaId ? await pool.query('SELECT nombre, siglas FROM empresas WHERE id = ?', [f.empresaId]) : [[]];
+  const cuentas = {};
+  for (const uso of ['diesel', 'gasolina', 'ieps']) {
+    const [[c]] = await pool.query('SELECT id, nombre, numero, segmento FROM cuentas_contables WHERE uso_combustible = ? ORDER BY id LIMIT 1', [uso]);
+    const pe = c && f.empresaId ? await cuentaPorEmpresa_(c.id, f.empresaId) : null;
+    cuentas[uso] = c ? { cuenta: c.nombre, numero: c.numero || '', huerta: (pe && pe.huerta) || '', segmento: (pe && pe.segmento) || c.segmento || '' }
+      : { cuenta: '', numero: '', huerta: '', segmento: '', falta: true };
+  }
+  const regs = await registrosProveedorCombustible_(f.proveedorId, f.desde, f.hasta, f.empresaId);
+  const rep = facComb.repartirFacturaCombustible({ tipos: f.tipos || {} }, regs);
+  const grupos = new Map();   // "huerta|segmento" → { huerta, segmento, diesel, gasolina, ieps }
+  const sumar = (huerta, segmento, uso, monto) => {
+    if (!monto) return;
+    const k = huerta + '|' + segmento;
+    if (!grupos.has(k)) grupos.set(k, { huerta, segmento, diesel: 0, gasolina: 0, ieps: 0 });
+    grupos.get(k)[uso] = Math.round((grupos.get(k)[uso] + monto) * 100) / 100;
   };
-  const t = f.tipos || {};
-  const filas = [];
-  if (t.diesel && t.diesel.subtotal) filas.push(Object.assign({ concepto: 'Diesel', importe: t.diesel.subtotal }, await cuenta(CUENTAS_COMBUSTIBLE_.diesel)));
-  if (t.gasolina && t.gasolina.subtotal) filas.push(Object.assign({ concepto: 'Gasolina', importe: t.gasolina.subtotal }, await cuenta(CUENTAS_COMBUSTIBLE_.gasolina)));
-  const ieps = Math.round(Object.values(t).reduce((x, g) => x + (Number(g.ieps) || 0), 0) * 100) / 100;
-  if (ieps) filas.push(Object.assign({ concepto: 'IEPS', importe: ieps }, await cuenta(CUENTAS_COMBUSTIBLE_.ieps)));
-  if (t.otro && t.otro.subtotal) filas.push({ concepto: 'Otros', cuenta: '', numero: '', huerta: '', segmento: '', importe: t.otro.subtotal });
+  regs.forEach((r) => {
+    const x = rep.porRegistro[r.clave];
+    if (!x) return;
+    const def = cuentas[r.tipo];
+    const huerta = r.huertaContable || def.huerta, segmento = r.segmento || def.segmento;
+    sumar(huerta, segmento, r.tipo, x.subtotal);
+    sumar(r.huertaContable || cuentas.ieps.huerta, r.segmento || cuentas.ieps.segmento, 'ieps', x.ieps);
+  });
+  // Lo que no se pudo repartir (no hay cargas de ese tipo) va a la huerta/segmento de la cuenta.
+  rep.sinAsignar.forEach((x) => {
+    const uso = x.tipo === 'gasolina' ? 'gasolina' : 'diesel';
+    sumar(cuentas[uso].huerta, cuentas[uso].segmento, uso, x.subtotal);
+    sumar(cuentas.ieps.huerta, cuentas.ieps.segmento, 'ieps', x.ieps);
+  });
+  const orden = Array.from(grupos.values()).sort((a, b) => (a.huerta === 'PRORRATEABLES') - (b.huerta === 'PRORRATEABLES') || a.huerta.localeCompare(b.huerta, 'es'));
+  const cajas = [];
+  orden.forEach((g) => ['diesel', 'gasolina', 'ieps'].forEach((uso) => {
+    if (g[uso]) cajas.push({ cuenta: cuentas[uso].cuenta, numero: cuentas[uso].numero, huerta: g.huerta, segmento: g.segmento, importe: g[uso], uso });
+  }));
   const fmtF = (iso) => (iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '');
-  const lit = ['diesel', 'gasolina'].filter((k) => t[k] && t[k].litros).map((k) => (k === 'diesel' ? 'Diesel ' : 'Gasolina ') + Number(t[k].litros).toLocaleString('es-MX') + ' L').join(' · ');
+  const faltan = [];
+  ['diesel', 'gasolina', 'ieps'].forEach((uso) => {
+    if (!cajas.some((c) => c.uso === uso)) return;
+    if (cuentas[uso].falta) faltan.push('no hay cuenta marcada como combustible ' + uso.toUpperCase() + ' (Catálogo → Cuentas contables)');
+    else if (!cuentas[uso].numero) faltan.push('la cuenta ' + cuentas[uso].cuenta + ' no tiene número');
+  });
+  const sinSeg = cajas.filter((c) => !c.segmento || !c.huerta);
+  if (sinSeg.length) faltan.push('hay ' + sinSeg.length + ' recuadro(s) sin huerta o segmento: captúralos en la huerta o la unidad (o en la cuenta para esta empresa)');
   return {
-    filas, empresaSiglas: (emp && (emp.siglas || emp.nombre.split(',')[0])) || '', autoriza: (emp && emp.autoriza_oc) || '', elaboro: f.subidoPor || '',
-    semanaTexto: 'Semana ' + fmtF(f.desde) + ' al ' + fmtF(f.hasta), litrosTexto: lit,
-    fechaTexto: 'Factura ' + [f.serie, f.folio].filter(Boolean).join(' ') + (f.uuid ? ' · UUID ' + f.uuid.slice(0, 8) + '…' : ''),
-    faltan: filas.filter((x) => x.concepto !== 'Otros' && (!x.numero || !x.segmento)).map((x) => x.cuenta),
+    cajas, empresaSiglas: (emp && (emp.siglas || emp.nombre.split(',')[0])) || '', firma: f.subidoPor || '',
+    pieTexto: 'Factura ' + [f.serie, f.folio].filter(Boolean).join(' ') + ' · semana ' + fmtF(f.desde) + ' al ' + fmtF(f.hasta) + (f.uuid ? ' · UUID ' + f.uuid.slice(0, 8) : ''),
+    faltan,
   };
 }
 // Genera (o vuelve a generar) la factura sellada y la manda al almacén digital.
@@ -4022,7 +4061,7 @@ async function subirFacturaCombustible(code, nombreUsuario, data) {
   const sello = await sellarFacturaCombustible_(ins.insertId, pdf);
   const rev = await revisarFacturaCombustible_(fac);
   if (!sello.ok) rev.avisos.push(sello.error);
-  if (sello.faltan && sello.faltan.length) rev.avisos.push('Faltan número o segmento de ' + sello.faltan.join(', ') + ' para ' + emp.nombre.split(',')[0] + ' (Catálogo → Cuentas contables); captúralos y dale "Sellar otra vez".');
+  if (sello.faltan && sello.faltan.length) rev.avisos.push('Nota contable: ' + sello.faltan.join('; ') + '. Captúralo y dale "Sellar otra vez".');
   if (!rev.registros) rev.avisos.unshift('No hay entregas a huertas ni cargas automotrices de ' + prov.nombre + ' para ' + emp.nombre.split(',')[0] + ' en esas fechas.');
   if (cfdi.total !== null && Math.abs(cfdi.subtotal + cfdi.iva + cfdi.ieps - cfdi.total) > 1) rev.avisos.push('Subtotal + IVA + IEPS ($' + (cfdi.subtotal + cfdi.iva + cfdi.ieps).toFixed(2) + ') no da el total de la factura ($' + cfdi.total.toFixed(2) + ').');
   await registrarAuditoria_('combustible_facturas', String(ins.insertId), 'subir', nombreUsuario,
@@ -6419,7 +6458,8 @@ async function getHuertasCatalogo(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
   const [rows] = await pool.query(`
     SELECT h.id AS Id, h.nombre AS Nombre, h.empresa_id AS EmpresaId, e.nombre AS EmpresaNombre,
-           h.proveedor_id AS ProveedorId, p.nombre AS ProveedorNombre, h.mapa_url AS MapaUrl
+           h.proveedor_id AS ProveedorId, p.nombre AS ProveedorNombre, h.mapa_url AS MapaUrl,
+           h.huerta_contable AS HuertaContable, h.segmento AS Segmento
     FROM huertas h
     LEFT JOIN empresas e ON e.id = h.empresa_id
     LEFT JOIN proveedores_combustible p ON p.id = h.proveedor_id
@@ -6433,6 +6473,8 @@ async function getHuertasCatalogo(code, nombreUsuario) {
     ProveedorId: r.ProveedorId,
     ProveedorNombre: r.ProveedorNombre,
     MapaUrl: r.MapaUrl,
+    HuertaContable: r.HuertaContable || '',
+    Segmento: r.Segmento || '',
   }));
 }
 
@@ -6448,13 +6490,18 @@ async function guardarHuerta(code, nombreUsuario, id, data) {
       ? null : Number(data.empresaId);
     const proveedorId = (data.proveedorId === '' || data.proveedorId === undefined || data.proveedorId === null)
       ? null : Number(data.proveedorId);
+    // Nov-2026: huerta y segmento para la nota contable de las facturas de combustible.
+    const conContable = 'huertaContable' in data || 'segmento' in data;
+    const hc = (data.huertaContable || '').toString().trim().toUpperCase().slice(0, 150) || null;
+    const seg = (data.segmento || '').toString().trim().slice(0, 20) || null;
     if (id) {
       await pool.query('UPDATE huertas SET nombre=?, empresa_id=?, proveedor_id=? WHERE id=?', [nombre, empresaId, proveedorId, id]);
+      if (conContable) await pool.query('UPDATE huertas SET huerta_contable=?, segmento=? WHERE id=?', [hc, seg, id]);
       return { success: true, id: Number(id) };
     }
     const [result] = await pool.query(
-      'INSERT INTO huertas (nombre, empresa_id, proveedor_id) VALUES (?, ?, ?)',
-      [nombre, empresaId, proveedorId]
+      'INSERT INTO huertas (nombre, empresa_id, proveedor_id, huerta_contable, segmento) VALUES (?, ?, ?, ?, ?)',
+      [nombre, empresaId, proveedorId, hc, seg]
     );
     return { success: true, id: result.insertId };
   } catch (err) {
@@ -8530,13 +8577,13 @@ async function guardarEmpresa(code, nombreUsuario, id, data) {
 async function getCuentasContables(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_.concat(['refacciones']), 'visualizar');
   const [rows] = await pool.query(
-    `SELECT c.id, c.nombre, c.numero, c.segmento, c.descripcion_oc, c.codigo_comercial, GROUP_CONCAT(t.nombre ORDER BY t.nombre SEPARATOR ', ') AS tipos
+    `SELECT c.id, c.nombre, c.numero, c.segmento, c.descripcion_oc, c.codigo_comercial, c.uso_combustible, GROUP_CONCAT(t.nombre ORDER BY t.nombre SEPARATOR ', ') AS tipos
      FROM cuentas_contables c LEFT JOIN tipos_unidad t ON t.cuenta_contable_id = c.id GROUP BY c.id ORDER BY c.nombre`
   );
   const [pe] = await pool.query(
     'SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento, e.nombre FROM cuentas_contables_empresas x JOIN empresas e ON e.id = x.empresa_id ORDER BY e.nombre'
   );
-  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', CodigoComercial: r.codigo_comercial || '', TiposUnidad: r.tipos || '',
+  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', CodigoComercial: r.codigo_comercial || '', UsoCombustible: r.uso_combustible || '', TiposUnidad: r.tipos || '',
     PorEmpresa: pe.filter((x) => x.cuenta_id === r.id).map((x) => ({ EmpresaId: x.empresa_id, Empresa: x.nombre, Huerta: x.huerta || '', Segmento: x.segmento || '' })) }));
 }
 
@@ -8571,6 +8618,12 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
     } else {
       const [res] = await pool.query('INSERT INTO cuentas_contables (nombre, numero, segmento, descripcion_oc, codigo_comercial) VALUES (?, ?, ?, ?, ?)', [nombre, numero, segmento || null, descripcionOc || null, codigoComercial]);
       cuentaId = res.insertId;
+    }
+    if ('usoCombustible' in data) {
+      // Nov-2026: la cuenta que va en la nota de las facturas de combustible (una por uso).
+      const uso = ['diesel', 'gasolina', 'ieps'].indexOf(String(data.usoCombustible || '')) >= 0 ? String(data.usoCombustible) : null;
+      if (uso) await pool.query('UPDATE cuentas_contables SET uso_combustible = NULL WHERE uso_combustible = ? AND id <> ?', [uso, cuentaId]);
+      await pool.query('UPDATE cuentas_contables SET uso_combustible = ? WHERE id = ?', [uso, cuentaId]);
     }
     if (porEmpresa) {
       await pool.query('DELETE FROM cuentas_contables_empresas WHERE cuenta_id = ?', [cuentaId]);
@@ -11873,6 +11926,7 @@ module.exports = {
   getReporteCombustibleGeneral,
   subirFacturaCombustible,
   sellarFacturaCombustible,
+  notaFacturaCombustible_,
   getFacturasCombustible,
   eliminarFacturaCombustible,
   repartoFacturasCombustible_,

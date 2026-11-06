@@ -8861,7 +8861,7 @@ async function guardarConfigOc_(clave, valor) {
 async function partidasOc_(ids) {
   const filtroIds = Array.isArray(ids) && ids.length ? ' AND ri.id IN (?)' : '';
   const [rows] = await pool.query(
-    `SELECT ri.id AS respuestaItemId, sci.cantidad AS cantidad, ri.precio_cotizado AS precioCotizado, r.descuento_pct AS descuentoPct,
+    `SELECT ri.id AS respuestaItemId, sci.cantidad AS cantidad, ri.precio_cotizado AS precioCotizado, r.descuento_pct AS descuentoPct, ri.oc_permitir_repetida AS permitirRepetida,
             s.folio AS solicitudFolio, s.orden AS orden, s.proveedor_id AS proveedorId, p.nombre AS proveedor, p.codigo_comercial AS codigoComercial,
             ref.id AS refaccionId, ref.codigo AS refaccionCodigo, ref.descripcion AS descripcion, ref.no_parte AS noParte, ref.folio_comercial AS folioComercial,
             rep.unidad AS ordenUnidad, rep.codigo_unidad AS codigoUnidad, mq.empresa_id AS empresaId, emp.nombre AS empresa,
@@ -8927,9 +8927,23 @@ async function partidasOc_(ids) {
       destino,
       motivo,
       exportada: x.expTipo ? { tipo: x.expTipo, serie: x.expSerie || '', folio: x.expFolio, fecha: fechaSoloOrNull(x.expFecha), por: x.expPor || '', en: isoOrNull(x.expEn) } : null,
-      exportadaOtra: !x.expTipo && otra ? { tipo: otra.tipo, serie: otra.serie || '', folio: otra.folio } : null,
+      exportadaOtra: !x.expTipo && otra && !x.permitirRepetida ? { tipo: otra.tipo, serie: otra.serie || '', folio: otra.folio } : null,
+      // Nov-2026: se autorizó cargarla aunque la orden ya tenga esa pieza (segunda pieza).
+      repetidaPermitida: !x.expTipo && otra && x.permitirRepetida ? { tipo: otra.tipo, serie: otra.serie || '', folio: otra.folio } : null,
     };
   });
+}
+
+// Panel (nov-2026): "Es otra pieza, cargarla": la partida se carga aunque la misma
+// pieza de la orden ya haya salido con otra cotización. Con la carga automática
+// prendida, la toma el agente en su siguiente vuelta.
+async function permitirOcRepetida(code, nombreUsuario, respuestaItemId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(respuestaItemId) || 0;
+  const [u] = await pool.query('UPDATE solicitud_cotizacion_respuesta_items SET oc_permitir_repetida = 1 WHERE id = ? AND autorizado = 1', [id]);
+  if (!u.affectedRows) return { success: false, error: 'Esa cotización ya no está autorizada.' };
+  await registrarAuditoria_('solicitud_cotizacion_respuesta_items', String(id), 'permitir_oc_repetida', nombreUsuario, 'Segunda pieza: se carga aunque la orden ya tenga esa pieza');
+  return { success: true };
 }
 
 async function getPartidasParaOC(code, nombreUsuario, incluirExportadas) {
@@ -12033,6 +12047,7 @@ module.exports = {
   getCargaComercial,
   guardarCargaAutomatica,
   accionOcComercial,
+  permitirOcRepetida,
   encolarOcAutomaticas_,
   corregirRespuestaItem,
   getUmbralesPreventivo,

@@ -4664,7 +4664,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
+  guardarPolizaSeguro: true, permitirOcRepetida: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -5240,7 +5240,7 @@ function ocultarControlesSoloLectura(){
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
-      '.ocx-auto-chk', '.ocx-auto-acc', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar', '.ocp-btn-archivar', '.ocp-btn-gasto', '.ocp-btn-pedir-gasto',
+      '.ocx-auto-chk', '.ocx-auto-acc', '.ocx-btn-repetida', '#ocx-btn-guardar-folios', '.ocp-btn-generar', '.ocp-btn-correo', '.ocp-btn-wa', '.ocp-btn-copiar', '.ocp-btn-cancelar', '.ocp-btn-archivar', '.ocp-btn-gasto', '.ocp-btn-pedir-gasto',
     ]);
   }
   if(!puedeCapturarPestana('insumos')){
@@ -22145,7 +22145,9 @@ function renderPartidasOcx_(){
       : '<span class="ocx-destino-revisar">Revisar</span><div class="mnt-subtext">' + escapeHtml(p.motivo) + '</div>';
     let ya = '';
     if(p.exportada) ya = '<span class="ocx-ya">' + (p.exportada.tipo === 'oc' ? 'OC ' + escapeHtml(p.exportada.serie + ' ' + p.exportada.folio) : 'Gasto directo') + '<br>' + escapeHtml((p.exportada.fecha || '') + ' · ' + (p.exportada.por || '')) + '</span>';
-    else if(p.exportadaOtra) ya = '<span class="ocx-ya">Esta pieza de la orden ya salió con otra cotización' + (p.exportadaOtra.tipo === 'oc' ? ' (OC ' + escapeHtml(p.exportadaOtra.serie + ' ' + p.exportadaOtra.folio) + ')' : '') + '</span>';
+    else if(p.exportadaOtra) ya = '<span class="ocx-ya">Esta pieza de la orden ya salió con otra cotización' + (p.exportadaOtra.tipo === 'oc' ? ' (OC ' + escapeHtml(p.exportadaOtra.serie + ' ' + p.exportadaOtra.folio) + ')' : '') + '</span>'
+      + ' <button type="button" class="row-view ocx-btn-repetida" data-id="' + p.respuestaItemId + '" title="Si es una SEGUNDA pieza (no la misma recotizada), se carga a Comercial">Es otra pieza, cargarla</button>';
+    else if(p.repetidaPermitida) ya = '<span class="mnt-subtext" style="display:inline;">Segunda pieza (la orden ya tenía una en ' + escapeHtml(p.repetidaPermitida.serie + ' ' + p.repetidaPermitida.folio) + '): se carga</span>';
     return '<tr>' +
       '<td><input type="checkbox" class="ocx-chk" data-id="' + p.respuestaItemId + '"' + (OCX_SELECCION[p.respuestaItemId] ? ' checked' : '') + ' style="width:auto;"></td>' +
       '<td>' + escapeHtml(p.orden || '—') + (p.ordenUnidad ? '<div class="mnt-subtext">' + escapeHtml(p.ordenUnidad) + '</div>' : '') + '</td>' +
@@ -22163,6 +22165,17 @@ function renderPartidasOcx_(){
     cb.addEventListener('change', function(){
       if(cb.checked) OCX_SELECCION[cb.dataset.id] = true; else delete OCX_SELECCION[cb.dataset.id];
       renderResumenOcx_();
+    });
+  });
+  // Nov-2026: segunda pieza igual para la misma orden → se carga de todos modos.
+  body.querySelectorAll('.ocx-btn-repetida').forEach(function(b){
+    b.addEventListener('click', function(){
+      if(!confirm('¿Es una SEGUNDA pieza (no la misma recotizada)? Se va a cargar a Comercial aunque la orden ya tenga una.')) return;
+      b.disabled = true;
+      google.script.run
+        .withSuccessHandler(function(r){ if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo.'); return; } cargarPartidasOcx_(false); if(typeof cargarCargaComercial_ === 'function') cargarCargaComercial_(); })
+        .withFailureHandler(function(){ b.disabled = false; alert('No se pudo.'); })
+        .permitirOcRepetida(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.id));
     });
   });
   renderResumenOcx_();

@@ -3554,3 +3554,9 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'huerta_contable');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE maquinaria ADD COLUMN huerta_contable VARCHAR(150) DEFAULT NULL, ADD COLUMN segmento VARCHAR(20) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026: segunda pieza igual para la misma orden (otra cotización). Por omisión
+-- no se carga (evita comprar dos veces); con esta marca sí se manda a Comercial.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'solicitud_cotizacion_respuesta_items' AND column_name = 'oc_permitir_repetida');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE solicitud_cotizacion_respuesta_items ADD COLUMN oc_permitir_repetida TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

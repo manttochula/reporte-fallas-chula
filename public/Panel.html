@@ -3447,6 +3447,8 @@
         <input type="hidden" id="ref-f-id">
         <div class="maq-field" id="ref-f-codigo-wrap" style="display:none;"><label>Código</label><div id="ref-f-codigo-valor" class="mnt-subtext" style="font-size:13px;"></div></div>
         <div class="maq-field"><label>Folio comercial (Código Producto de CONTPAQi, opcional)</label><input type="text" id="ref-f-folio-comercial" maxlength="30" placeholder="Ej. FR0102011"></div>
+        <div class="maq-field"><label><input type="checkbox" id="ref-f-lleva-lote" style="width:auto;"> Lleva lote en Comercial (aceites, lubricantes…)</label>
+          <span class="mnt-subtext">Comercial la deja con cantidad 0 al convertir la OC a COMPRA EN PESOS: el agente la convierte igual y el Panel avisa que falta capturar cantidad y lote a mano.</span></div>
         <div class="maq-field"><label>No. de parte (de la marca, opcional)</label><input type="text" id="ref-f-noparte"></div>
         <div class="maq-field"><label>Descripción *</label><input type="text" id="ref-f-descripcion"></div>
         <div class="maq-field"><label>Precio (opcional)</label><input type="number" id="ref-f-precio" min="0" step="0.01"></div>
@@ -19078,6 +19080,7 @@ function limpiarModalRefaccion(){
   document.getElementById('ref-f-id').value = '';
   document.getElementById('ref-f-noparte').value = '';
   document.getElementById('ref-f-folio-comercial').value = '';
+  document.getElementById('ref-f-lleva-lote').checked = false;
   document.getElementById('ref-f-descripcion').value = '';
   document.getElementById('ref-f-precio').value = '';
   document.getElementById('ref-f-categoria-id').value = '';
@@ -19108,6 +19111,7 @@ function abrirModalRefaccion(ref){
     }
     document.getElementById('ref-f-noparte').value = ref.NoParte || '';
     document.getElementById('ref-f-folio-comercial').value = ref.FolioComercial || '';
+    document.getElementById('ref-f-lleva-lote').checked = !!ref.LlevaLote;
     document.getElementById('ref-f-descripcion').value = ref.Descripcion || '';
     document.getElementById('ref-f-precio').value = ref.Precio !== null && ref.Precio !== undefined ? ref.Precio : '';
     document.getElementById('ref-f-categoria-id').value = ref.CategoriaId || '';
@@ -19154,6 +19158,7 @@ document.getElementById('ref-btn-save').addEventListener('click', function(){
   const datos = {
     noParte: document.getElementById('ref-f-noparte').value.trim(),
     folioComercial: document.getElementById('ref-f-folio-comercial').value.trim(),
+    llevaLote: document.getElementById('ref-f-lleva-lote').checked,
     descripcion: descripcion,
     precio: document.getElementById('ref-f-precio').value,
     categoriaId: document.getElementById('ref-f-categoria-id').value,

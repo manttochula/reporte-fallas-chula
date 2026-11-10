@@ -3942,6 +3942,13 @@ async function revisarFacturaCombustible_(fac) {
 // contables como "Combustible" (diesel / gasolina / ieps); la huerta y el segmento
 // salen de la huerta (diesel entregado) o de la unidad (carga automotriz) y, si no
 // tienen, de la cuenta para esa empresa (ej. PRORRATEABLES / 29).
+// Iniciales de la empresa para "Empresa a contabilizar" cuando no tiene siglas en el
+// catálogo (como las de refacciones): CHULA BRAND MEXICO → CBM, CHULA BRAND DEL GOLFO → CBG.
+function inicialesEmpresa_(nombre) {
+  const base = String(nombre || '').split(',')[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  return base.split(/[^A-Z0-9]+/).filter((w) => w && ['DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y', 'EN', 'SA', 'CV', 'S', 'C', 'V', 'R', 'L', 'P'].indexOf(w) < 0)
+    .map((w) => w[0]).join('');
+}
 async function notaFacturaCombustible_(f) {
   const [[emp]] = f.empresaId ? await pool.query('SELECT nombre, siglas FROM empresas WHERE id = ?', [f.empresaId]) : [[]];
   const cuentas = {};
@@ -3989,7 +3996,7 @@ async function notaFacturaCombustible_(f) {
   const sinSeg = cajas.filter((c) => !c.segmento || !c.huerta);
   if (sinSeg.length) faltan.push('hay ' + sinSeg.length + ' recuadro(s) sin huerta o segmento: captúralos en la huerta o la unidad (o en la cuenta para esta empresa)');
   return {
-    cajas, empresaSiglas: (emp && (emp.siglas || emp.nombre.split(',')[0])) || '', firma: f.subidoPor || '',
+    cajas, empresaSiglas: (emp && (emp.siglas || inicialesEmpresa_(emp.nombre))) || '', firma: f.subidoPor || '',
     pieTexto: 'Factura ' + [f.serie, f.folio].filter(Boolean).join(' ') + ' · semana ' + fmtF(f.desde) + ' al ' + fmtF(f.hasta) + (f.uuid ? ' · UUID ' + f.uuid.slice(0, 8) : ''),
     faltan,
   };
@@ -5241,7 +5248,7 @@ async function importarServiciosAutomotrices(code, nombreUsuario, filas) {
 async function getRefacciones(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
   const [rows] = await pool.query(`
-    SELECT r.id AS Id, r.codigo AS Codigo, r.folio_comercial AS FolioComercial, r.no_parte AS NoParte, r.descripcion AS Descripcion,
+    SELECT r.id AS Id, r.codigo AS Codigo, r.folio_comercial AS FolioComercial, r.no_parte AS NoParte, r.descripcion AS Descripcion, r.lleva_lote AS LlevaLote,
            r.precio AS Precio, r.proveedor AS ProveedorTexto, r.proveedor_id AS ProveedorId,
            p.nombre AS ProveedorNombre, r.categoria_id AS CategoriaId, c.nombre AS CategoriaNombre,
            r.marca_id AS MarcaId, mr.nombre AS MarcaNombre
@@ -5284,6 +5291,7 @@ async function getRefacciones(code, nombreUsuario) {
       Id: r.Id,
       Codigo: r.Codigo || '',
       FolioComercial: r.FolioComercial || '',
+      LlevaLote: !!r.LlevaLote,
       NoParte: r.NoParte || '',
       Descripcion: r.Descripcion,
       Precio: r.Precio !== null && r.Precio !== undefined ? Number(r.Precio) : null,
@@ -5369,6 +5377,8 @@ async function guardarRefaccion(code, nombreUsuario, id, data) {
       );
       refaccionId = result.insertId;
     }
+    // Nov-2026: "Lleva lote en Comercial" (si no viene, se conserva).
+    if (Object.prototype.hasOwnProperty.call(data, 'llevaLote')) await pool.query('UPDATE refacciones SET lleva_lote = ? WHERE id = ?', [data.llevaLote ? 1 : 0, refaccionId]);
 
     // Sincroniza los modelos compatibles: se borran los que ya no aplican
     // y se insertan los nuevos (más simple y sin duda alguna que calcular
@@ -10134,6 +10144,17 @@ async function gastosPorConvertir_(ag) {
   return out;
 }
 
+// Refacciones de una OC al proveedor marcadas "Lleva lote en Comercial".
+async function refaccionesConLoteDeOc_(ocId) {
+  const [rows] = await pool.query(
+    `SELECT DISTINCT ref.descripcion FROM ordenes_compra_items i
+       JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = i.respuesta_item_id
+       JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+       JOIN refacciones ref ON ref.id = sci.refaccion_id
+      WHERE i.oc_id = ? AND ref.lleva_lote = 1`, [ocId]);
+  return rows.map((x) => x.descripcion);
+}
+
 // resultados: [{ id, ok, mensaje, paso }]
 async function agenteGastosResultado(token, resultados) {
   if (!(await agenteDeClave_(token))) return { success: false, error: 'Clave del agente no válida.' };
@@ -10148,8 +10169,15 @@ async function agenteGastosResultado(token, resultados) {
       continue;
     }
     if (r.ok) ok++; else err++;
+    let mensaje = String(r.mensaje || (r.ok ? 'Convertido por el agente' : 'sin detalle'));
+    if (r.ok) {
+      // Nov-2026 (Carlos): con productos que llevan LOTE, Comercial deja la cantidad
+      // en 0 al convertir; el agente la convierte igual y se completa a mano.
+      const lotes = await refaccionesConLoteDeOc_(id);
+      if (lotes.length) mensaje += ' FALTA en Comercial: capturar cantidad y lote de ' + lotes.join(', ') + ' (producto con lotes; quedó en 0).';
+    }
     await pool.query('UPDATE ordenes_compra SET gasto_estado = ?, gasto_mensaje = ?, gasto_paso = ?, gasto_en = NOW() WHERE id = ?',
-      [r.ok ? 'convertido' : 'error', String(r.mensaje || (r.ok ? 'Convertido por el agente' : 'sin detalle')).slice(0, 2000), r.ok ? null : String(r.paso || '').slice(0, 80) || null, id]);
+      [r.ok ? 'convertido' : 'error', mensaje.slice(0, 2000), r.ok ? null : String(r.paso || '').slice(0, 80) || null, id]);
     if (!r.ok) {
       const [o] = await pool.query('SELECT serie, folio FROM ordenes_compra WHERE id = ?', [id]);
       if (o.length) avisos.avisarTexto_('No se pudo convertir a gasto la OC ' + o[0].serie + ' ' + o[0].folio, [['Paso', r.paso || '—'], ['Motivo', r.mensaje || 'sin detalle']], '/panel', 'oc-gasto-' + id);
@@ -10329,8 +10357,8 @@ async function guardarProveedor(code, nombreUsuario, id, data) {
     const codigoComercial = (data.codigoComercial || '').toString().trim().toUpperCase() || null;
     if (codigoComercial) {
       if (codigoComercial.length > 20) return { success: false, error: 'El código en Comercial es muy largo (máximo 20 caracteres).' };
-      const [dup] = await pool.query('SELECT nombre FROM proveedores WHERE codigo_comercial = ? AND id <> ?', [codigoComercial, Number(id) || 0]);
-      if (dup.length) return { success: false, error: 'El código en Comercial ' + codigoComercial + ' ya lo tiene el proveedor ' + dup[0].nombre + '.' };
+      // Nov-2026 (Carlos): SÍ se puede repetir: sucursales del mismo proveedor (cada una
+      // cotiza aparte) que en Comercial son la misma razón social / el mismo código.
     }
     // RFC y domicilio fiscal: salen en la OC al proveedor (oct-2026).
     const rfc = (data.rfc || '').toString().trim().toUpperCase() || null;
@@ -11941,6 +11969,7 @@ module.exports = {
   subirFacturaCombustible,
   sellarFacturaCombustible,
   notaFacturaCombustible_,
+  inicialesEmpresa_,
   getFacturasCombustible,
   eliminarFacturaCombustible,
   repartoFacturasCombustible_,

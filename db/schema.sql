@@ -3560,3 +3560,10 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'solicitud_cotizacion_respuesta_items' AND column_name = 'oc_permitir_repetida');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE solicitud_cotizacion_respuesta_items ADD COLUMN oc_permitir_repetida TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026: refacciones que en Comercial controlan LOTES (aceites, lubricantes…).
+-- Comercial las pasa con cantidad 0 al convertir la OC a COMPRA EN PESOS y pide
+-- capturar el lote: el agente la convierte igual y el Panel avisa que falta capturarlo a mano.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'refacciones' AND column_name = 'lleva_lote');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE refacciones ADD COLUMN lleva_lote TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

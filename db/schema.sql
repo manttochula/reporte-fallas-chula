@@ -3587,3 +3587,21 @@ CREATE TABLE IF NOT EXISTS huerta_actividades_manual (
   INDEX idx_ham_avance (avance_id),
   INDEX idx_ham_actividad (actividad_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Avance por día (nov-2026, Carlos: "detalle de avance por día y el promedio
+-- de avance por los días trabajados"): las mismas pasadas de
+-- huerta_actividades_aportes pero separadas por día (hora de México). Un
+-- recorrido que se reanuda otro día reparte su avance en cada día. La llenan
+-- el avance en vivo y el recálculo (recalcular_avance_cuadros_nube.bat
+-- rellena los días de recorridos viejos).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS huerta_actividades_aportes_dia (
+  actividad_id INT NOT NULL,
+  avance_id    INT NOT NULL,
+  dia          DATE NOT NULL,
+  pasadas      DECIMAL(10,4) NOT NULL DEFAULT 0,
+  metros       DECIMAL(12,2) NOT NULL DEFAULT 0,
+  PRIMARY KEY (actividad_id, avance_id, dia),
+  INDEX idx_haad_avance (avance_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

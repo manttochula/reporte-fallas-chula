@@ -7742,6 +7742,7 @@ async function eliminarCuadroHuerta(code, nombreUsuario, cuadroId) {
   const id = Number(cuadroId);
   if (!id) return { success: false, error: 'Falta indicar qué cuadro borrar.' };
   await pool.query('DELETE x FROM huerta_actividades_aportes x JOIN huerta_actividades a ON a.id = x.actividad_id WHERE a.cuadro_id = ?', [id]);
+  await pool.query('DELETE x FROM huerta_actividades_aportes_dia x JOIN huerta_actividades a ON a.id = x.actividad_id WHERE a.cuadro_id = ?', [id]);
   await pool.query('DELETE FROM huerta_actividades WHERE cuadro_id = ?', [id]);
   await pool.query('DELETE FROM huerta_cuadros WHERE id = ?', [id]);
   return { success: true };
@@ -8105,6 +8106,7 @@ async function eliminarActividadHuerta(code, nombreUsuario, actividadId) {
   const id = Number(actividadId);
   if (!id) return { success: false, error: 'Falta indicar qué actividad borrar.' };
   await pool.query('DELETE FROM huerta_actividades_aportes WHERE actividad_id = ?', [id]);
+  await pool.query('DELETE FROM huerta_actividades_aportes_dia WHERE actividad_id = ?', [id]);
   await pool.query('DELETE FROM huerta_actividades WHERE id = ?', [id]);
   return { success: true };
 }
@@ -8135,11 +8137,12 @@ async function getActividadesHuerta(huerta) {
   );
   // Quién trabajó cada actividad (por equipo/operador) y qué recorrido la completó.
   const aportesPorAct = {};
+  const porDiaPorAct = {};
   const completoPorAct = {};
   if (rows.length) {
     const ids = rows.map((r) => r.id);
     const [aps] = await pool.query(
-      `SELECT x.actividad_id, x.pasadas, ah.nombre, ah.codigo_unidad, m.unidad
+      `SELECT x.actividad_id, x.avance_id, x.pasadas, x.primera_en, ah.nombre, ah.codigo_unidad, ah.manual, m.unidad
        FROM huerta_actividades_aportes x JOIN avance_huerta ah ON ah.id = x.avance_id
        LEFT JOIN maquinaria m ON m.codigo_unidad = ah.codigo_unidad
        WHERE x.actividad_id IN (?) ORDER BY x.primera_en`,
@@ -8151,6 +8154,30 @@ async function getActividadesHuerta(huerta) {
       let e = lista.find((y) => y.clave === clave);
       if (!e) { e = { clave, equipo: x.unidad || x.codigo_unidad || '', operador: x.nombre || '', pasadas: 0 }; lista.push(e); }
       e.pasadas += Number(x.pasadas) || 0;
+    });
+    // Avance por día (nov-2026): de huerta_actividades_aportes_dia; si un
+    // recorrido viejo todavía no tiene sus días (antes del recálculo), todo su
+    // avance cuenta en el día en que empezó a aportar.
+    const [dias] = await pool.query(
+      `SELECT actividad_id, avance_id, DATE_FORMAT(dia, '%Y-%m-%d') AS dia, pasadas FROM huerta_actividades_aportes_dia WHERE actividad_id IN (?) ORDER BY dia`,
+      [ids]
+    );
+    const conDias = new Set(dias.map((d) => d.actividad_id + '|' + d.avance_id));
+    const infoAp = {};
+    aps.forEach((x) => { infoAp[x.actividad_id + '|' + x.avance_id] = x; });
+    const filasDia = dias.map((d) => ({ actividad_id: d.actividad_id, avance_id: d.avance_id, dia: d.dia, pasadas: Number(d.pasadas) || 0 }));
+    aps.forEach((x) => {
+      if (conDias.has(x.actividad_id + '|' + x.avance_id) || !x.primera_en) return;
+      filasDia.push({ actividad_id: x.actividad_id, avance_id: x.avance_id, dia: x.manual ? diaLocal_(x.primera_en) : diaMexico_(x.primera_en), pasadas: Number(x.pasadas) || 0 });
+    });
+    filasDia.forEach((d) => {
+      const x = infoAp[d.actividad_id + '|' + d.avance_id];
+      if (!x) return; // recorrido ya borrado
+      const lista = porDiaPorAct[d.actividad_id] || (porDiaPorAct[d.actividad_id] = []);
+      const clave = d.dia + '|' + (x.codigo_unidad || '') + '|' + (x.nombre || '');
+      let e = lista.find((y) => y.clave === clave);
+      if (!e) { e = { clave, dia: d.dia, equipo: x.unidad || x.codigo_unidad || '', operador: x.nombre || '', pasadas: 0 }; lista.push(e); }
+      e.pasadas += d.pasadas;
     });
     const avIds = Array.from(new Set(rows.map((r) => r.avance_id).filter(Boolean)));
     if (avIds.length) {
@@ -8198,6 +8225,8 @@ async function getActividadesHuerta(huerta) {
       implementoUnidad: r.implementoUnidad,
       operadorNombre: r.operador_nombre,
       aportes: (aportesPorAct[r.id] || []).map((e) => ({ equipo: e.equipo, operador: e.operador, pasadas: Math.round(e.pasadas * 100) / 100 })),
+      porDia: (porDiaPorAct[r.id] || []).sort((a, b) => (a.dia < b.dia ? -1 : a.dia > b.dia ? 1 : 0))
+        .map((e) => ({ dia: e.dia, equipo: e.equipo, operador: e.operador, pasadas: Math.round(e.pasadas * 10000) / 10000 })),
       completadoPor: r.avance_id ? (completoPorAct[r.avance_id] || null) : null,
     };
   });
@@ -8304,6 +8333,11 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
          ON DUPLICATE KEY UPDATE pasadas = pasadas + VALUES(pasadas), metros = metros + VALUES(metros), ultima_en = VALUES(ultima_en)`,
         [act.id, avanceId, Math.round(tramo.pasadas * 10000) / 10000, Math.round(tramo.metros * 100) / 100, tPunto, tPunto]
       );
+      await pool.query(
+        `INSERT INTO huerta_actividades_aportes_dia (actividad_id, avance_id, dia, pasadas, metros) VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE pasadas = pasadas + VALUES(pasadas), metros = metros + VALUES(metros)`,
+        [act.id, avanceId, diaMexico_(tPunto), Math.round(tramo.pasadas * 10000) / 10000, Math.round(tramo.metros * 100) / 100]
+      );
       const nuevasPasadas = (Number(act.avance_pasadas) || 0) + tramo.pasadas;
       const nuevosMetros = (Number(act.avance_metros) || 0) + tramo.metros;
       // Cuadro SIN surcos capturados (necesarias === null): ya NO se
@@ -8353,12 +8387,38 @@ async function marcarCuadrosCompletadosPorPunto_(huerta, avanceId, lat, lng, ava
 // cada actividad. La llena el avance en vivo y el recálculo.
 async function guardarAportesActividad_(actividadId, aportes) {
   await pool.query('DELETE FROM huerta_actividades_aportes WHERE actividad_id = ?', [actividadId]);
+  await pool.query('DELETE FROM huerta_actividades_aportes_dia WHERE actividad_id = ?', [actividadId]);
   for (const [avanceId, ap] of Object.entries(aportes || {})) {
     await pool.query(
       'INSERT INTO huerta_actividades_aportes (actividad_id, avance_id, pasadas, metros, primera_en, ultima_en) VALUES (?, ?, ?, ?, ?, ?)',
       [actividadId, Number(avanceId), Math.round(ap.pasadas * 10000) / 10000, Math.round(ap.metros * 100) / 100, ap.primera, ap.ultima]
     );
+    for (const [dia, d] of Object.entries(ap.dias || {})) {
+      await pool.query(
+        'INSERT INTO huerta_actividades_aportes_dia (actividad_id, avance_id, dia, pasadas, metros) VALUES (?, ?, ?, ?, ?)',
+        [actividadId, Number(avanceId), dia, Math.round(d.pasadas * 10000) / 10000, Math.round(d.metros * 100) / 100]
+      );
+    }
   }
+}
+
+// Día (YYYY-MM-DD) en hora de México de un instante (puntos de GPS).
+function diaMexico_(fecha) {
+  const d = fecha instanceof Date ? fecha : new Date(fecha);
+  if (isNaN(d.getTime())) return fechaMexico_();
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+// Día de un avance a mano: la fecha se guardó tal cual la capturaron (sin zona),
+// así que se toma la fecha "de reloj" con que se lee de la base.
+function diaLocal_(fecha) {
+  const d = fecha instanceof Date ? fecha : new Date(fecha);
+  const z = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate());
+}
+function sumarDia_(ap, dia, pasadas, metros) {
+  const dd = ap.dias || (ap.dias = {});
+  const x = dd[dia] || (dd[dia] = { pasadas: 0, metros: 0 });
+  x.pasadas += pasadas; x.metros += metros;
 }
 
 // ---- Avance a mano (nov-2026, Carlos) ----
@@ -8428,6 +8488,7 @@ async function eliminarAvanceManual(code, nombreUsuario, id) {
   const [cuadros] = await pool.query('SELECT DISTINCT a.cuadro_id FROM huerta_actividades_manual x JOIN huerta_actividades a ON a.id = x.actividad_id WHERE x.avance_id = ?', [av.id]);
   await pool.query('DELETE FROM huerta_actividades_manual WHERE avance_id = ?', [av.id]);
   await pool.query('DELETE FROM huerta_actividades_aportes WHERE avance_id = ?', [av.id]);
+  await pool.query('DELETE FROM huerta_actividades_aportes_dia WHERE avance_id = ?', [av.id]);
   await pool.query('DELETE FROM avance_huerta WHERE id = ?', [av.id]);
   for (const c of cuadros) await recalcularAvanceActividadesHuerta_(true, { cuadroId: c.cuadro_id });
   await registrarAuditoria_('avance_huerta', String(av.id), 'borrar_av_manual', nombreUsuario, av.huerta);
@@ -8498,6 +8559,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
         pasadas += extra;
         const ap = aportes[ses.id] || (aportes[ses.id] = { pasadas: 0, metros: 0, primera: t, ultima: t });
         ap.pasadas += extra;
+        sumarDia_(ap, diaLocal_(t), extra, 0);
         if ((necesarias !== null && pasadas >= necesarias - margenCompletado_(necesarias)) || (necesarias === null && pct >= 100)) {
           completadoEn = t;
           avanceIdCompleto = ses.id;
@@ -8514,6 +8576,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
         metros += tramo.metros;
         const ap = aportes[ses.id] || (aportes[ses.id] = { pasadas: 0, metros: 0, primera: pb.t, ultima: pb.t });
         ap.pasadas += tramo.pasadas; ap.metros += tramo.metros; ap.ultima = pb.t;
+        sumarDia_(ap, diaMexico_(pb.t), tramo.pasadas, tramo.metros);
         if (necesarias !== null && pasadas >= necesarias - margenCompletado_(necesarias)) {
           completadoEn = pb.t;
           avanceIdCompleto = ses.id;
@@ -12203,6 +12266,7 @@ module.exports = {
   generarOrdenServicioAutomotriz,
   revisarYGenerarOrdenesPreventivasAutomaticas_,
   recalcularAvanceActividadesHuerta_,
+  diaMexico_,
   dentroParaAvance_,
   avanceDeTramo_,
   pasadasNecesarias_,

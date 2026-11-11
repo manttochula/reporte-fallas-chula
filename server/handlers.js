@@ -9140,10 +9140,10 @@ async function getCuentasContables(code, nombreUsuario) {
      FROM cuentas_contables c LEFT JOIN tipos_unidad t ON t.cuenta_contable_id = c.id GROUP BY c.id ORDER BY c.nombre`
   );
   const [pe] = await pool.query(
-    'SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento, e.nombre FROM cuentas_contables_empresas x JOIN empresas e ON e.id = x.empresa_id ORDER BY e.nombre'
+    'SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento, x.codigo_comercial, e.nombre FROM cuentas_contables_empresas x JOIN empresas e ON e.id = x.empresa_id ORDER BY e.nombre'
   );
   return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', CodigoComercial: r.codigo_comercial || '', UsoCombustible: r.uso_combustible || '', TiposUnidad: r.tipos || '',
-    PorEmpresa: pe.filter((x) => x.cuenta_id === r.id).map((x) => ({ EmpresaId: x.empresa_id, Empresa: x.nombre, Huerta: x.huerta || '', Segmento: x.segmento || '' })) }));
+    PorEmpresa: pe.filter((x) => x.cuenta_id === r.id).map((x) => ({ EmpresaId: x.empresa_id, Empresa: x.nombre, Huerta: x.huerta || '', Segmento: x.segmento || '', CodigoComercial: x.codigo_comercial || '' })) }));
 }
 
 // Huerta/segmento de una cuenta para una empresa (null si no tiene fila).
@@ -9169,7 +9169,8 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
       empresaId: Number(x.empresaId) || 0,
       huerta: (x.huerta || '').toString().trim().toUpperCase().slice(0, 150),
       segmento: (x.segmento || '').toString().trim().slice(0, 20),
-    })).filter((x) => x.empresaId && (x.huerta || x.segmento)) : null;
+      codigo: (x.codigoComercial || '').toString().trim().toUpperCase().slice(0, 30),
+    })).filter((x) => x.empresaId && (x.huerta || x.segmento || x.codigo)) : null;
     let cuentaId = Number(id) || 0;
     if (cuentaId) {
       await pool.query('UPDATE cuentas_contables SET nombre=?, numero=?, segmento=?, descripcion_oc=?' + ('codigoComercial' in data ? ', codigo_comercial=?' : '') + ' WHERE id=?',
@@ -9187,7 +9188,7 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
     if (porEmpresa) {
       await pool.query('DELETE FROM cuentas_contables_empresas WHERE cuenta_id = ?', [cuentaId]);
       for (const x of porEmpresa) {
-        await pool.query('INSERT INTO cuentas_contables_empresas (cuenta_id, empresa_id, huerta, segmento) VALUES (?, ?, ?, ?)', [cuentaId, x.empresaId, x.huerta || null, x.segmento || null]);
+        await pool.query('INSERT INTO cuentas_contables_empresas (cuenta_id, empresa_id, huerta, segmento, codigo_comercial) VALUES (?, ?, ?, ?, ?)', [cuentaId, x.empresaId, x.huerta || null, x.segmento || null, x.codigo || null]);
       }
     }
     return { success: true, id: cuentaId };
@@ -9430,7 +9431,7 @@ async function partidasOc_(ids) {
             COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial) AS codigoComercial, pce.codigo AS codigoPorEmpresa,
             ref.id AS refaccionId, ref.codigo AS refaccionCodigo, ref.descripcion AS descripcion, ref.no_parte AS noParte, ref.folio_comercial AS folioComercial,
             rep.unidad AS ordenUnidad, rep.codigo_unidad AS codigoUnidad, mq.empresa_id AS empresaId, emp.nombre AS empresa,
-            cc.codigo_comercial AS codigoGasto, cc.nombre AS cuentaNombre,
+            COALESCE(NULLIF(TRIM(cce.codigo_comercial), ''), cc.codigo_comercial) AS codigoGasto, cc.nombre AS cuentaNombre,
             x.tipo AS expTipo, x.serie AS expSerie, x.folio AS expFolio, x.fecha_oc AS expFecha, x.exportado_por AS expPor, x.exportado_en AS expEn
      FROM solicitud_cotizacion_respuesta_items ri
      JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
@@ -9444,6 +9445,7 @@ async function partidasOc_(ids) {
      LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = mq.empresa_id
      LEFT JOIN tipos_unidad tu ON LOWER(TRIM(tu.nombre)) = LOWER(TRIM(mq.tipo_unidad))
      LEFT JOIN cuentas_contables cc ON cc.id = tu.cuenta_contable_id
+     LEFT JOIN cuentas_contables_empresas cce ON cce.cuenta_id = cc.id AND cce.empresa_id = mq.empresa_id
      LEFT JOIN oc_exportaciones x ON x.respuesta_item_id = ri.id
      WHERE ri.autorizado = 1 AND s.estado <> 'cancelada'${filtroIds}
      ORDER BY s.orden, p.nombre, ref.descripcion`,

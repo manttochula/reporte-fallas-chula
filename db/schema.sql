@@ -3768,3 +3768,10 @@ CREATE TABLE IF NOT EXISTS proveedores_codigos_empresa (
 SET @idx_cta = (SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables' AND column_name = 'nombre' AND NON_UNIQUE = 0 LIMIT 1);
 SET @sql_alter = IF(@idx_cta IS NULL, 'SELECT 1', CONCAT('ALTER TABLE cuentas_contables DROP INDEX `', @idx_cta, '`'));
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Código de producto para GASTOS por empresa (nov-2026, Carlos): la misma
+-- cuenta (ej. MTTO TRACTORES) usa GTS30 en CHULA BRAND MEXICO y 0020 en
+-- CHULA BRAND DEL GOLFO. Vacío = el de la cuenta (cuentas_contables.codigo_comercial).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables_empresas' AND column_name = 'codigo_comercial');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE cuentas_contables_empresas ADD COLUMN codigo_comercial VARCHAR(30) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

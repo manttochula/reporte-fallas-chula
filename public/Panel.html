@@ -3165,9 +3165,9 @@
             <small style="color:var(--text-dim);">Si es la cuenta del diesel, la gasolina o el IEPS, va en la nota contable (sello) de las facturas semanales de combustible. La huerta y el segmento de cada recuadro salen de la huerta o de la unidad; si no tienen, de la tabla "por empresa" de abajo.</small></div>
           <div class="maq-field"><label>Código de producto en Comercial para gastos</label><input type="text" id="catsimple-f-cuenta-codigo" maxlength="30" placeholder="Ej. GTS30">
             <small style="color:var(--text-dim);">Las refacciones sin folio comercial (gastos) de los equipos con esta cuenta se exportan a la OC de CONTPAQi con este código (ej. GTS30 = SERVICIO MTTO. TRACTORES). Vacío = van a la hoja "Gasto directo".</small></div>
-          <div class="maq-field"><label>Huerta y segmento por empresa</label>
-            <small style="color:var(--text-dim);">Según la empresa del equipo (Catálogo de maquinaria). Ej. Chula Brand México → PRORRATEABLES, 29. Si dejas una empresa vacía: huerta de la orden y el segmento de arriba.</small>
-            <table class="ocx-tabla cce-tabla" style="margin-top:6px;width:100%;"><thead><tr><th>Empresa</th><th>Huerta (nota)</th><th>Segmento</th></tr></thead><tbody id="catsimple-f-cuenta-empresas"></tbody></table>
+          <div class="maq-field"><label>Huerta, segmento y código de gastos por empresa</label>
+            <small style="color:var(--text-dim);">Según la empresa del equipo (Catálogo de maquinaria). Ej. Chula Brand México → PRORRATEABLES, 29. Si dejas una empresa vacía: huerta de la orden, y el segmento y el código de gastos de arriba. Código gastos: el código de producto en el Comercial de esa empresa (ej. 0020 en Chula Brand del Golfo).</small>
+            <table class="ocx-tabla cce-tabla" style="margin-top:6px;width:100%;"><thead><tr><th>Empresa</th><th>Huerta (nota)</th><th>Segmento</th><th>Código gastos</th></tr></thead><tbody id="catsimple-f-cuenta-empresas"></tbody></table>
           </div>
         </div>
         <div id="catsimple-f-fiscal-wrap" style="display:none;">
@@ -21578,7 +21578,7 @@ function renderCatalogoSimple(key){
     }
     if(cfg.tieneCuentaExtra){
       const partes = [r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.CodigoComercial ? 'gastos: ' + r.CodigoComercial : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean)
-        .concat((r.PorEmpresa || []).map(function(x){ return x.Empresa.split(',')[0] + ': ' + [x.Huerta, x.Segmento ? 'seg. ' + x.Segmento : ''].filter(Boolean).join(' '); }));
+        .concat((r.PorEmpresa || []).map(function(x){ return x.Empresa.split(',')[0] + ': ' + [x.Huerta, x.Segmento ? 'seg. ' + x.Segmento : '', x.CodigoComercial ? 'gastos ' + x.CodigoComercial : ''].filter(Boolean).join(' '); }));
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
     if(cfg.tieneFiscal){
@@ -21684,8 +21684,9 @@ function abrirModalCatalogoSimple(key, registro){
       const x = porEmp.find(function(p){ return p.EmpresaId === e.Id; }) || {};
       return '<tr data-empresa-id="' + e.Id + '"><td>' + escapeHtml(e.Nombre) + '</td>' +
         '<td><input type="text" class="cce-huerta" maxlength="150" list="cce-huertas" value="' + escapeHtml(x.Huerta || '') + '" placeholder="Huerta de la orden"></td>' +
-        '<td><input type="text" class="cce-segmento" maxlength="20" value="' + escapeHtml(x.Segmento || '') + '" placeholder="General" style="max-width:110px;"></td></tr>';
-    }).join('') || '<tr><td colspan="3" class="mnt-subtext">Da de alta las empresas primero.</td></tr>';
+        '<td><input type="text" class="cce-segmento" maxlength="20" value="' + escapeHtml(x.Segmento || '') + '" placeholder="General" style="max-width:90px;"></td>' +
+        '<td><input type="text" class="cce-codigo" maxlength="30" value="' + escapeHtml(x.CodigoComercial || '') + '" placeholder="El de arriba" style="max-width:100px;" title="Código de producto para gastos en el Comercial de esta empresa (vacío = el de arriba)"></td></tr>';
+    }).join('') || '<tr><td colspan="4" class="mnt-subtext">Da de alta las empresas primero.</td></tr>';
     let dl = document.getElementById('cce-huertas');
     if(!dl){ dl = document.createElement('datalist'); dl.id = 'cce-huertas'; document.body.appendChild(dl); }
     dl.innerHTML = ['PRORRATEABLES'].concat((CATALOGO_SIMPLE_DATOS.huertas || []).map(function(h){ return h.Nombre; })).map(function(h){ return '<option value="' + escapeHtml(h) + '">'; }).join('');
@@ -21778,7 +21779,7 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
     data.codigoComercial = document.getElementById('catsimple-f-cuenta-codigo').value.trim();
     data.usoCombustible = document.getElementById('catsimple-f-cuenta-combustible').value;
     data.porEmpresa = Array.from(document.querySelectorAll('#catsimple-f-cuenta-empresas tr[data-empresa-id]')).map(function(tr){
-      return { empresaId: Number(tr.dataset.empresaId), huerta: tr.querySelector('.cce-huerta').value.trim(), segmento: tr.querySelector('.cce-segmento').value.trim() };
+      return { empresaId: Number(tr.dataset.empresaId), huerta: tr.querySelector('.cce-huerta').value.trim(), segmento: tr.querySelector('.cce-segmento').value.trim(), codigoComercial: tr.querySelector('.cce-codigo').value.trim() };
     });
     if(!data.numero){
       statusEl.textContent = 'Escribe el número de cuenta.'; statusEl.className = 'maq-modal-status show err';

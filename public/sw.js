@@ -12,7 +12,7 @@
 // manifiesto/ícono con que se instala) carguen sin señal; una vez cargada,
 // el resto (encolar y reintentar el envío) lo hace el propio Index.html
 // con IndexedDB + fetch normal.
-const CACHE_NOMBRE = 'reportar-shell-v4';
+const CACHE_NOMBRE = 'reportar-shell-v5';
 // Librerías y tipografías de otros sitios que usa el Panel (no cambian:
 // llevan la versión en la dirección). Se guardan la primera vez y después
 // se usan de la copia, para que el Panel se vea igual sin internet.
@@ -36,8 +36,10 @@ const ESPERA_RED_MS = 5000;
 // funcione aunque no haya señal, no solo la página desde el navegador.
 // Panel (oct-2026): también se guarda para abrirlo sin internet en la
 // computadora (ver la capa "Panel SIN INTERNET" en Panel.html).
+// Taller (nov-2026): también abre sin internet, con su catálogo de partes.
 const RUTAS_SHELL = ['/', '/icons/reportar.webmanifest', '/icons/reportar-icon-192.png', '/icons/reportar-icon-512.png',
-  '/panel', '/icons/panel.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+  '/panel', '/icons/panel.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
+  '/taller', '/catalogoPartes.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

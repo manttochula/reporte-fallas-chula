@@ -690,13 +690,14 @@
 <div class="app">
   <header>
     <div class="eyebrow">Flota &amp; Mantenimiento</div>
-    <h1>Reporte de Fallas</h1>
+    <h1 id="app-nombre">Reporte de Fallas</h1>
     <div class="tabs">
       <div class="tab active" id="tab-form">Reportar</div>
       <div class="tab" id="tab-diesel">Cargar Diesel</div>
       <div class="tab" id="tab-movimientos">Movimientos</div>
       <div class="tab" id="tab-misreportes">Mis Reportes</div>
       <div class="tab" id="tab-avance">Avance Huerta</div>
+      <div class="tab" id="tab-taller" style="display:none;">Taller</div>
     </div>
   </header>
 
@@ -1566,7 +1567,45 @@ function aplicarHuerta(datos){
   aplicarHuertasReportar(datos.huertasReportar, huerta);
   poblarSelectHuertaAvance();
   aplicarPestanasCelularOcultas_(datos.pestanasCelularOcultas);
+  appAplicarModulos_(datos);
 }
+
+// ------------------------------------------------------------
+// Taller dentro de la app (nov-2026, Carlos): "la aplicación de taller
+// volverla una app offline, tipo como la de los operadores... que tenga el
+// nombre de la aplicación dependiendo para lo que se ocupa". Quien tiene el
+// módulo Taller ve la pestaña Taller (abre taller.html, que también trabaja
+// sin señal); quien SOLO tiene Taller se va directo a Taller. El nombre de
+// arriba: "Reporte de Fallas" para quien reporta, "Avance Huertas" para
+// quien solo hace Avance Huerta.
+// ------------------------------------------------------------
+function appUrlTaller_(){ return window.APP_SERVIDOR ? 'taller.html' : '/taller'; }
+function appTieneModulo_(modulos, m){
+  return (modulos || []).some(function(x){ return String(x).toLowerCase() === m; });
+}
+function appAplicarModulos_(datos){
+  datos = datos || {};
+  var nombre = localStorage.getItem('reporte_usuario') || '';
+  // Servidor viejo (sin "modulos"): como siempre, solo Reportar.
+  var modulos = Array.isArray(datos.modulos) && datos.modulos.length ? datos.modulos : ['Reportar'];
+  try { localStorage.setItem('app_modulos', JSON.stringify(modulos)); } catch(e){}
+  var tieneTaller = appTieneModulo_(modulos, 'taller');
+  var tieneReportar = appTieneModulo_(modulos, 'reportar');
+  try {
+    if(tieneTaller && nombre) localStorage.setItem('taller_nombre', nombre);
+    else localStorage.removeItem('taller_nombre');
+  } catch(e){}
+  var tabTaller = document.getElementById('tab-taller');
+  if(tabTaller) tabTaller.style.display = tieneTaller ? '' : 'none';
+  if(tieneTaller && !tieneReportar){ window.location.href = appUrlTaller_(); return; }
+  var ocultas = Array.isArray(datos.pestanasCelularOcultas) ? datos.pestanasCelularOcultas : [];
+  var soloAvance = ocultas.indexOf('form') !== -1 && ocultas.indexOf('avance') === -1;
+  var titulo = soloAvance ? 'Avance Huertas' : 'Reporte de Fallas';
+  var h1 = document.getElementById('app-nombre');
+  if(h1) h1.textContent = titulo;
+  document.title = titulo;
+}
+document.getElementById('tab-taller').addEventListener('click', function(){ window.location.href = appUrlTaller_(); });
 
 // --- Buscador de "Usuario" en el login (escribe y te muestra las opciones
 // dadas de alta), mismo mecanismo que el buscador de unidad de arriba
@@ -1635,7 +1674,7 @@ function mostrarLogin(){
       // en este celular.
       NOMBRES_USUARIOS_LOGIN = Object.keys(loginOfflineLeer_());
     })
-    .getNombresUsuarios('Reportar');
+    .getNombresUsuarios('App'); // Reportar o Taller (nov-2026: Taller también va en la app)
 }
 
 // ------------------------------------------------------------
@@ -1736,7 +1775,7 @@ function intentarLogin(){
         loginStatus.classList.add('show');
       });
     })
-    .validarUsuario(nombre, pass, 'Reportar');
+    .validarUsuario(nombre, pass, 'App');
 }
 
 function asegurarUsuario(){
@@ -1764,6 +1803,7 @@ document.getElementById('login-pass').addEventListener('keydown', function(e){
 });
 document.getElementById('btn-change-user').addEventListener('click', function(){
   localStorage.removeItem('reporte_usuario');
+  localStorage.removeItem('taller_nombre');
   mostrarLogin();
 });
 

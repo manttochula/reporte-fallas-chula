@@ -203,6 +203,11 @@
     cursor:pointer;
   }
   .usr-row:hover{ border-color: var(--amber-dim); }
+  .usr-cat{ margin-bottom:14px; }
+  .usr-cat > summary{ cursor:pointer; padding:8px 2px; margin-bottom:8px; border-bottom:1px solid var(--line); list-style:revert; }
+  .usr-cat-nombre{ font-family:'Oswald',sans-serif; font-size:17px; text-transform:uppercase; letter-spacing:0.03em; }
+  .usr-cat-n{ background:var(--amber); color:#1c1c1c; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:700; margin-left:6px; }
+  .usr-cat-desc{ color:var(--text-dim); font-size:12.5px; margin-left:10px; }
   .usr-row .name{ font-weight:600; }
   .usr-row .huerta{ color: var(--text-dim); font-size:13px; margin-left:12px; }
   .usr-delete{
@@ -14224,9 +14229,24 @@ function renderUsuarios(usuarios){
     listEl.appendChild(empty);
     return;
   }
+  // Por categoría (nov-2026, Carlos): Gestión (entran al Panel), Operadores
+  // (Avance Huerta en el celular), Encargados (reportan) y Taller (app de
+  // Taller). Cada quien sale en UNA sola, la de mayor nivel: ver usrCategoria_.
+  const secciones = {};
+  USR_CATEGORIAS.forEach(function(c){
+    const det = document.createElement('details');
+    det.className = 'usr-cat';
+    det.open = true;
+    const sum = document.createElement('summary');
+    sum.innerHTML = '<span class="usr-cat-nombre">' + c.nombre + '</span> <span class="usr-cat-n" data-cat="' + c.id + '"></span><span class="usr-cat-desc">' + c.desc + '</span>';
+    det.appendChild(sum);
+    secciones[c.id] = { det: det, n: 0 };
+  });
   usuarios.forEach(function(u){
     const row = document.createElement('div');
     row.className = 'usr-row';
+    const cat = secciones[usrCategoria_(u)];
+    cat.n++;
 
     const left = document.createElement('div');
     const nameSpan = document.createElement('span');
@@ -14371,9 +14391,36 @@ function renderUsuarios(usuarios){
 
     row.appendChild(left);
     row.appendChild(delBtn);
-    listEl.appendChild(row);
+    cat.det.appendChild(row);
+  });
+  USR_CATEGORIAS.forEach(function(c){
+    const sec = secciones[c.id];
+    if(!sec.n) return;
+    sec.det.querySelector('.usr-cat-n').textContent = sec.n;
+    listEl.appendChild(sec.det);
   });
   ocultarControlesSoloLectura();
+}
+
+// Categorías de Usuarios (en el orden en que se muestran). Cada persona sale
+// en UNA sola, la de mayor nivel: Gestión > Taller > Encargados > Operadores
+// (ver usrCategoria_).
+const USR_CATEGORIAS = [
+  { id: 'gestion', nombre: 'Gestión', desc: 'Entran al Panel' },
+  { id: 'operadores', nombre: 'Operadores', desc: 'Hacen Avance Huerta en el celular' },
+  { id: 'encargados', nombre: 'Encargados', desc: 'Reportan fallas desde el celular' },
+  { id: 'taller', nombre: 'Taller', desc: 'Tienen la app de Taller' },
+  { id: 'otros', nombre: 'Otros', desc: 'Sin Panel, Taller, Reportar ni Avance Huerta' },
+];
+function usrCategoria_(u){
+  const mods = (u.Modulos || []).map(function(m){ return String(m).toLowerCase(); });
+  if(mods.indexOf('panel') !== -1) return 'gestion';
+  if(mods.indexOf('taller') !== -1) return 'taller';
+  const reportar = mods.length === 0 || mods.indexOf('reportar') !== -1; // sin módulos = Reportar (igual que el servidor)
+  const ocultas = u.PestanasCelularOcultas || [];
+  if(reportar && ocultas.indexOf('form') === -1) return 'encargados';
+  if(reportar && ocultas.indexOf('avance') === -1) return 'operadores';
+  return 'otros';
 }
 
 document.getElementById('usr-save').addEventListener('click', function(){

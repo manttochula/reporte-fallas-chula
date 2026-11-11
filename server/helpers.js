@@ -35,6 +35,9 @@ function tieneAccesoModulo_(modulosStr, modulo) {
   const mod = (modulo || '').toString().trim().toLowerCase();
   const raw = (modulosStr || '').toString().trim();
   if (!mod) return false;
+  // 'app' (nov-2026): la app del celular, que ahora trae Reportar Y Taller --
+  // entra quien tenga cualquiera de los dos.
+  if (mod === 'app') return tieneAccesoModulo_(raw, 'reportar') || tieneAccesoModulo_(raw, 'taller');
   if (!raw) return mod === 'reportar';
   const lista = raw
     .split(',')

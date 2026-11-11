@@ -268,6 +268,18 @@
   }
   .rn-guardar-btn:disabled{ opacity:0.5; }
 
+  /* Sin señal (nov-2026): cambios guardados en el celular que faltan de enviar. */
+  .tl-offline-banner{ display:none; align-items:center; justify-content:space-between; gap:10px; background: rgba(232,135,30,0.12);
+    border:1px solid var(--amber-dim); color: var(--amber); border-radius:4px; padding:10px 12px; margin-bottom:12px; font-size:13px; }
+  .tl-offline-banner.show{ display:flex; }
+  .tl-offline-banner button{ background:transparent; border:1px solid var(--amber); color:var(--amber); border-radius:4px; padding:6px 10px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  .tl-offline-fallidos{ display:none; margin-bottom:12px; }
+  .tl-offline-fallidos.show{ display:block; }
+  .tl-offline-fallido{ display:flex; gap:10px; align-items:center; justify-content:space-between; background: rgba(194,75,63,0.12); border:1px solid var(--danger);
+    color: var(--danger); border-radius:4px; padding:8px 10px; margin-bottom:6px; font-size:12.5px; }
+  .tl-offline-fallido button{ background:transparent; border:1px solid var(--danger); color:var(--danger); border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer; }
+  .tl-sin-senal{ font-family:'IBM Plex Mono', monospace; font-size:11px; color: var(--amber); }
+  .tl-volver{ color: var(--text-dim); font-size:12px; text-decoration:none; font-family:'IBM Plex Mono', monospace; display:inline-block; margin-bottom:6px; }
   .empty{ text-align:center; padding: 60px 20px; color: var(--text-dim); font-size: 14px; }
   .empty .icon{ font-size: 32px; display:block; margin-bottom:12px; }
   .loading{
@@ -301,8 +313,10 @@
   <div id="view-main" style="display:none;">
     <header style="display:flex; justify-content:space-between; align-items:flex-end;">
       <div>
+        <a class="tl-volver" id="tl-volver" href="/" style="display:none;">&larr; Reporte de Fallas</a>
         <div class="eyebrow">Flota &amp; Mantenimiento</div>
         <h1>Taller</h1>
+        <div class="tl-sin-senal" id="tl-sin-senal" style="display:none;">Sin señal: trabajando con lo guardado en el celular</div>
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
         <button id="btn-refresh" style="background:transparent;border:1px solid var(--line);color:var(--text-dim);padding:8px 12px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;cursor:pointer;white-space:nowrap;">Actualizar</button>
@@ -310,6 +324,11 @@
       </div>
     </header>
     <main>
+      <div class="tl-offline-banner" id="tl-offline-banner">
+        <span id="tl-offline-texto"></span>
+        <button type="button" id="tl-offline-reintentar">Reintentar ahora</button>
+      </div>
+      <div class="tl-offline-fallidos" id="tl-offline-fallidos"></div>
       <div class="filters">
         <input type="text" id="f-search" placeholder="Buscar por orden, unidad o huerta...">
       </div>
@@ -325,59 +344,315 @@
 
 <script>
 // ============================================================
-// Shim de compatibilidad: reemplaza google.script.run por llamadas
-// fetch() al servidor local (Node.js), SIN tocar el resto del código
-// de este archivo. El resto del archivo sigue usando exactamente el
-// mismo patrón:
-//   google.script.run.withSuccessHandler(cb).withFailureHandler(cb).nombreFuncion(args)
-// y aquí simplemente lo traducimos a: POST /api/nombreFuncion  { args: [...] }
+// Taller SIN SEÑAL (nov-2026, Carlos: "la aplicación de taller volverla una
+// app offline, tipo como la de los operadores"). Igual que la app del
+// celular (Index.html):
+//  - Dentro del APK esta página va empaquetada (www/taller.html, ver
+//    server/scripts/prepararAppAndroid.js) con window.APP_SERVIDOR = Render.
+//    En el sitio web (/taller) APP_SERVIDOR queda vacío y la página se
+//    guarda con el Service Worker (/sw.js) para abrir sin señal.
+//  - Consultas (get...): con señal, la versión nueva (y se guarda copia en
+//    el celular, IndexedDB 'rf-cache-lecturas'); sin señal o si el servidor
+//    tarda, la copia.
+//  - Cambios (guardar la orden, fotos, refacciones): si no hay señal se
+//    guardan en el celular (IndexedDB 'taller_offline') y se envían solos,
+//    en orden, en cuanto haya señal.
+// ============================================================
+window.APP_SERVIDOR = window.APP_SERVIDOR || '';
+function urlServidor_(ruta){
+  if(typeof ruta !== 'string' || ruta.charAt(0) !== '/' || ruta.charAt(1) === '/') return ruta;
+  return window.APP_SERVIDOR + ruta;
+}
+// Rutas de fotos/videos que vienen del servidor ("/uploads/...", "VID:/uploads/...").
+function urlMedia_(u){
+  if(typeof u !== 'string' || !u) return u;
+  var m = /^(VID:|AUD:)(.*)$/.exec(u);
+  return m ? m[1] + urlServidor_(m[2]) : urlServidor_(u);
+}
+function opcionesPostServidor_(cuerpo){
+  return { method: 'POST', headers: { 'Content-Type': window.APP_SERVIDOR ? 'text/plain;charset=UTF-8' : 'application/json' }, body: cuerpo };
+}
+
+var TL_CACHE_ESPERA_MS = 8000;
+function tlCacheDb_(){
+  if(tlCacheDb_.promesa) return tlCacheDb_.promesa;
+  tlCacheDb_.promesa = new Promise(function(ok, mal){
+    if(!window.indexedDB){ mal(new Error('sin IndexedDB')); return; }
+    var req = indexedDB.open('rf-cache-lecturas', 1);
+    req.onupgradeneeded = function(){ if(!req.result.objectStoreNames.contains('r')) req.result.createObjectStore('r'); };
+    req.onsuccess = function(){ ok(req.result); };
+    req.onerror = function(){ tlCacheDb_.promesa = null; mal(req.error); };
+  });
+  return tlCacheDb_.promesa;
+}
+function tlCacheGuardar_(clave, valor){
+  return tlCacheDb_().then(function(db){
+    return new Promise(function(ok){
+      try {
+        var tx = db.transaction('r', 'readwrite');
+        tx.objectStore('r').put({ valor: valor, guardado: Date.now() }, clave);
+        tx.oncomplete = function(){ ok(true); };
+        tx.onerror = tx.onabort = function(){ ok(false); };
+      } catch(e){ ok(false); }
+    });
+  }).catch(function(){ return false; });
+}
+function tlCacheLeer_(clave){
+  return tlCacheDb_().then(function(db){
+    return new Promise(function(ok){
+      try {
+        var req = db.transaction('r', 'readonly').objectStore('r').get(clave);
+        req.onsuccess = function(){ ok(req.result || null); };
+        req.onerror = function(){ ok(null); };
+      } catch(e){ ok(null); }
+    });
+  }).catch(function(){ return null; });
+}
+
+// ---- Cola de cambios sin enviar ----
+var TL_COLA_DB = 'taller_offline';
+var TL_COLA_STORE = 'pendientes';
+// Funciones que se pueden guardar en el celular y mandar después (y cómo nombrarlas).
+var TL_ENCOLABLES = { actualizarOrden: 'cambios de la orden', agregarFotosOrden: 'fotos de la orden', guardarRefaccionesNecesarias: 'refacciones de la orden' };
+function tlColaDb_(){
+  if(tlColaDb_.promesa) return tlColaDb_.promesa;
+  tlColaDb_.promesa = new Promise(function(ok, mal){
+    if(!window.indexedDB){ mal(new Error('Este celular no permite guardar datos.')); return; }
+    var req = indexedDB.open(TL_COLA_DB, 1);
+    req.onupgradeneeded = function(){ if(!req.result.objectStoreNames.contains(TL_COLA_STORE)) req.result.createObjectStore(TL_COLA_STORE, { keyPath: 'id', autoIncrement: true }); };
+    req.onsuccess = function(){ ok(req.result); };
+    req.onerror = function(){ tlColaDb_.promesa = null; mal(req.error); };
+  });
+  return tlColaDb_.promesa;
+}
+function tlColaOp_(modo, fn){
+  return tlColaDb_().then(function(db){
+    return new Promise(function(ok, mal){
+      var tx = db.transaction(TL_COLA_STORE, modo);
+      var res = fn(tx.objectStore(TL_COLA_STORE));
+      tx.oncomplete = function(){ ok(res && res.result !== undefined ? res.result : undefined); };
+      tx.onerror = function(){ mal(tx.error); };
+    });
+  });
+}
+function tlColaAgregar_(fnNombre, args){ return tlColaOp_('readwrite', function(st){ return st.add({ fn: fnNombre, args: args, creadoEn: Date.now() }); }); }
+function tlColaListar_(){ return tlColaOp_('readonly', function(st){ return st.getAll(); }).then(function(x){ return (x || []).sort(function(a, b){ return a.id - b.id; }); }).catch(function(){ return []; }); }
+function tlColaQuitar_(id){ return tlColaOp_('readwrite', function(st){ return st.delete(id); }); }
+function tlColaMarcarError_(id, error){
+  return tlColaOp_('readwrite', function(st){
+    var req = st.get(id);
+    req.onsuccess = function(){ if(req.result){ req.result.error = error; st.put(req.result); } };
+    return req;
+  });
+}
+function tlEsErrorDeConexion_(err){
+  return !(err && err.status) || err.status >= 500 || err.status === 408 || err.status === 429;
+}
+function tlLlamarServidor_(fnNombre, args){
+  return fetch(urlServidor_('/api/' + fnNombre), opcionesPostServidor_(JSON.stringify({ args: args })))
+    .then(function(res){
+      return res.json().catch(function(){ return null; }).then(function(data){
+        if(!res.ok){ var err = new Error((data && data.error) || ('Error HTTP ' + res.status)); err.status = res.status; throw err; }
+        return data;
+      });
+    });
+}
+
+var tlEnviando_ = false;
+function tlEnviarPendientes_(){
+  if(tlEnviando_) return Promise.resolve();
+  if(navigator.onLine === false){ tlActualizarAviso_(); return Promise.resolve(); }
+  tlEnviando_ = true;
+  var huboEnvios = false;
+  return tlColaListar_().then(function(items){
+    return items.filter(function(it){ return !it.error; }).reduce(function(cadena, it){
+      return cadena.then(function(sigue){
+        if(!sigue) return false;
+        return tlLlamarServidor_(it.fn, it.args).then(function(data){
+          huboEnvios = true;
+          if(data && data.success === false) return tlColaMarcarError_(it.id, data.error || 'El servidor no lo aceptó.').then(function(){ return true; });
+          return tlColaQuitar_(it.id).then(function(){ return true; });
+        }, function(err){
+          if(tlEsErrorDeConexion_(err)) return false; // sigue sin señal: se reintenta al rato
+          huboEnvios = true;
+          return tlColaMarcarError_(it.id, (err && err.message) || 'El servidor no lo aceptó.').then(function(){ return true; });
+        });
+      });
+    }, Promise.resolve(true));
+  }).catch(function(){}).then(function(){
+    tlEnviando_ = false;
+    tlActualizarAviso_();
+    // Ya se enviaron: refrescar las órdenes para ver lo que quedó en el servidor.
+    if(huboEnvios && typeof tlRefrescarSilencioso_ === 'function') tlRefrescarSilencioso_();
+  });
+}
+function tlActualizarAviso_(){
+  return tlColaListar_().then(function(items){
+    var sinEnviar = items.filter(function(it){ return !it.error; });
+    var fallidos = items.filter(function(it){ return !!it.error; });
+    var banner = document.getElementById('tl-offline-banner');
+    var texto = document.getElementById('tl-offline-texto');
+    if(banner && texto){
+      texto.textContent = sinEnviar.length === 1 ? '1 cambio guardado en el celular, falta enviar. Se envía solo cuando haya señal.'
+        : sinEnviar.length + ' cambios guardados en el celular, faltan de enviar. Se envían solos cuando haya señal.';
+      banner.classList.toggle('show', sinEnviar.length > 0);
+    }
+    var box = document.getElementById('tl-offline-fallidos');
+    if(box){
+      box.innerHTML = '';
+      fallidos.forEach(function(it){
+        var orden = it.args && it.args[2];
+        var fila = document.createElement('div');
+        fila.className = 'tl-offline-fallido';
+        var span = document.createElement('span');
+        span.textContent = 'No se pudieron enviar ' + (TL_ENCOLABLES[it.fn] || 'cambios') + (orden ? ' ' + orden : '') + ': ' + it.error + '. Captúralo de nuevo.';
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.textContent = 'Quitar';
+        btn.addEventListener('click', function(){ tlColaQuitar_(it.id).then(tlActualizarAviso_); });
+        fila.appendChild(span); fila.appendChild(btn);
+        box.appendChild(fila);
+      });
+      box.classList.toggle('show', fallidos.length > 0);
+    }
+    var sinSenal = document.getElementById('tl-sin-senal');
+    if(sinSenal) sinSenal.style.display = navigator.onLine === false ? '' : 'none';
+    return items;
+  });
+}
+window.addEventListener('online', tlEnviarPendientes_);
+window.addEventListener('offline', tlActualizarAviso_);
+setInterval(tlEnviarPendientes_, 20000);
+
 (function () {
-  const API_BASE = '/api';
-
   function crearRunner(successCb, failCb) {
-    return new Proxy(
-      {},
-      {
-        get(target, prop) {
-          if (prop === 'withSuccessHandler') {
-            return (cb) => crearRunner(cb, failCb);
+    return new Proxy({}, {
+      get(target, prop) {
+        if (prop === 'withSuccessHandler') return (cb) => crearRunner(cb, failCb);
+        if (prop === 'withFailureHandler') return (cb) => crearRunner(successCb, cb);
+        return function (...args) {
+          const entregar = (data) => { if (successCb) { try { successCb(data); } catch (e) { console.error('[' + prop + ']', e); } } };
+          const fallar = (err) => { if (failCb) failCb(err); else console.error(err); };
+          // Consultas: copia del celular si no hay señal o el servidor tarda.
+          if (/^get[A-Z]/.test(prop)) {
+            const clave = prop + '|' + JSON.stringify(args || []);
+            let resuelto = false;
+            const usarCopia = () => tlCacheLeer_(clave).then((copia) => {
+              if (resuelto || !copia) return !!(copia && resuelto);
+              resuelto = true; entregar(copia.valor); return true;
+            });
+            const sinCopia = () => { const e = new Error('Sin señal y sin datos guardados en el celular.'); e.sinSenal = true; return e; };
+            if (navigator.onLine === false) { usarCopia().then((ok) => { if (!ok && !resuelto) { resuelto = true; fallar(sinCopia()); } }); return; }
+            const timer = setTimeout(() => { usarCopia(); }, TL_CACHE_ESPERA_MS);
+            tlLlamarServidor_(prop, args).then((data) => {
+              clearTimeout(timer);
+              tlCacheGuardar_(clave, data);
+              if (!resuelto) { resuelto = true; entregar(data); }
+            }, (err) => {
+              clearTimeout(timer);
+              if (resuelto) return;
+              if (!tlEsErrorDeConexion_(err)) { resuelto = true; fallar(err); return; }
+              usarCopia().then((ok) => { if (!ok && !resuelto) { resuelto = true; fallar(err); } });
+            });
+            return;
           }
-          if (prop === 'withFailureHandler') {
-            return (cb) => crearRunner(successCb, cb);
-          }
-          // Cualquier otro nombre de propiedad se trata como el nombre de la
-          // función a invocar en el servidor (igual que google.script.run).
-          return function (...args) {
-            fetch(`${API_BASE}/${prop}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ args }),
-            })
-              .then(async (res) => {
-                const data = await res.json().catch(() => null);
-                if (!res.ok) {
-                  const err = new Error((data && data.error) || ('Error HTTP ' + res.status));
-                  throw err;
-                }
-                return data;
-              })
-              .then((data) => {
-                if (successCb) successCb(data);
-              })
-              .catch((err) => {
-                if (failCb) failCb(err);
-                else console.error(err);
+          // Cambios: sin señal (o si ya hay cambios esperando, para no
+          // desordenarlos) se guardan en el celular y la pantalla sigue.
+          if (TL_ENCOLABLES[prop]) {
+            const encolar = () => tlColaAgregar_(prop, args).then(() => {
+              tlActualizarAviso_();
+              entregar({ success: true, encolado: true });
+            }, (e) => fallar(e));
+            tlColaListar_().then((pend) => {
+              if (navigator.onLine === false || pend.some((p) => !p.error)) { encolar().then(tlEnviarPendientes_); return; }
+              tlLlamarServidor_(prop, args).then(entregar, (err) => {
+                if (tlEsErrorDeConexion_(err)) encolar(); else fallar(err);
               });
-          };
-        },
-      }
-    );
+            });
+            return;
+          }
+          tlLlamarServidor_(prop, args).then(entregar, fallar);
+        };
+      },
+    });
   }
-
   window.google = window.google || {};
   window.google.script = window.google.script || {};
   window.google.script.run = crearRunner(null, null);
 })();
+
+// Lo que se guardó en el celular y falta de enviar se ve ya aplicado en la
+// pantalla (aunque las órdenes vengan de la copia guardada).
+function tlAplicarPendientes_(records){
+  return tlColaListar_().then(function(items){
+    items.filter(function(it){ return !it.error && it.fn === 'actualizarOrden'; }).forEach(function(it){
+      var orden = it.args[2], p = it.args[3] || {};
+      var rec = (records || []).find(function(r){ return r.Orden === orden; });
+      if(!rec) return;
+      if(p.FechaSalida !== undefined) rec.FechaSalida = p.FechaSalida || null;
+      if(p.TrabajoRealizado !== undefined) rec.TrabajoRealizado = p.TrabajoRealizado;
+      if(p.AtendioPor !== undefined) rec.AtendioPor = p.AtendioPor;
+      if(p.LecturaServicio !== undefined) rec.LecturaCierre = p.LecturaServicio === '' ? null : Number(p.LecturaServicio);
+      rec.PendienteDeEnviar = true;
+    });
+    return records;
+  });
+}
+function tlRefaccionesPendientes_(orden){
+  return tlColaListar_().then(function(items){
+    var ult = null;
+    items.forEach(function(it){ if(!it.error && it.fn === 'guardarRefaccionesNecesarias' && it.args[2] === orden) ult = it; });
+    return ult ? ult.args[3] : null;
+  });
+}
+function tlNormalizarRegistros_(records){
+  (records || []).forEach(function(r){
+    if(r.FotoURL) r.FotoURL = urlMedia_(r.FotoURL);
+    if(r.EvidenciaURL) r.EvidenciaURL = urlMedia_(r.EvidenciaURL);
+    if(r.FotosExtraTexto) r.FotosExtraTexto = r.FotosExtraTexto.split(',').filter(Boolean).map(function(t){
+      var i = t.indexOf('|'); return t.slice(0, i + 1) + urlServidor_(t.slice(i + 1));
+    }).join(',');
+  });
+  return records;
+}
+
+// ---- Entrar sin señal: mismo esquema que la app (Index.html), misma huella guardada ----
+var LOGIN_OFFLINE_KEY = 'login_offline_v1';
+var LOGIN_OFFLINE_ITERACIONES = 100000;
+function loginOfflineLeer_(){ try { return JSON.parse(localStorage.getItem(LOGIN_OFFLINE_KEY) || '{}') || {}; } catch(e){ return {}; } }
+function loginHex_(buf){ return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('0' + b.toString(16)).slice(-2); }).join(''); }
+function loginDesdeHex_(hex){ var a = new Uint8Array(hex.length / 2); for(var i = 0; i < a.length; i++) a[i] = parseInt(hex.substr(i * 2, 2), 16); return a; }
+function loginHuella_(pass, salHex, iteraciones){
+  if(!(window.crypto && window.crypto.subtle)) return Promise.reject(new Error('sin cifrado disponible'));
+  var enc = new TextEncoder();
+  return crypto.subtle.importKey('raw', enc.encode(pass), { name: 'PBKDF2' }, false, ['deriveBits']).then(function(clave){
+    return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: loginDesdeHex_(salHex), iterations: iteraciones, hash: 'SHA-256' }, clave, 256);
+  }).then(loginHex_);
+}
+function loginOfflineGuardar_(nombre, pass, datos){
+  var sal = new Uint8Array(16);
+  crypto.getRandomValues(sal);
+  var salHex = loginHex_(sal);
+  return loginHuella_(pass, salHex, LOGIN_OFFLINE_ITERACIONES).then(function(huella){
+    var todos = loginOfflineLeer_();
+    todos[nombre] = { sal: salHex, huella: huella, iteraciones: LOGIN_OFFLINE_ITERACIONES, datos: datos || null, guardado: Date.now() };
+    try { localStorage.setItem(LOGIN_OFFLINE_KEY, JSON.stringify(todos)); } catch(e){}
+    return true;
+  }).catch(function(){ return false; });
+}
+function loginOfflineVerificar_(nombre, pass){
+  var reg = loginOfflineLeer_()[nombre];
+  if(!reg || !reg.sal || !reg.huella) return Promise.resolve(null);
+  return loginHuella_(pass, reg.sal, reg.iteraciones || LOGIN_OFFLINE_ITERACIONES).then(function(huella){
+    return huella === reg.huella ? (reg.datos || { success: true }) : null;
+  }).catch(function(){ return null; });
+}
+function tlModulosApp_(){ try { return JSON.parse(localStorage.getItem('app_modulos') || '[]') || []; } catch(e){ return []; } }
+function tlTieneModulo_(modulos, m){ return (modulos || []).some(function(x){ return String(x).toLowerCase() === m; }); }
+
+// Service Worker: en el sitio web, que /taller abra sin señal (la app ya trae la página adentro).
+if('serviceWorker' in navigator && !window.APP_SERVIDOR){
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){}); });
+}
 // ============================================================
 
 
@@ -396,14 +671,24 @@ function mostrarLogin(){
   google.script.run
     .withSuccessHandler(function(nombres){
       var sel = document.getElementById('login-nombre');
+      var antes = sel.value; // si ya eligió su nombre mientras llegaba la lista, no se le borra
       sel.innerHTML = '<option value="" disabled selected>Selecciona tu nombre</option>';
       (nombres || []).forEach(function(n){
         var opt = document.createElement('option');
         opt.value = n; opt.textContent = n;
         sel.appendChild(opt);
       });
+      if(antes && (nombres || []).indexOf(antes) !== -1) sel.value = antes;
     })
-    .withFailureHandler(function(){})
+    .withFailureHandler(function(){
+      // Sin señal y sin copia: al menos quienes ya entraron en este celular.
+      var sel = document.getElementById('login-nombre');
+      var antes = sel.value;
+      var conocidos = Object.keys(loginOfflineLeer_());
+      sel.innerHTML = '<option value="" disabled selected>Selecciona tu nombre</option>';
+      conocidos.forEach(function(n){ var opt = document.createElement('option'); opt.value = n; opt.textContent = n; sel.appendChild(opt); });
+      if(antes && conocidos.indexOf(antes) !== -1) sel.value = antes;
+    })
     .getNombresUsuarios('Taller');
 }
 
@@ -411,6 +696,15 @@ function iniciarApp(nombre){
   localStorage.setItem('taller_nombre', nombre);
   document.getElementById('login-overlay').hidden = true;
   document.getElementById('view-main').style.display = 'block';
+  // Regresar a la app (Reportar / Avance Huerta) si esta persona también la tiene.
+  var volver = document.getElementById('tl-volver');
+  var mods = tlModulosApp_();
+  if(volver){
+    volver.href = window.APP_SERVIDOR ? 'index.html' : '/';
+    volver.style.display = tlTieneModulo_(mods, 'reportar') && localStorage.getItem('reporte_usuario') === nombre ? '' : 'none';
+  }
+  tlActualizarAviso_();
+  tlEnviarPendientes_();
   cargarOrdenes();
 }
 
@@ -431,17 +725,28 @@ function intentarLogin(){
       btn.disabled = false;
       btn.textContent = 'Entrar';
       if(res && res.success){
+        loginOfflineGuardar_(nombre, pass, res);
+        if(Array.isArray(res.modulos)){ try { localStorage.setItem('app_modulos', JSON.stringify(res.modulos)); } catch(e){} }
         iniciarApp(nombre);
       } else {
         loginStatus.textContent = (res && res.error) || 'No se pudo iniciar sesión.';
         loginStatus.classList.add('show');
       }
     })
-    .withFailureHandler(function(){
-      btn.disabled = false;
-      btn.textContent = 'Entrar';
-      loginStatus.textContent = 'Error de conexión. Intenta de nuevo.';
-      loginStatus.classList.add('show');
+    .withFailureHandler(function(err){
+      // Sin señal: si ya entró antes en este celular, se revisa aquí mismo.
+      var esDeConexion = tlEsErrorDeConexion_(err);
+      (esDeConexion ? loginOfflineVerificar_(nombre, pass) : Promise.resolve(null)).then(function(datos){
+        btn.disabled = false;
+        btn.textContent = 'Entrar';
+        if(datos && (!Array.isArray(datos.modulos) || tlTieneModulo_(datos.modulos, 'taller'))){ iniciarApp(nombre); return; }
+        var conocido = !!loginOfflineLeer_()[nombre];
+        loginStatus.textContent = !esDeConexion ? ((err && err.message) || 'No se pudo iniciar sesión.')
+          : (datos ? 'Tu usuario no tiene acceso a Taller.'
+            : (conocido ? 'Sin señal: la contraseña no coincide con la que usaste la última vez en este celular.'
+                        : 'Sin señal: la primera vez que entras en este celular necesitas internet.'));
+        loginStatus.classList.add('show');
+      });
     })
     .validarUsuario(nombre, pass, 'Taller');
 }
@@ -450,13 +755,19 @@ function cargarOrdenes(){
   var nombre = localStorage.getItem('taller_nombre') || '';
   google.script.run
     .withSuccessHandler(function(records){
-      ALL_RECORDS = records || [];
-      renderList();
+      tlAplicarPendientes_(tlNormalizarRegistros_(records || [])).then(function(recs){ ALL_RECORDS = recs; renderList(); });
     })
-    .withFailureHandler(function(){
-      document.getElementById('order-list').innerHTML = '<div class="empty">No se pudieron cargar las órdenes.</div>';
+    .withFailureHandler(function(err){
+      document.getElementById('order-list').innerHTML = '<div class="empty">' + (err && err.sinSenal ? 'Sin señal y todavía no hay órdenes guardadas en este celular. Ábrelo una vez con señal.' : 'No se pudieron cargar las órdenes.') + '</div>';
     })
     .getReportesTaller(ACCESS_CODE, nombre);
+}
+// Después de enviar lo pendiente: volver a pedir las órdenes sin cerrar la que está abierta.
+function tlRefrescarSilencioso_(){
+  var nombre = localStorage.getItem('taller_nombre') || '';
+  if(!nombre || document.getElementById('view-main').style.display === 'none') return;
+  if(document.querySelector('.order-body.open')) return; // no mover la pantalla mientras capturan
+  cargarOrdenes();
 }
 
 document.getElementById('login-btn').addEventListener('click', intentarLogin);
@@ -465,7 +776,16 @@ document.getElementById('login-pass').addEventListener('keydown', function(e){
 });
 document.getElementById('btn-change-user').addEventListener('click', function(){
   localStorage.removeItem('taller_nombre');
+  if(window.APP_SERVIDOR){
+    // En la app se entra desde la pantalla principal (sirve para Reportar y Taller).
+    localStorage.removeItem('reporte_usuario');
+    window.location.href = 'index.html';
+    return;
+  }
   mostrarLogin();
+});
+document.getElementById('tl-offline-reintentar').addEventListener('click', function(){
+  var b = this; b.disabled = true; tlEnviarPendientes_(); setTimeout(function(){ b.disabled = false; }, 1500);
 });
 
 window.addEventListener('load', function(){
@@ -604,7 +924,9 @@ function pintarFotosExtraTaller_(r, wrap){
         .withSuccessHandler(function(res){
           btn.disabled = false;
           if(!res || !res.success){ st.textContent = (res && res.error) || 'No se pudieron subir.'; st.className = 'rn-status show err'; return; }
-          r.FotosExtraTexto = (res.fotos || []).map(function(x){ return x.id + '|' + x.url; }).join(',');
+          if(res.encolado){ st.textContent = 'Sin señal: ' + fotos.length + ' foto(s) guardada(s) en el celular. Se suben solas cuando haya señal.'; st.className = 'rn-status show ok'; return; }
+          st.textContent = ''; st.className = 'rn-status';
+          r.FotosExtraTexto = (res.fotos || []).map(function(x){ return x.id + '|' + urlServidor_(x.url); }).join(',');
           pintarFotosExtraTaller_(r);
         })
         .withFailureHandler(function(){ btn.disabled = false; st.textContent = 'No se pudieron subir. Revisa tu señal e intenta de nuevo.'; st.className = 'rn-status show err'; })
@@ -670,6 +992,7 @@ function buildOrderCard(r){
   var meta = document.createElement('div');
   meta.className = 'order-meta';
   meta.textContent = (r.Huerta || '') + ' - ' + new Date(r.Fecha).toLocaleDateString('es-MX');
+  if(r.PendienteDeEnviar) meta.textContent += ' · ⏳ cambios sin enviar';
   topLeft.appendChild(folio);
   topLeft.appendChild(meta);
   var pill = document.createElement('span');
@@ -977,10 +1300,14 @@ function rnCargar(orden){
     .withSuccessHandler(function(result){
       if(!result){ result = { items: [], sugeridas: [] }; }
       var items = (result.items && result.items.length > 0) ? result.items : (result.sugeridas || []);
-      REFNEC_TALLER[orden] = { cargado: true, items: items.map(function(it){
-        return { texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, origen: it.origen, oc: it.oc || null };
-      }) };
-      rnRenderLista(orden);
+      tlRefaccionesPendientes_(orden).then(function(pend){
+        // Si hay refacciones guardadas en el celular sin enviar, esas son las que valen.
+        var lista = pend || items;
+        REFNEC_TALLER[orden] = { cargado: true, items: lista.map(function(it){
+          return { texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, piezaManualId: it.piezaManualId || null, origen: it.origen, oc: it.oc || null };
+        }) };
+        rnRenderLista(orden);
+      });
     })
     .withFailureHandler(function(){
       var lista = document.getElementById('rn-lista-' + orden);
@@ -1243,7 +1570,7 @@ function rnGuardar(orden){
         statusEl.className = 'rn-status show err';
         return;
       }
-      statusEl.textContent = 'Guardado.';
+      statusEl.textContent = result.encolado ? 'Sin señal: guardado en el celular. Se envía solo cuando haya señal.' : 'Guardado.';
       statusEl.className = 'rn-status show ok';
     })
     .withFailureHandler(function(){
@@ -1384,14 +1711,15 @@ function guardarOrden(orden){
         statusEl.className = 'save-status show err';
         return;
       }
-      statusEl.textContent = 'Guardado correctamente OK';
+      statusEl.textContent = result.encolado ? 'Sin señal: guardado en el celular. Se envía solo cuando haya señal.' : 'Guardado correctamente OK';
       statusEl.className = 'save-status show ok';
       var rec = null;
       for(var i=0; i<ALL_RECORDS.length; i++){ if(ALL_RECORDS[i].Orden === orden){ rec = ALL_RECORDS[i]; break; } }
       if(rec){
         rec.FechaSalida = fs; rec.AtendioPor = nombre; rec.TrabajoRealizado = trabajo;
         if(lecturaEl){ rec.LecturaCierre = lectura === '' ? null : Number(lectura); }
-        if(result.evidenciaUrl){ rec.EvidenciaURL = result.evidenciaUrl; }
+        if(result.evidenciaUrl){ rec.EvidenciaURL = urlMedia_(result.evidenciaUrl); }
+        if(result.encolado){ rec.PendienteDeEnviar = true; }
       }
       delete EVIDENCIA_DATA[orden];
       var card = document.querySelector('.order-card[data-orden="' + orden + '"] .status-pill');
@@ -1420,10 +1748,13 @@ document.getElementById('btn-refresh').onclick = function(){
   btn.textContent = 'Actualizando...';
   google.script.run
     .withSuccessHandler(function(records){
-      ALL_RECORDS = records || [];
-      btn.disabled = false;
-      btn.textContent = 'Actualizar';
-      renderList();
+      tlAplicarPendientes_(tlNormalizarRegistros_(records || [])).then(function(recs){
+        ALL_RECORDS = recs;
+        btn.disabled = false;
+        btn.textContent = 'Actualizar';
+        renderList();
+      });
+      tlEnviarPendientes_();
     })
     .withFailureHandler(function(){
       btn.disabled = false;

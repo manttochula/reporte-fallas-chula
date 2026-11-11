@@ -2682,13 +2682,19 @@ async function datosReportarUsuario_(usuario) {
     // elegir (Reportar, Diesel, Movimientos, Avance Huerta). Vacío = ve
     // todo el equipo, igual que siempre.
     equiposAsignados: await equiposAsignadosUsuario_(usuario.nombre),
+    // Módulos (nov-2026): la app del celular decide si muestra Reportar,
+    // Taller o los dos. Sin módulos capturados = Reportar (como siempre).
+    modulos: usuario.nombre
+      ? (String(usuario.modulos || '').split(',').map((m) => m.trim()).filter(Boolean).length
+        ? String(usuario.modulos).split(',').map((m) => m.trim()).filter(Boolean) : ['Reportar'])
+      : [],
   };
 }
 
 async function getHuertaPorUsuario(nombre) {
   if (!nombre) return datosReportarUsuario_({});
   const [rows] = await pool.query(
-    'SELECT nombre, huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    'SELECT nombre, modulos, huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
     [nombre]
   );
   return datosReportarUsuario_(rows.length ? rows[0] : {});

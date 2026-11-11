@@ -26,6 +26,9 @@ on:
       # La pantalla del celular va empaquetada dentro del APK: si cambia,
       # se compila un APK nuevo.
       - 'public/Index.html'
+      # Taller también va dentro del APK (nov-2026).
+      - 'public/Taller.html'
+      - 'public/catalogoPartes.js'
       - 'server/versionApp.js'
       - 'server/scripts/prepararAppAndroid.js'
       - 'package.json'

@@ -103,6 +103,9 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // En la app (APK) las rutas "/uploads/..." van al servidor (ver urlServidor_ en Taller.html).
+  function u_(url) { return typeof window.urlServidor_ === 'function' ? window.urlServidor_(url) : url; }
+
   function norm_(s) {
     return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
   }
@@ -199,7 +202,7 @@
     if (!V.opts.orden || (!r.falla && !fotos.length && !r.video)) { caja.className = 'cp-falla'; return; }
     document.getElementById('cp-falla-texto').innerHTML = '<b>Falla reportada</b>' + esc_(r.falla || '');
     document.getElementById('cp-fotos').innerHTML =
-      fotos.map(function (f, i) { return '<img class="cp-foto" data-foto="' + i + '" src="' + esc_(f.url) + '" alt="Foto ' + (i + 1) + ' de la orden" title="Ver foto ' + (i + 1) + ' de ' + fotos.length + '">'; }).join('') +
+      fotos.map(function (f, i) { return '<img class="cp-foto" data-foto="' + i + '" src="' + esc_(u_(f.url)) + '" alt="Foto ' + (i + 1) + ' de la orden" title="Ver foto ' + (i + 1) + ' de ' + fotos.length + '">'; }).join('') +
       (r.video ? '<a class="cp-video" href="' + esc_(r.video) + '" target="_blank" rel="noopener">▶ Ver video</a>' : '');
     caja.className = 'cp-falla cp-mostrar';
     Array.prototype.forEach.call(caja.querySelectorAll('[data-foto]'), function (im) {
@@ -215,7 +218,7 @@
     var lb = document.createElement('div');
     lb.className = 'cp-lightbox';
     lb.id = 'cp-lightbox';
-    lb.innerHTML = '<img id="cp-lb-img" alt="Foto de la orden" src="' + esc_(fotos[V.fotoActual].url) + '">' +
+    lb.innerHTML = '<img id="cp-lb-img" alt="Foto de la orden" src="' + esc_(u_(fotos[V.fotoActual].url)) + '">' +
       '<button type="button" class="cp-lb-btn cp-lb-cerrar" id="cp-lb-cerrar" title="Cerrar">&times;</button>' +
       (fotos.length > 1 ? '<button type="button" class="cp-lb-btn cp-lb-ant" id="cp-lb-ant">&#8249;</button><button type="button" class="cp-lb-btn cp-lb-sig" id="cp-lb-sig">&#8250;</button>' : '') +
       '<div class="cp-lb-cont" id="cp-lb-cont">' + (V.fotoActual + 1) + ' de ' + fotos.length + '</div>';
@@ -232,7 +235,7 @@
     var fotos = (V && V.datos && V.datos.fotos) || [];
     if (!fotos.length || !document.getElementById('cp-lightbox')) return;
     V.fotoActual = (V.fotoActual + d + fotos.length) % fotos.length;
-    document.getElementById('cp-lb-img').src = fotos[V.fotoActual].url;
+    document.getElementById('cp-lb-img').src = u_(fotos[V.fotoActual].url);
     document.getElementById('cp-lb-cont').textContent = (V.fotoActual + 1) + ' de ' + fotos.length;
   }
 
@@ -428,7 +431,7 @@
       if (!s) { det.innerHTML = '<div class="cp-vacio">Este catálogo no tiene secciones.</div>'; return; }
       html += '<h4>' + esc_(s.titulo) + '</h4><div class="cp-sub">' + esc_([s.codigo, s.grupo, s.aplica, s.serie].filter(Boolean).join(' · ')) + '</div>';
       if (s.imagenUrl) {
-        html += '<div class="cp-dibujo-wrap"><img class="cp-dibujo" id="cp-dibujo" alt="Dibujo de ' + esc_(s.titulo) + '" src="' + esc_(s.imagenUrl) + '" title="Clic para acercar"></div>';
+        html += '<div class="cp-dibujo-wrap"><img class="cp-dibujo" id="cp-dibujo" alt="Dibujo de ' + esc_(s.titulo) + '" src="' + esc_(u_(s.imagenUrl)) + '" title="Clic para acercar"></div>';
       }
       html += encabezadoTabla_(false);
       s.piezas.forEach(function (p) { html += filaPieza_(p, s, false); });

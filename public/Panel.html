@@ -9479,7 +9479,7 @@ function ahPrediccion_(r, plan, hoy){
     var paso = Math.min(ef.ha, falta);
     if(paso > 0 || ahDiaLaborable_(dp, plan.diasExtra)){
       falta -= paso; acc += paso;
-      if(futuras++ < 90) out.dias.push({ dia: dp, tractores: ef.eqs, esperado: paso, real: null, acumEsperado: null, acumReal: acc, laborable: true, hoy: dp === hoy, futuro: true });
+      if(futuras++ < 730) out.dias.push({ dia: dp, tractores: ef.eqs, esperado: paso, real: null, acumEsperado: null, acumReal: acc, laborable: true, hoy: dp === hoy, futuro: true });
     }
     if(falta <= 0.005){ fin = dp; break; }
     dp = ahDiaSumar_(dp, 1);
@@ -9580,12 +9580,9 @@ function ahRenderPrediccion_(res){
     b.addEventListener('click', function(){ ahPlanLlamar_('guardarDiaExtraPlan', { huerta: AH_HUERTA_ACTUAL, dia: b.dataset.dia, quitar: true }, b); });
   });
   document.querySelectorAll('#ah-pred-wrap .ah-pred-captura').forEach(function(el){ el.style.display = puede ? '' : 'none'; });
-  // Día con día en orden de fecha: lo real hasta hoy y luego unos días proyectados
-  // (el resto se resume en un renglón con la fecha de terminación).
-  var MAX_PROY = 10;
-  var pasados = pr.dias.filter(function(x){ return !x.futuro; });
-  var proy = pr.dias.filter(function(x){ return x.futuro; });
-  var filas = pasados.concat(proy.slice(0, MAX_PROY));
+  // Día con día en orden de fecha: lo real hasta hoy y luego todos los días
+  // proyectados hasta que se acaba la actividad (Carlos: "que se vea hasta que se acabe").
+  var filas = pr.dias;
   document.getElementById('ah-pred-dias-body').innerHTML = filas.length ? filas.map(function(x){
     var cls = x.futuro ? 'ah-pred-futuro' : (x.hoy ? 'ah-pred-hoy' : '');
     var dif = x.futuro ? null : x.acumReal - x.acumEsperado;
@@ -9598,8 +9595,7 @@ function ahRenderPrediccion_(res){
       + '<td class="num">' + num(x.acumReal, 2) + ' ha</td>'
       + '<td class="num">' + (dif === null ? '' : '<span class="' + (dif >= -0.005 ? 'ah-pred-ok' : 'ah-pred-mal') + '">' + (dif >= 0 ? '+' : '') + num(dif, 2) + '</span>') + '</td>'
       + '</tr>';
-  }).join('') + (proy.length > MAX_PROY ? '<tr class="ah-pred-futuro"><td colspan="7">… ' + (proy.length - MAX_PROY) + ' día(s) más'
-      + (pr.fin ? '; termina el ' + escapeHtml(ahFechaDia_(pr.fin)) : '') + '</td></tr>' : '')
+  }).join('') + (pr.restante > 0.005 ? '<tr class="ah-op-total"><td colspan="7">' + (pr.fin ? '🏁 Termina el ' + escapeHtml(ahFechaDia_(pr.fin)) : 'Sin fecha de terminación: no hay tractores con rendimiento asignados') + '</td></tr>' : '')
     : '<tr><td colspan="7" class="ah-pred-ayuda">Asigna tractores a la actividad para ver el esperado día con día.</td></tr>';
 }
 

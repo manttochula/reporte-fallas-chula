@@ -9192,7 +9192,8 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
     }
     return { success: true, id: cuentaId };
   } catch (err) {
-    if (err && err.code === 'ER_DUP_ENTRY') return { success: false, error: 'Ya existe una cuenta con ese nombre.' };
+    // Nov-2026: el nombre ya se puede repetir (cuentas de otra empresa); si sale esto es que falta correr actualizar_estructura_nube.
+    if (err && err.code === 'ER_DUP_ENTRY') return { success: false, error: 'La base todavía no permite cuentas con el mismo nombre: corre actualizar_estructura_nube.bat y vuelve a guardar.' };
     return { success: false, error: err.toString() };
   }
 }
@@ -9408,6 +9409,10 @@ async function leerConfigOc_(empresaId) {
         siguienteFolio: ug ? ug + 1 : null,
       };
     })(),
+    // Nov-2026 (Carlos): en CHULA BRAND DEL GOLFO y DESARROLLO GENETICO todo
+    // el refaccionamiento va a ORDEN DE COMPRA GENERALES (al gasto), aunque la
+    // refacción tenga código de producto.
+    soloGastos: !!empresaId && v['oc_solo_gastos' + suf] === '1',
   };
 }
 
@@ -9447,6 +9452,9 @@ async function partidasOc_(ids) {
   // La misma pieza de la misma orden ya exportada desde OTRA cotización
   // (p.ej. se cambió el "Aut" a otro proveedor después de exportar).
   const [otras] = await pool.query("SELECT respuesta_item_id, orden, refaccion_id, tipo, serie, folio FROM oc_exportaciones WHERE orden IS NOT NULL");
+  // Empresas donde todo el refaccionamiento va al gasto (ver leerConfigOc_).
+  const [sg] = await pool.query("SELECT clave FROM configuracion WHERE clave LIKE 'oc\\_solo\\_gastos\\_e%' AND valor = '1'");
+  const soloGastos = new Set(sg.map((c) => Number(c.clave.replace('oc_solo_gastos_e', ''))));
   return rows.map((x) => {
     const precio = calcularPreciosCotizados(x.precioCotizado === null ? null : Number(x.precioCotizado), x.descuentoPct, null).PrecioConDescuento;
     const otra = otras.find((o) => o.respuesta_item_id !== x.respuestaItemId && o.orden === x.orden && o.refaccion_id === x.refaccionId);
@@ -9457,11 +9465,18 @@ async function partidasOc_(ids) {
     // cuenta contable del equipo (ej. GTS30 = SERVICIO MTTO. TRACTORES).
     // Solo si la cuenta no tiene ese código se va a "Gasto directo".
     let codigoPorCuenta = '';
+    const todoAlGasto = !!x.empresaId && soloGastos.has(Number(x.empresaId));
+    if (todoAlGasto) x.folioComercial = ''; // en esta empresa no se usa el código de producto
     if (!(x.folioComercial || '').trim() && (x.codigoGasto || '').trim()) {
       codigoPorCuenta = x.codigoGasto.trim();
       x.folioComercial = codigoPorCuenta;
     }
-    if (!(x.folioComercial || '').trim()) { destino = 'gasto'; motivo = 'Sin folio comercial ni código de gasto en la cuenta contable del equipo: gasto directo.'; }
+    if (!(x.folioComercial || '').trim()) {
+      destino = 'gasto';
+      motivo = todoAlGasto
+        ? 'En ' + (x.empresa || 'esta empresa') + ' todo va al gasto, pero la cuenta contable del equipo no tiene código de gasto: gasto directo.'
+        : 'Sin folio comercial ni código de gasto en la cuenta contable del equipo: gasto directo.';
+    }
     else if (!(Number(x.cantidad) > 0)) { destino = 'revisar'; motivo = 'Sin cantidad.'; }
     else if (precio === null) { destino = 'revisar'; motivo = 'Sin precio autorizado.'; }
     else if (!(x.codigoComercial || '').trim()) { destino = 'revisar'; motivo = 'El proveedor no tiene "Código en Comercial"' + (x.empresa ? ' para ' + x.empresa : '') + '.'; }
@@ -10055,8 +10070,9 @@ async function guardarFoliosOc(code, nombreUsuario, empresaId, data) {
   await guardarConfigOc_('oc_concepto_gasto' + suf, conceptoGasto);
   if (sig !== '') await guardarConfigOc_('oc_ultimo_folio' + suf, Number(sig) - 1);
   if (sigG !== '') await guardarConfigOc_('oc_ultimo_folio_gasto' + suf, Number(sigG) - 1);
+  if (Object.prototype.hasOwnProperty.call(data, 'soloGastos')) await guardarConfigOc_('oc_solo_gastos' + suf, data.soloGastos ? '1' : '0');
   await registrarAuditoria_('configuracion', 'oc_folios' + suf, 'editar', nombreUsuario,
-    e[0].nombre + ': ' + serie + ' sig. ' + (sig || '—') + ', ' + serieGasto + ' sig. ' + (sigG || '—'));
+    e[0].nombre + ': ' + serie + ' sig. ' + (sig || '—') + ', ' + serieGasto + ' sig. ' + (sigG || '—') + (data.soloGastos ? ' · todo al gasto' : ''));
   return { success: true, config: await leerConfigOc_(id) };
 }
 

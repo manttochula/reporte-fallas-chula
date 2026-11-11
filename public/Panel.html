@@ -3715,6 +3715,7 @@
             <div class="maq-field" style="flex:2;"><label>Concepto gastos</label><input type="text" id="ocx-concepto-gasto"></div>
           </div>
           <div class="mnt-subtext" id="ocx-folio-gasto-ayuda"></div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-top:6px;"><input type="checkbox" id="ocx-solo-gastos" style="width:auto;"> En esta empresa <b>todo el refaccionamiento va al gasto</b> (OC de gastos, ej. ORDEN DE COMPRA GENERALES), aunque la refacción tenga código de producto</label>
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:8px;"><input type="checkbox" id="ocx-incluir-exportadas" style="width:auto;"> Mostrar también las que ya se exportaron (para volver a mandarlas a propósito)</label>
         <div class="summary" id="ocx-resumen"></div>
@@ -23170,6 +23171,7 @@ function aplicarEmpresaOcx_(conConfig){
         document.getElementById('ocx-serie-gasto').value = cg.serie || 'mtto';
         document.getElementById('ocx-concepto-gasto').value = cg.concepto || 'ORDEN DE COMPRA GENERALES';
         document.getElementById('ocx-folio-gasto').value = cg.siguienteFolio || '';
+        document.getElementById('ocx-solo-gastos').checked = !!c.soloGastos;
         document.getElementById('ocx-folio-gasto-ayuda').textContent = cg.ultimoFolio
           ? 'El último folio de gastos que se exportó fue ' + (cg.serie || 'mtto') + ' ' + cg.ultimoFolio + '. Revisa en Comercial que el folio inicial no exista.'
           : 'Escribe el primer folio libre de la serie de gastos en Comercial; después el sistema propone el siguiente.';
@@ -23264,9 +23266,10 @@ document.getElementById('ocx-btn-guardar-folios').addEventListener('click', func
     serie: document.getElementById('ocx-serie').value, siguienteFolio: document.getElementById('ocx-folio').value,
     concepto: document.getElementById('ocx-concepto').value, almacen: document.getElementById('ocx-almacen').value,
     serieGasto: document.getElementById('ocx-serie-gasto').value, siguienteFolioGasto: document.getElementById('ocx-folio-gasto').value,
-    conceptoGasto: document.getElementById('ocx-concepto-gasto').value
+    conceptoGasto: document.getElementById('ocx-concepto-gasto').value,
+    soloGastos: document.getElementById('ocx-solo-gastos').checked
   };
-  if(!confirm('Guardar para ' + nombre + ':\n- Refacciones: ' + datos.serie + ', siguiente folio ' + (datos.siguienteFolio || '(sin cambio)') + '\n- Gastos: ' + datos.serieGasto + ', siguiente folio ' + (datos.siguienteFolioGasto || '(sin cambio)') + '\n\nEl folio debe ser el SIGUIENTE libre en Comercial. ¿Guardar?')) return;
+  if(!confirm('Guardar para ' + nombre + ':\n- Refacciones: ' + datos.serie + ', siguiente folio ' + (datos.siguienteFolio || '(sin cambio)') + '\n- Gastos: ' + datos.serieGasto + ', siguiente folio ' + (datos.siguienteFolioGasto || '(sin cambio)') + (datos.soloGastos ? '\n- TODO el refaccionamiento va al gasto' : '') + '\n\nEl folio debe ser el SIGUIENTE libre en Comercial. ¿Guardar?')) return;
   const btn = this;
   btn.disabled = true;
   google.script.run

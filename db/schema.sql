@@ -3146,7 +3146,7 @@ INSERT IGNORE INTO configuracion (clave, valor) VALUES ('carga_empresas_maquinar
 -- ============================================================
 CREATE TABLE IF NOT EXISTS cuentas_contables (
   id             INT AUTO_INCREMENT PRIMARY KEY,
-  nombre         VARCHAR(150) NOT NULL UNIQUE,     -- ej. MTTO TRACTORES
+  nombre         VARCHAR(150) NOT NULL,            -- ej. MTTO TRACTORES (se puede repetir: ver abajo)
   numero         VARCHAR(40)  DEFAULT NULL,        -- ej. 59060003000
   segmento       VARCHAR(20)  DEFAULT NULL,        -- ej. 29
   descripcion_oc VARCHAR(150) DEFAULT NULL,        -- texto de la columna Descripción en la OC (ej. SERVICIO MTTO. TRACTORES)
@@ -3759,3 +3759,12 @@ CREATE TABLE IF NOT EXISTS proveedores_codigos_empresa (
   codigo       VARCHAR(20) NOT NULL,
   PRIMARY KEY (proveedor_id, empresa_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Cuentas contables con el MISMO nombre (nov-2026, Carlos): "que no afecte
+-- que sea el mismo nombre, ya que corresponden a otra empresa y tienen otra
+-- información". Se quita el índice único del nombre.
+-- ------------------------------------------------------------
+SET @idx_cta = (SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables' AND column_name = 'nombre' AND NON_UNIQUE = 0 LIMIT 1);
+SET @sql_alter = IF(@idx_cta IS NULL, 'SELECT 1', CONCAT('ALTER TABLE cuentas_contables DROP INDEX `', @idx_cta, '`'));
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

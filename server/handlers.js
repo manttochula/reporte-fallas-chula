@@ -8176,7 +8176,7 @@ async function getActividadesHuerta(huerta) {
       const lista = porDiaPorAct[d.actividad_id] || (porDiaPorAct[d.actividad_id] = []);
       const clave = d.dia + '|' + (x.codigo_unidad || '') + '|' + (x.nombre || '');
       let e = lista.find((y) => y.clave === clave);
-      if (!e) { e = { clave, dia: d.dia, equipo: x.unidad || x.codigo_unidad || '', operador: x.nombre || '', pasadas: 0 }; lista.push(e); }
+      if (!e) { e = { clave, dia: d.dia, equipo: x.unidad || x.codigo_unidad || '', equipoCodigo: x.codigo_unidad || '', operador: x.nombre || '', pasadas: 0 }; lista.push(e); }
       e.pasadas += d.pasadas;
     });
     const avIds = Array.from(new Set(rows.map((r) => r.avance_id).filter(Boolean)));
@@ -8226,7 +8226,7 @@ async function getActividadesHuerta(huerta) {
       operadorNombre: r.operador_nombre,
       aportes: (aportesPorAct[r.id] || []).map((e) => ({ equipo: e.equipo, operador: e.operador, pasadas: Math.round(e.pasadas * 100) / 100 })),
       porDia: (porDiaPorAct[r.id] || []).sort((a, b) => (a.dia < b.dia ? -1 : a.dia > b.dia ? 1 : 0))
-        .map((e) => ({ dia: e.dia, equipo: e.equipo, operador: e.operador, pasadas: Math.round(e.pasadas * 10000) / 10000 })),
+        .map((e) => ({ dia: e.dia, equipo: e.equipo, equipoCodigo: e.equipoCodigo, operador: e.operador, pasadas: Math.round(e.pasadas * 10000) / 10000 })),
       completadoPor: r.avance_id ? (completoPorAct[r.avance_id] || null) : null,
     };
   });
@@ -8479,6 +8479,92 @@ async function getAvancesManuales(code, nombreUsuario, huerta) {
       GROUP BY ah.id ORDER BY ah.fecha_inicio DESC LIMIT 100`, [(huerta || '').toString()]);
   return rows.map((r) => ({ id: r.id, operador: r.nombre, trabajo: r.trabajo || '', equipo: r.unidad || r.codigo_unidad || '', inicio: isoOrNull(r.fecha_inicio), fin: isoOrNull(r.fecha_fin),
     capturadoPor: r.capturado_por || '', cuadros: r.cuadros || '' }));
+}
+
+// ---- Predicción de avance (nov-2026, Carlos) ----
+// Tractores asignados a cada actividad desde una fecha, rendimiento estimado
+// por tractor y actividad (ha/día; sin él se usa su promedio real) y domingos
+// trabajados. El cálculo de la predicción se hace en el Panel con el avance
+// por día (getActividadesHuerta → porDia).
+const fechaValida_ = (f) => /^\d{4}-\d{2}-\d{2}$/.test(String(f || '')) && !isNaN(new Date(String(f) + 'T12:00:00Z').getTime());
+
+async function getPlanAvance(code, nombreUsuario, huerta) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  const h = (huerta || '').toString().trim();
+  const [asig] = await pool.query(
+    `SELECT p.id, p.codigo_unidad, m.unidad, p.trabajo, DATE_FORMAT(p.desde, '%Y-%m-%d') AS desde, p.creado_por
+       FROM avance_plan_tractores p LEFT JOIN maquinaria m ON m.codigo_unidad = p.codigo_unidad
+      WHERE LOWER(TRIM(p.huerta)) = LOWER(TRIM(?)) ORDER BY p.desde, p.id`, [h]);
+  const [rend] = await pool.query(
+    'SELECT trabajo, codigo_unidad, ha_dia FROM avance_plan_rendimientos WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?))', [h]);
+  const [dias] = await pool.query(
+    "SELECT DATE_FORMAT(dia, '%Y-%m-%d') AS dia FROM avance_plan_dias_extra WHERE LOWER(TRIM(huerta)) = LOWER(TRIM(?)) ORDER BY dia", [h]);
+  return {
+    asignaciones: asig.map((r) => ({ id: r.id, equipoCodigo: r.codigo_unidad, equipo: r.unidad || r.codigo_unidad, trabajo: r.trabajo || '', desde: r.desde, creadoPor: r.creado_por || '' })),
+    rendimientos: rend.map((r) => ({ trabajo: r.trabajo, equipoCodigo: r.codigo_unidad, haDia: Number(r.ha_dia) })),
+    diasExtra: dias.map((r) => r.dia),
+  };
+}
+
+// data: { huerta, equipo (código), trabajo ('' = sacarlo de toda actividad), desde 'YYYY-MM-DD' }
+// Mover un tractor a otra actividad = asignarlo de nuevo con otra fecha.
+async function asignarTractorPlan(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  data = data || {};
+  const huerta = (data.huerta || '').toString().trim();
+  const equipo = (data.equipo || '').toString().trim();
+  const trabajo = (data.trabajo || '').toString().trim();
+  const desde = (data.desde || '').toString().slice(0, 10);
+  if (!huerta) return { success: false, error: 'Elige la huerta.' };
+  if (!equipo) return { success: false, error: 'Elige el tractor.' };
+  if (!fechaValida_(desde)) return { success: false, error: 'Revisa la fecha "desde".' };
+  const [[m]] = await pool.query('SELECT codigo_unidad FROM maquinaria WHERE codigo_unidad = ?', [equipo]);
+  if (!m) return { success: false, error: 'Ese tractor ya no existe en Maquinaria.' };
+  await pool.query(
+    `INSERT INTO avance_plan_tractores (huerta, codigo_unidad, trabajo, desde, creado_por) VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE trabajo = VALUES(trabajo), creado_por = VALUES(creado_por)`,
+    [huerta, equipo, trabajo, desde, nombreUsuario || null]);
+  return { success: true };
+}
+
+async function eliminarAsignacionPlan(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const [r] = await pool.query('DELETE FROM avance_plan_tractores WHERE id = ?', [Number(id) || 0]);
+  return r.affectedRows ? { success: true } : { success: false, error: 'Esa asignación ya no existe.' };
+}
+
+// haDia vacío/null = quitar el estimado (vuelve a usar el promedio real).
+async function guardarRendimientoTractor(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  data = data || {};
+  const huerta = (data.huerta || '').toString().trim();
+  const trabajo = (data.trabajo || '').toString().trim();
+  const equipo = (data.equipo || '').toString().trim();
+  if (!huerta || !trabajo || !equipo) return { success: false, error: 'Faltan huerta, actividad o tractor.' };
+  if (data.haDia === null || data.haDia === undefined || data.haDia === '') {
+    await pool.query('DELETE FROM avance_plan_rendimientos WHERE huerta = ? AND trabajo = ? AND codigo_unidad = ?', [huerta, trabajo, equipo]);
+    return { success: true, haDia: null };
+  }
+  const ha = Number(data.haDia);
+  if (!(ha > 0 && ha < 1000)) return { success: false, error: 'El rendimiento debe ser mayor a 0 ha/día.' };
+  await pool.query(
+    `INSERT INTO avance_plan_rendimientos (huerta, trabajo, codigo_unidad, ha_dia, actualizado_por) VALUES (?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE ha_dia = VALUES(ha_dia), actualizado_por = VALUES(actualizado_por)`,
+    [huerta, trabajo, equipo, Math.round(ha * 1000) / 1000, nombreUsuario || null]);
+  return { success: true, haDia: Math.round(ha * 1000) / 1000 };
+}
+
+// Domingo (u otro día) que sí se trabaja: { huerta, dia, quitar }
+async function guardarDiaExtraPlan(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  data = data || {};
+  const huerta = (data.huerta || '').toString().trim();
+  const dia = (data.dia || '').toString().slice(0, 10);
+  if (!huerta) return { success: false, error: 'Elige la huerta.' };
+  if (!fechaValida_(dia)) return { success: false, error: 'Revisa la fecha.' };
+  if (data.quitar) await pool.query('DELETE FROM avance_plan_dias_extra WHERE huerta = ? AND dia = ?', [huerta, dia]);
+  else await pool.query('INSERT IGNORE INTO avance_plan_dias_extra (huerta, dia) VALUES (?, ?)', [huerta, dia]);
+  return { success: true };
 }
 
 async function eliminarAvanceManual(code, nombreUsuario, id) {
@@ -12214,6 +12300,11 @@ module.exports = {
   eliminarActividadHuerta,
   getActividadesHuerta,
   registrarAvanceManual,
+  getPlanAvance,
+  asignarTractorPlan,
+  eliminarAsignacionPlan,
+  guardarRendimientoTractor,
+  guardarDiaExtraPlan,
   getAvancesManuales,
   eliminarAvanceManual,
   getActividadesCatalogo,

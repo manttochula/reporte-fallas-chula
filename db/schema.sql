@@ -3605,3 +3605,37 @@ CREATE TABLE IF NOT EXISTS huerta_actividades_aportes_dia (
   PRIMARY KEY (actividad_id, avance_id, dia),
   INDEX idx_haad_avance (avance_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Predicción de avance (nov-2026, Carlos): qué tractores trabajan cada
+-- actividad DESDE una fecha (moverlo = otra fila con fecha nueva; trabajo
+-- vacío = ya no trabaja en ninguna), el rendimiento estimado que se le ponga
+-- a cada tractor en cada actividad (si no, se usa su promedio real) y los
+-- domingos que sí se trabajan (de lunes a sábado siempre cuentan).
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS avance_plan_tractores (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  huerta        VARCHAR(150) NOT NULL,
+  codigo_unidad VARCHAR(60) NOT NULL,
+  trabajo       VARCHAR(150) NOT NULL DEFAULT '',
+  desde         DATE NOT NULL,
+  creado_por    VARCHAR(150) DEFAULT NULL,
+  creado_en     DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_apt (huerta, codigo_unidad, desde)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS avance_plan_rendimientos (
+  huerta        VARCHAR(150) NOT NULL,
+  trabajo       VARCHAR(150) NOT NULL,
+  codigo_unidad VARCHAR(60) NOT NULL,
+  ha_dia        DECIMAL(8,3) NOT NULL,
+  actualizado_por VARCHAR(150) DEFAULT NULL,
+  actualizado_en  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (huerta, trabajo, codigo_unidad)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS avance_plan_dias_extra (
+  huerta VARCHAR(150) NOT NULL,
+  dia    DATE NOT NULL,
+  PRIMARY KEY (huerta, dia)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

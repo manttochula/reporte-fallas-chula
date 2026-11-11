@@ -354,6 +354,19 @@
   .ah-dia-prom-act{ font-weight:700; font-size:13px; }
   .ah-dia-prom-num{ font-size:20px; font-weight:800; margin:2px 0; color:var(--amber); }
   .ah-dia-prom-sub{ font-size:12px; opacity:.8; line-height:1.35; }
+  .ah-pred-bloque{ border:1px solid var(--line); border-radius:10px; padding:10px; margin:8px 0; }
+  .ah-pred-titulo{ font-weight:700; font-size:13px; margin-bottom:6px; }
+  .ah-pred-ayuda{ font-size:12px; color:var(--text-dim); margin:4px 0; }
+  .ah-pred-form{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+  .ah-pred-form select, .ah-pred-form input{ padding:5px 8px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  .ah-pred-asignaciones{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .ah-pred-chip{ border:1px solid var(--line); border-radius:14px; padding:3px 10px; font-size:12px; }
+  .ah-pred-chip button{ background:none; border:none; color:var(--danger); cursor:pointer; margin-left:4px; }
+  .ah-pred-rend{ width:80px; padding:3px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--text); text-align:right; }
+  .ah-avance-operadores tr.ah-pred-futuro td{ opacity:.55; font-style:italic; }
+  .ah-avance-operadores tr.ah-pred-hoy td{ border-top:2px solid var(--amber); }
+  .ah-pred-ok{ color:var(--ok); font-weight:700; }
+  .ah-pred-mal{ color:var(--danger); font-weight:700; }
   .ah-avance-act-ops{ border-top:1px solid var(--line); margin-top:8px; padding-top:6px; }
   .ah-avance-act-ops-tit{ font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); margin-bottom:4px; }
   .ah-avance-act-op{ display:flex; flex-wrap:wrap; justify-content:space-between; gap:0 8px; font-size:12px; padding:2px 0; }
@@ -4160,6 +4173,50 @@
               </table>
             </div>
           </div>
+          <!-- Predicción de avance y terminación (nov-2026, Carlos). Ver ahPrediccion_. -->
+          <div id="ah-pred-wrap" style="display:none;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:16px 0 6px;">
+              <div class="avance-paso" style="margin:0;">Predicción de avance y terminación</div>
+              <div class="maq-field" style="margin-bottom:0; min-width:220px;">
+                <label for="ah-pred-trabajo">Actividad</label>
+                <select id="ah-pred-trabajo"></select>
+              </div>
+            </div>
+            <div id="ah-pred-resumen" class="ah-avance-dias-promedios"></div>
+            <div class="ah-pred-bloque">
+              <div class="ah-pred-titulo">Tractores en esta actividad</div>
+              <div class="table-wrap">
+                <table class="ah-avance-operadores">
+                  <thead><tr><th>Tractor</th><th>Periodo en la actividad</th><th>Promedio real</th><th>Estimado (ha/día)</th><th>Se usa</th></tr></thead>
+                  <tbody id="ah-pred-tractores-body"></tbody>
+                </table>
+              </div>
+              <div class="ah-pred-form ah-pred-captura">
+                <select id="ah-pred-f-equipo"></select>
+                <select id="ah-pred-f-trabajo"></select>
+                <input type="date" id="ah-pred-f-desde">
+                <button type="button" class="export-btn" id="ah-pred-asignar">Asignar / mover desde esa fecha</button>
+              </div>
+              <div class="ah-pred-ayuda">Para mover un tractor elígelo, pon la actividad nueva y desde qué día. "Ninguna actividad" lo saca del plan. El rendimiento vacío usa su promedio real.</div>
+              <div id="ah-pred-asignaciones" class="ah-pred-asignaciones"></div>
+            </div>
+            <div class="ah-pred-bloque">
+              <div class="ah-pred-titulo">Días que se trabajan</div>
+              <div class="ah-pred-ayuda">De lunes a sábado. Agrega aquí un domingo (u otro día) si lo trabajan.</div>
+              <div class="ah-pred-form ah-pred-captura">
+                <input type="date" id="ah-pred-f-dia">
+                <button type="button" class="export-btn" id="ah-pred-agregar-dia">Agregar día trabajado</button>
+              </div>
+              <div id="ah-pred-dias" class="ah-pred-asignaciones"></div>
+            </div>
+            <div class="ah-pred-titulo" style="margin-top:10px;">Día con día: esperado contra real</div>
+            <div class="table-wrap">
+              <table class="ah-avance-operadores">
+                <thead><tr><th>Día</th><th>Tractores</th><th>Esperado</th><th>Real</th><th>Acum. esperado</th><th>Acum. real</th><th>Diferencia</th></tr></thead>
+                <tbody id="ah-pred-dias-body"></tbody>
+              </table>
+            </div>
+          </div>
           <div id="ah-actividad-mapa-wrap" style="display:none;">
             <div class="ah-actividad-mapa-leyenda" id="ah-actividad-mapa-leyenda"></div>
             <div id="ah-actividad-mapa-google"></div>
@@ -4707,7 +4764,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
+  guardarPolizaSeguro: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -9113,7 +9170,7 @@ function ahResumenPorActividad_(actividades, cuadros){
   var orden = [];
   (actividades || []).forEach(function(a){
     var t = a.trabajo || '';
-    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {}, dias: {}, opDias: {} }; orden.push(t); }
+    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {}, dias: {}, opDias: {}, equipoDias: {} }; orden.push(t); }
     var r = porTrabajo[t];
     var ha = haCuadro[a.cuadroId] || 0;
     var completado = a.estado === 'completado';
@@ -9152,6 +9209,9 @@ function ahResumenPorActividad_(actividades, cuadros){
       od.ha += ha * usable;
       od.pasadas += p;
       if(p >= 0.05){ od.cuadros[a.cuadroId] = true; if(x.equipo) od.equipos[x.equipo] = true; }
+      // Por tractor y día (predicción de avance): ha de cada tractor cada día.
+      var eq = x.equipoCodigo || x.equipo || '';
+      if(eq){ var ed = r.equipoDias[eq] || (r.equipoDias[eq] = {}); ed[x.dia] = (ed[x.dia] || 0) + ha * usable; }
       if(p >= 0.05){
         d.cuadros[a.cuadroId] = true;
         var g = (x.operador || 'Sin nombre') + (x.equipo ? ' · ' + x.equipo : '');
@@ -9298,12 +9358,269 @@ function ahRenderAvancePorDia_(lista){
   }).join('');
 }
 
+// ---------------------------------------------------------------
+// Predicción de avance y terminación (nov-2026, Carlos): "conforme un
+// rendimiento que se estime con el promedio de días anteriores y poder
+// agregarle el rendimiento estimado... ver en una tabla del día con día si se
+// va teniendo el avance estimado... agregar cuáles tractores se quiere que
+// trabajen e ir moviéndolos de actividad".
+// - Cada tractor trabaja la actividad de su asignación más reciente (desde <= día).
+// - Rendimiento del tractor en la actividad = el estimado que se le capture o,
+//   si no, su promedio real (ha / días que trabajó esa actividad); si nunca la
+//   ha trabajado, el promedio de la actividad por tractor-día.
+// - Se trabaja de lunes a sábado más los días extra capturados (domingos).
+// - Esperado del día = suma del rendimiento de los tractores asignados.
+// ---------------------------------------------------------------
+var AH_PLAN = { asignaciones: [], rendimientos: [], diasExtra: [] };
+var AH_PRED_TRABAJO = '';
+
+function ahDiaSumar_(dia, n){
+  var p = dia.split('-');
+  var d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + n));
+  return d.toISOString().slice(0, 10);
+}
+function ahDiaHoy_(){
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function ahDiaLaborable_(dia, diasExtra){
+  var p = dia.split('-');
+  var dow = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]))).getUTCDay();
+  return dow !== 0 || (diasExtra || []).indexOf(dia) !== -1;
+}
+
+// r = renglón de ahResumenPorActividad_ de esa actividad; plan = AH_PLAN.
+function ahPrediccion_(r, plan, hoy){
+  var trabajo = r.trabajo;
+  plan = plan || { asignaciones: [], rendimientos: [], diasExtra: [] };
+  var porEquipo = {};
+  (plan.asignaciones || []).forEach(function(a){ (porEquipo[a.equipoCodigo] = porEquipo[a.equipoCodigo] || []).push(a); });
+  Object.keys(porEquipo).forEach(function(k){ porEquipo[k].sort(function(a, b){ return a.desde < b.desde ? -1 : a.desde > b.desde ? 1 : a.id - b.id; }); });
+  var trabajoDe = function(eq, dia){
+    var t = null;
+    (porEquipo[eq] || []).forEach(function(a){ if(a.desde <= dia) t = a.trabajo; });
+    return t;
+  };
+  var nombres = {};
+  (plan.asignaciones || []).forEach(function(a){ nombres[a.equipoCodigo] = a.equipo || a.equipoCodigo; });
+  var equipos = Object.keys(porEquipo).filter(function(eq){ return porEquipo[eq].some(function(a){ return a.trabajo === trabajo; }); });
+  // Promedios reales
+  var ed = r.equipoDias || {};
+  var totHa = 0, totDias = 0;
+  Object.keys(ed).forEach(function(eq){ Object.keys(ed[eq]).forEach(function(d){ if(ed[eq][d] > 0.0005){ totHa += ed[eq][d]; totDias++; } }); });
+  var promActividad = totDias ? totHa / totDias : 0;
+  var override = {};
+  (plan.rendimientos || []).forEach(function(x){ if(x.trabajo === trabajo) override[x.equipoCodigo] = Number(x.haDia); });
+  var tractores = equipos.map(function(eq){
+    var dias = ed[eq] ? Object.keys(ed[eq]).filter(function(d){ return ed[eq][d] > 0.0005; }) : [];
+    var ha = dias.reduce(function(s, d){ return s + ed[eq][d]; }, 0);
+    var prom = dias.length ? ha / dias.length : null;
+    var rend = override[eq] > 0 ? override[eq] : (prom !== null ? prom : promActividad);
+    var fuente = override[eq] > 0 ? 'estimado' : (prom !== null ? 'promedio' : (promActividad ? 'prom. actividad' : 'sin datos'));
+    var periodos = [];
+    (porEquipo[eq] || []).forEach(function(a, i, arr){
+      if(a.trabajo !== trabajo) return;
+      var sig = arr[i + 1];
+      periodos.push({ desde: a.desde, hasta: sig ? ahDiaSumar_(sig.desde, -1) : null, movidoA: sig ? (sig.trabajo || 'ninguna actividad') : null });
+    });
+    return { equipoCodigo: eq, equipo: nombres[eq], promedio: prom, diasReales: dias.length, estimado: override[eq] > 0 ? override[eq] : null, rendimiento: rend, fuente: fuente, periodos: periodos };
+  });
+  var rendDe = {};
+  tractores.forEach(function(t){ rendDe[t.equipoCodigo] = t.rendimiento; });
+  var esperadoDe = function(dia){
+    if(!ahDiaLaborable_(dia, plan.diasExtra)) return { ha: 0, eqs: [] };
+    var eqs = equipos.filter(function(eq){ return trabajoDe(eq, dia) === trabajo; });
+    return { ha: eqs.reduce(function(s, eq){ return s + (rendDe[eq] || 0); }, 0), eqs: eqs.map(function(eq){ return nombres[eq]; }) };
+  };
+  var realDe = {};
+  (r.porDia || []).forEach(function(d){ realDe[d.dia] = d.ha; });
+  var inicios = [];
+  equipos.forEach(function(eq){ porEquipo[eq].forEach(function(a){ if(a.trabajo === trabajo) inicios.push(a.desde); }); });
+  var inicio = inicios.sort()[0] || null;
+  var restante = Math.max(0, (r.haAsignadas || 0) - (r.haPonderadas || 0));
+  var out = { trabajo: trabajo, tractores: tractores, inicio: inicio, restante: restante, haAsignadas: r.haAsignadas || 0, dias: [], promActividad: promActividad };
+  if(!inicio) return out;
+  var realAntes = 0;
+  Object.keys(realDe).forEach(function(d){ if(d < inicio) realAntes += realDe[d]; });
+  var objetivo = Math.max(0, (r.haAsignadas || 0) - realAntes);
+  // Pasado (desde el inicio del plan hasta hoy): esperado contra real
+  var acE = 0, acR = 0, d = inicio, n = 0, finPlan = null;
+  var realHoy = realDe[hoy] || 0;
+  while(d <= hoy && n++ < 800){
+    var e = esperadoDe(d);
+    var eHa = Math.min(e.ha, Math.max(0, objetivo - acE));
+    var real = realDe[d] || 0;
+    var lab = ahDiaLaborable_(d, plan.diasExtra);
+    if(lab || real > 0){
+      acE += eHa; acR += real;
+      out.dias.push({ dia: d, tractores: e.eqs, esperado: eHa, real: real, acumEsperado: acE, acumReal: acR, laborable: lab, hoy: d === hoy, futuro: false });
+    }
+    if(!finPlan && objetivo > 0 && acE >= objetivo - 0.005) finPlan = d;
+    d = ahDiaSumar_(d, 1);
+  }
+  // Comparación al último día con datos (hoy cuenta solo si ya tiene avance)
+  var ultimo = null;
+  out.dias.forEach(function(x){ if(!x.hoy || realHoy > 0) ultimo = x; });
+  out.diferencia = ultimo ? ultimo.acumReal - ultimo.acumEsperado : 0;
+  out.ritmoHoy = esperadoDe(hoy).ha || 0;
+  // Futuro: plan original (sigue acumulando el esperado) y predicción con lo real
+  var dPlan = ahDiaSumar_(hoy, 1), accPlan = acE;
+  for(var k = 0; !finPlan && k < 730; k++){
+    accPlan += esperadoDe(dPlan).ha;
+    if(objetivo > 0 && accPlan >= objetivo - 0.005){ finPlan = dPlan; break; }
+    dPlan = ahDiaSumar_(dPlan, 1);
+  }
+  out.finPlan = finPlan;
+  var falta = restante, dp = realHoy > 0 ? ahDiaSumar_(hoy, 1) : hoy, acc = acR, fin = falta <= 0.005 ? hoy : null;
+  if(dp === hoy && out.dias.length && out.dias[out.dias.length - 1].hoy) out.dias.pop(); // hoy sin avance: va como proyectado
+  var futuras = 0;
+  for(var j = 0; !fin && j < 730; j++){
+    var ef = esperadoDe(dp);
+    var paso = Math.min(ef.ha, falta);
+    if(paso > 0 || ahDiaLaborable_(dp, plan.diasExtra)){
+      falta -= paso; acc += paso;
+      if(futuras++ < 90) out.dias.push({ dia: dp, tractores: ef.eqs, esperado: paso, real: null, acumEsperado: null, acumReal: acc, laborable: true, hoy: dp === hoy, futuro: true });
+    }
+    if(falta <= 0.005){ fin = dp; break; }
+    dp = ahDiaSumar_(dp, 1);
+  }
+  out.fin = fin;
+  out.ritmo = esperadoDe(dp).ha;
+  return out;
+}
+
+function ahCargarPlan_(huerta){
+  if(!huerta){ AH_PLAN = { asignaciones: [], rendimientos: [], diasExtra: [] }; return; }
+  google.script.run
+    .withSuccessHandler(function(p){ AH_PLAN = p || { asignaciones: [], rendimientos: [], diasExtra: [] }; ahRenderPrediccion_(); })
+    .withFailureHandler(function(){ })
+    .getPlanAvance(ACCESS_CODE, PANEL_USUARIO, huerta);
+}
+
+function ahPlanLlamar_(fn, datos, btn){
+  if(btn) btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(x){
+      if(btn) btn.disabled = false;
+      if(!x || !x.success){ alert((x && x.error) || 'No se pudo guardar.'); return; }
+      ahCargarPlan_(AH_HUERTA_ACTUAL);
+    })
+    .withFailureHandler(function(e){ if(btn) btn.disabled = false; alert((e && e.message) || 'No se pudo guardar.'); })
+    [fn](ACCESS_CODE, PANEL_USUARIO, datos);
+}
+
+function ahRenderPrediccion_(res){
+  var wrap = document.getElementById('ah-pred-wrap');
+  if(!wrap) return;
+  res = res || ahResumenPorActividad_(AH_ACTIVIDADES, AH_CUADROS);
+  var trabajos = res.lista.map(function(r){ return r.trabajo; });
+  if(!AH_HUERTA_ACTUAL || !trabajos.length){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  if(AH_ACTIVIDADES_FILTRO_TRABAJO && trabajos.indexOf(AH_ACTIVIDADES_FILTRO_TRABAJO) !== -1) AH_PRED_TRABAJO = AH_ACTIVIDADES_FILTRO_TRABAJO;
+  if(trabajos.indexOf(AH_PRED_TRABAJO) === -1) AH_PRED_TRABAJO = trabajos[0];
+  var opts = trabajos.map(function(t){ return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>'; }).join('');
+  var sel = document.getElementById('ah-pred-trabajo');
+  sel.innerHTML = opts; sel.value = AH_PRED_TRABAJO;
+  var selT = document.getElementById('ah-pred-f-trabajo');
+  var prevT = selT.value;
+  selT.innerHTML = opts + '<option value="">Ninguna actividad (sacarlo)</option>';
+  selT.value = prevT && (trabajos.indexOf(prevT) !== -1) ? prevT : AH_PRED_TRABAJO;
+  var selE = document.getElementById('ah-pred-f-equipo');
+  var prevE = selE.value;
+  selE.innerHTML = '<option value="">Elige el tractor</option>' + (AH_RECURSOS.equipos || []).map(function(e){ return '<option value="' + escapeHtml(e.codigo) + '">' + escapeHtml(e.unidad || e.codigo) + '</option>'; }).join('');
+  selE.value = prevE;
+  var fd = document.getElementById('ah-pred-f-desde'); if(!fd.value) fd.value = ahDiaHoy_();
+  var hoy = ahDiaHoy_();
+  var r = res.lista.find(function(x){ return x.trabajo === AH_PRED_TRABAJO; });
+  var pr = ahPrediccion_(r, AH_PLAN, hoy);
+  var num = function(n, d){ return Number(n || 0).toFixed(d); };
+  var puede = typeof puedeCapturarPestana !== 'function' || puedeCapturarPestana('avance_huerta');
+  // Resumen
+  var tarjeta = function(t, v, sub){ return '<div class="ah-dia-prom"><div class="ah-dia-prom-act">' + t + '</div><div class="ah-dia-prom-num">' + v + '</div><div class="ah-dia-prom-sub">' + sub + '</div></div>'; };
+  var html = tarjeta('Falta', num(pr.restante, 2) + ' ha', 'de ' + num(pr.haAsignadas, 2) + ' ha con esta actividad');
+  if(!pr.inicio){
+    html += tarjeta('Sin tractores asignados', '—', 'Asigna abajo los tractores que trabajarán esta actividad para ver la predicción.' + (pr.promActividad ? '<br>Promedio real por tractor: ' + num(pr.promActividad, 2) + ' ha/día' : ''));
+  } else {
+    html += tarjeta('Ritmo esperado', num(pr.ritmoHoy, 2) + ' ha/día', 'Con los tractores asignados hoy');
+    html += tarjeta('Terminación estimada', pr.restante <= 0.005 ? 'Terminada' : (pr.fin ? escapeHtml(ahFechaDia_(pr.fin)) : 'Sin fecha'),
+      pr.restante <= 0.005 ? '' : (pr.fin ? 'Con lo que falta y el ritmo de los tractores asignados' : 'No hay tractores con rendimiento asignados'));
+    var dif = pr.diferencia || 0;
+    html += tarjeta('Contra lo esperado', '<span class="' + (dif >= -0.005 ? 'ah-pred-ok' : 'ah-pred-mal') + '">' + (dif >= 0 ? '+' : '') + num(dif, 2) + ' ha</span>',
+      (dif >= -0.005 ? 'Adelante del plan' : 'Atrás del plan') + ' desde el ' + escapeHtml(ahFechaDia_(pr.inicio)) + (pr.finPlan ? '<br>Según el plan terminaba el ' + escapeHtml(ahFechaDia_(pr.finPlan)) : ''));
+  }
+  document.getElementById('ah-pred-resumen').innerHTML = html;
+  // Tractores
+  var tb = document.getElementById('ah-pred-tractores-body');
+  tb.innerHTML = pr.tractores.length ? pr.tractores.map(function(t){
+    var per = t.periodos.map(function(p){ return 'desde ' + escapeHtml(ahFechaDia_(p.desde)) + (p.hasta ? ' hasta ' + escapeHtml(ahFechaDia_(p.hasta)) + ' (pasó a ' + escapeHtml(p.movidoA) + ')' : ' · sigue'); }).join('<br>');
+    return '<tr><td>🚜 ' + escapeHtml(t.equipo) + '</td><td>' + per + '</td>'
+      + '<td class="num">' + (t.promedio !== null ? num(t.promedio, 2) + ' ha/día<br><small>' + t.diasReales + ' día(s)</small>' : '<small>sin días todavía</small>') + '</td>'
+      + '<td class="num">' + (puede ? '<input type="number" step="0.01" min="0" class="ah-pred-rend" data-equipo="' + escapeHtml(t.equipoCodigo) + '" value="' + (t.estimado !== null ? t.estimado : '') + '" placeholder="' + (t.promedio !== null ? num(t.promedio, 2) : '') + '">' : (t.estimado !== null ? num(t.estimado, 2) : '')) + '</td>'
+      + '<td class="num">' + num(t.rendimiento, 2) + ' ha/día<br><small>' + t.fuente + '</small></td></tr>';
+  }).join('') : '<tr><td colspan="5" class="ah-pred-ayuda">Ningún tractor asignado a esta actividad.</td></tr>';
+  tb.querySelectorAll('.ah-pred-rend').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      ahPlanLlamar_('guardarRendimientoTractor', { huerta: AH_HUERTA_ACTUAL, trabajo: AH_PRED_TRABAJO, equipo: inp.dataset.equipo, haDia: inp.value === '' ? null : Number(inp.value) }, inp);
+    });
+  });
+  // Dónde está hoy cada tractor + historial de asignaciones (para borrar una equivocada)
+  var porEq = {};
+  (AH_PLAN.asignaciones || []).forEach(function(a){ (porEq[a.equipoCodigo] = porEq[a.equipoCodigo] || []).push(a); });
+  document.getElementById('ah-pred-asignaciones').innerHTML = (AH_PLAN.asignaciones || []).slice().sort(function(a, b){ return a.equipo.localeCompare(b.equipo, 'es') || (a.desde < b.desde ? -1 : 1); }).map(function(a){
+    return '<span class="ah-pred-chip">🚜 ' + escapeHtml(a.equipo) + ' → ' + escapeHtml(a.trabajo || 'ninguna') + ' desde ' + escapeHtml(ahFechaDia_(a.desde))
+      + (puede ? '<button type="button" class="ah-pred-borrar-asig" data-id="' + a.id + '" title="Borrar esta asignación">✕</button>' : '') + '</span>';
+  }).join('');
+  document.querySelectorAll('.ah-pred-borrar-asig').forEach(function(b){
+    b.addEventListener('click', function(){ if(confirm('¿Borrar esta asignación?')) ahPlanLlamar_('eliminarAsignacionPlan', Number(b.dataset.id), b); });
+  });
+  document.getElementById('ah-pred-dias').innerHTML = (AH_PLAN.diasExtra || []).map(function(d){
+    return '<span class="ah-pred-chip">' + escapeHtml(ahFechaDia_(d)) + (puede ? '<button type="button" class="ah-pred-borrar-dia" data-dia="' + d + '" title="Ya no se trabaja">✕</button>' : '') + '</span>';
+  }).join('');
+  document.querySelectorAll('.ah-pred-borrar-dia').forEach(function(b){
+    b.addEventListener('click', function(){ ahPlanLlamar_('guardarDiaExtraPlan', { huerta: AH_HUERTA_ACTUAL, dia: b.dataset.dia, quitar: true }, b); });
+  });
+  document.querySelectorAll('#ah-pred-wrap .ah-pred-captura').forEach(function(el){ el.style.display = puede ? '' : 'none'; });
+  // Día con día en orden de fecha: lo real hasta hoy y luego unos días proyectados
+  // (el resto se resume en un renglón con la fecha de terminación).
+  var MAX_PROY = 10;
+  var pasados = pr.dias.filter(function(x){ return !x.futuro; });
+  var proy = pr.dias.filter(function(x){ return x.futuro; });
+  var filas = pasados.concat(proy.slice(0, MAX_PROY));
+  document.getElementById('ah-pred-dias-body').innerHTML = filas.length ? filas.map(function(x){
+    var cls = x.futuro ? 'ah-pred-futuro' : (x.hoy ? 'ah-pred-hoy' : '');
+    var dif = x.futuro ? null : x.acumReal - x.acumEsperado;
+    var cumple = x.real + 0.005 >= x.esperado;
+    return '<tr class="' + cls + '"><td>' + escapeHtml(ahFechaDia_(x.dia)) + (x.futuro ? ' <small>(proyectado)</small>' : '') + (!x.laborable ? ' <small>(no laborable)</small>' : '') + '</td>'
+      + '<td>' + escapeHtml(x.tractores.join(', ')) + '</td>'
+      + '<td class="num">' + num(x.esperado, 2) + ' ha</td>'
+      + '<td class="num">' + (x.futuro ? '' : '<span class="' + (cumple ? 'ah-pred-ok' : 'ah-pred-mal') + '" title="' + (cumple ? 'Llegó a lo esperado' : 'No llegó a lo esperado') + '">' + num(x.real, 2) + ' ha ' + (cumple ? '✓' : '✗') + '</span>') + '</td>'
+      + '<td class="num">' + (x.futuro ? '' : num(x.acumEsperado, 2) + ' ha') + '</td>'
+      + '<td class="num">' + num(x.acumReal, 2) + ' ha</td>'
+      + '<td class="num">' + (dif === null ? '' : '<span class="' + (dif >= -0.005 ? 'ah-pred-ok' : 'ah-pred-mal') + '">' + (dif >= 0 ? '+' : '') + num(dif, 2) + '</span>') + '</td>'
+      + '</tr>';
+  }).join('') + (proy.length > MAX_PROY ? '<tr class="ah-pred-futuro"><td colspan="7">… ' + (proy.length - MAX_PROY) + ' día(s) más'
+      + (pr.fin ? '; termina el ' + escapeHtml(ahFechaDia_(pr.fin)) : '') + '</td></tr>' : '')
+    : '<tr><td colspan="7" class="ah-pred-ayuda">Asigna tractores a la actividad para ver el esperado día con día.</td></tr>';
+}
+
+document.getElementById('ah-pred-trabajo').addEventListener('change', function(){ AH_PRED_TRABAJO = this.value; document.getElementById('ah-pred-f-trabajo').value = this.value; ahRenderPrediccion_(); });
+document.getElementById('ah-pred-asignar').addEventListener('click', function(){
+  ahPlanLlamar_('asignarTractorPlan', { huerta: AH_HUERTA_ACTUAL, equipo: document.getElementById('ah-pred-f-equipo').value,
+    trabajo: document.getElementById('ah-pred-f-trabajo').value, desde: document.getElementById('ah-pred-f-desde').value }, this);
+});
+document.getElementById('ah-pred-agregar-dia').addEventListener('click', function(){
+  var d = document.getElementById('ah-pred-f-dia').value;
+  if(!d){ alert('Elige el día.'); return; }
+  ahPlanLlamar_('guardarDiaExtraPlan', { huerta: AH_HUERTA_ACTUAL, dia: d }, this);
+});
+
 function ahRenderAvancePorActividad_(){
   var cont = document.getElementById('ah-avance-actividades');
   if(!cont) return;
   var res = ahResumenPorActividad_(AH_ACTIVIDADES, AH_CUADROS);
   ahRenderAvancePorOperador_(res.lista);
   ahRenderAvancePorDia_(res.lista);
+  ahRenderPrediccion_(res);
   if(!res.lista.length){ cont.innerHTML = ''; ahRenderMapaActividad_(); return; }
   cont.innerHTML = res.lista.map(function(r){
     var activa = AH_ACTIVIDADES_FILTRO_TRABAJO === r.trabajo;
@@ -9479,6 +9796,7 @@ function ahCargarCuadrosYActividades_(huerta){
       google.script.run
         .withSuccessHandler(function(actividades){
           AH_ACTIVIDADES = actividades || [];
+          ahCargarPlan_(huerta);
           google.script.run
             .withSuccessHandler(function(catalogo){
               AH_CATALOGO = catalogo || [];

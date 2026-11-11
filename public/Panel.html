@@ -14418,8 +14418,11 @@ function usrCategoria_(u){
   if(mods.indexOf('taller') !== -1) return 'taller';
   const reportar = mods.length === 0 || mods.indexOf('reportar') !== -1; // sin módulos = Reportar (igual que el servidor)
   const ocultas = u.PestanasCelularOcultas || [];
+  // Operador (nov-2026, Carlos): tiene Avance Huerta y sus pestañas del
+  // celular están acotadas (p. ej. solo Reportar + Avance Huerta). Quien ve
+  // todas las pestañas (sin configurar) es Encargado.
+  if(reportar && ocultas.indexOf('avance') === -1 && ocultas.length > 0) return 'operadores';
   if(reportar && ocultas.indexOf('form') === -1) return 'encargados';
-  if(reportar && ocultas.indexOf('avance') === -1) return 'operadores';
   return 'otros';
 }
 

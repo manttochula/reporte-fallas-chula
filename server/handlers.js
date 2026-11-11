@@ -49,7 +49,7 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // Carlos le dé este permiso.
 // 'costo_refacciones' (nov-2026) no es pestaña: es el permiso para ver la columna
 // "Costo refacciones" en Órdenes (lo ya registrado como gasto en Comercial).
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'costo_refacciones'];
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'verificaciones', 'costo_refacciones'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -12038,6 +12038,210 @@ async function guardarSiniestroSeguro(code, nombreUsuario, datos) {
   return { success: true, id: sid, polizaId };
 }
 
+// ============================================================
+// Verificaciones vehiculares (nov-2026, Carlos): "habilítame un módulo de
+// verificaciones... aplica para las unidades automotrices, la idea es que el
+// pago sea conforme el número de placa... regístramelo a 2026 únicamente,
+// márcame cuáles son las que están pendientes de llenar el dato".
+// - Unidades: Maquinaria con usa_gasolina = 1, más las del archivo 2024.
+// - Periodo por el ÚLTIMO número de la placa (calendario semestral).
+// - Se registra cada verificación hecha (fecha, holograma, folio, costo,
+//   comprobante). Solo desde 2026.
+// - El archivo "VERIFICACIONES 2024.xlsx" (verificacionesPadron.js) se
+//   relaciona una sola vez con Maquinaria por serie, placa o AF, y llena la
+//   placa que falte.
+// ============================================================
+const VERIF_ANIO_MIN = 2026;
+const VERIF_MESES_POR_DIGITO = { 5: [1, 7], 6: [1, 7], 7: [2, 8], 8: [2, 8], 3: [3, 9], 4: [3, 9], 1: [4, 10], 2: [4, 10], 9: [5, 11], 0: [5, 11] };
+const VERIF_MESES = ['', 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+const normAlnum_ = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Último número de la placa ('YA-1500-A' -> 0); null si no trae números.
+function terminacionPlaca_(placa) {
+  const d = String(placa || '').match(/\d/g);
+  return d ? Number(d[d.length - 1]) : null;
+}
+
+// [{ periodo: 1, mesInicio, mesFin, texto }, { periodo: 2, ... }] o null sin placa.
+function periodosVerificacion_(placa) {
+  const t = terminacionPlaca_(placa);
+  if (t === null) return null;
+  return VERIF_MESES_POR_DIGITO[t].map((m, i) => ({ periodo: i + 1, mesInicio: m, mesFin: m + 1, texto: VERIF_MESES[m] + '-' + VERIF_MESES[m + 1] }));
+}
+
+// verificada | en_periodo | proxima | vencida  (hoy 'YYYY-MM-DD')
+function estadoPeriodoVerif_(anio, p, hoy, registro) {
+  if (registro) return 'verificada';
+  const z = (n) => String(n).padStart(2, '0');
+  const inicio = anio + '-' + z(p.mesInicio) + '-01';
+  const fin = anio + '-' + z(p.mesFin) + '-' + z(new Date(Date.UTC(anio, p.mesFin, 0)).getUTCDate());
+  if (hoy < inicio) return 'proxima';
+  if (hoy > fin) return 'vencida';
+  return 'en_periodo';
+}
+
+function afDeTexto_(v) {
+  const m = String(v || '').match(/\bAF[\s-]*0*(\d+)/i);
+  return m ? Number(m[1]) : null;
+}
+
+// Relaciona el archivo 2024 con Maquinaria (una sola vez, la primera vez que
+// alguien abre Verificaciones después de publicar).
+let verifPadronListo_ = false;
+async function asegurarPadronVerificaciones_() {
+  if (verifPadronListo_) return;
+  const [ya] = await pool.query("SELECT 1 FROM configuracion WHERE clave = 'verif_padron_2024_cargado'");
+  if (ya.length) { verifPadronListo_ = true; return; }
+  const [ins] = await pool.query("INSERT IGNORE INTO configuracion (clave, valor) VALUES ('verif_padron_2024_cargado', 'en_proceso')");
+  if (!ins.affectedRows) return; // otro proceso lo está cargando
+  try {
+    const padron = require('./verificacionesPadron');
+    const [maq] = await pool.query('SELECT codigo_unidad, unidad, serie, placa, usa_gasolina FROM maquinaria');
+    for (const r of padron) {
+      let m = null, como = null;
+      if (normAlnum_(r.serie).length >= 8) { m = maq.find((x) => normAlnum_(x.serie) === normAlnum_(r.serie)); como = m && 'serie'; }
+      if (!m && normAlnum_(r.placa)) { m = maq.find((x) => normAlnum_(x.placa) && normAlnum_(x.placa) === normAlnum_(r.placa)); como = m && 'placa'; }
+      if (!m) {
+        const porAf = maq.filter((x) => Number(x.usa_gasolina) && (afDeTexto_(x.codigo_unidad) === r.af || afDeTexto_(x.unidad) === r.af));
+        if (porAf.length === 1) { m = porAf[0]; como = 'af'; }
+      }
+      let cargada = 0;
+      if (m && !String(m.placa || '').trim() && r.placa) {
+        await pool.query("UPDATE maquinaria SET placa = ? WHERE codigo_unidad = ? AND (placa IS NULL OR TRIM(placa) = '')", [r.placa, m.codigo_unidad]);
+        m.placa = r.placa;
+        cargada = 1;
+      }
+      await pool.query(
+        `INSERT INTO verificaciones_padron (af, combustible, conductor, anio_modelo, marca, modelo, color, placa, serie, periodo1, periodo2, codigo_unidad, relacion, placa_cargada)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [r.af, r.combustible, r.conductor, r.anio, r.marca, r.modelo, r.color, r.placa || null, r.serie || null, r.periodo1 || null, r.periodo2 || null,
+          m ? m.codigo_unidad : null, como, cargada]);
+    }
+    await pool.query("UPDATE configuracion SET valor = 'hecho' WHERE clave = 'verif_padron_2024_cargado'");
+    verifPadronListo_ = true;
+  } catch (e) {
+    await pool.query('DELETE FROM verificaciones_padron');
+    await pool.query("DELETE FROM configuracion WHERE clave = 'verif_padron_2024_cargado'");
+    throw e;
+  }
+}
+
+async function getVerificaciones(code, nombreUsuario, anio) {
+  await requierePermisoPanel_(code, nombreUsuario, 'verificaciones', 'visualizar');
+  await asegurarPadronVerificaciones_();
+  const hoy = fechaMexico_();
+  const anioHoy = Number(hoy.slice(0, 4));
+  const a = Math.max(VERIF_ANIO_MIN, Number(anio) || anioHoy);
+  const [pad] = await pool.query('SELECT * FROM verificaciones_padron ORDER BY af');
+  const relacionadas = pad.filter((p) => p.codigo_unidad).map((p) => p.codigo_unidad);
+  const [maq] = await pool.query(
+    `SELECT m.codigo_unidad, m.unidad, m.placa, m.serie, m.anio, m.verificacion_exenta, m.usa_gasolina,
+            COALESCE(mca.nombre, m.marca) AS marca, COALESCE(mdo.nombre, m.modelo) AS modelo, emp.nombre AS empresa
+       FROM maquinaria m
+       LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
+       LEFT JOIN modelos_refacciones mdo ON mdo.id = m.modelo_id
+       LEFT JOIN empresas emp ON emp.id = m.empresa_id
+      WHERE m.usa_gasolina = 1` + (relacionadas.length ? ' OR m.codigo_unidad IN (?)' : '') + `
+      ORDER BY m.codigo_unidad`, relacionadas.length ? [relacionadas] : []);
+  const [regs] = await pool.query('SELECT * FROM verificaciones WHERE anio = ?', [a]);
+  const unidades = maq.map((m) => {
+    const p = pad.find((x) => x.codigo_unidad === m.codigo_unidad) || null;
+    const placa = String(m.placa || '').trim();
+    const periodos = periodosVerificacion_(placa);
+    const exenta = !!Number(m.verificacion_exenta);
+    const pendientes = [];
+    if (!placa) pendientes.push('Falta la placa');
+    else if (!periodos) pendientes.push('La placa no trae números');
+    if (p && p.placa && placa && normAlnum_(p.placa) !== normAlnum_(placa)) pendientes.push('La placa no coincide con el archivo 2024 (' + p.placa + ')');
+    return {
+      codigoUnidad: m.codigo_unidad, unidad: m.unidad, placa, serie: m.serie || '', anio: m.anio || '', marca: m.marca || '', modelo: m.modelo || '', empresa: m.empresa || '',
+      exenta, terminacion: terminacionPlaca_(placa),
+      conductor: p ? p.conductor || '' : '', af: p ? p.af : afDeTexto_(m.codigo_unidad) || afDeTexto_(m.unidad),
+      enArchivo: !!p, placaArchivo: p ? p.placa || '' : '', placaCargadaDelArchivo: p ? !!p.placa_cargada : false,
+      pendientes,
+      periodos: (periodos || []).map((per) => {
+        const r = regs.find((x) => x.codigo_unidad === m.codigo_unidad && Number(x.periodo) === per.periodo) || null;
+        return Object.assign({}, per, {
+          estado: exenta && !r ? 'exenta' : estadoPeriodoVerif_(a, per, hoy, r),
+          registro: r ? { id: r.id, fecha: fechaSoloOrNull(r.fecha), holograma: r.holograma || '', folio: r.folio || '', costo: r.costo === null ? null : Number(r.costo),
+            comprobanteUrl: r.comprobante_url || '', observaciones: r.observaciones || '', placa: r.placa || '', registradoPor: r.registrado_por || '' } : null,
+        });
+      }),
+    };
+  });
+  const sinUnidad = pad.filter((p) => !p.codigo_unidad).map((p) => ({ af: p.af, conductor: p.conductor || '', marca: p.marca || '', modelo: p.modelo || '', anio: p.anio_modelo || '', placa: p.placa || '', serie: p.serie || '' }));
+  const anios = [];
+  for (let y = VERIF_ANIO_MIN; y <= Math.max(anioHoy + 1, VERIF_ANIO_MIN); y++) anios.push(y);
+  return { success: true, hoy, anio: a, anios, unidades, sinUnidad };
+}
+
+// data: { codigoUnidad, anio, periodo, fecha, holograma, folio, costo, observaciones, archivoDataUrl }
+async function guardarVerificacion(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'verificaciones', 'capturar');
+  data = data || {};
+  const codigo = String(data.codigoUnidad || '').trim();
+  const anio = Number(data.anio), periodo = Number(data.periodo);
+  const fecha = String(data.fecha || '').slice(0, 10);
+  if (!codigo) return { success: false, error: 'Falta la unidad.' };
+  if (!(anio >= VERIF_ANIO_MIN && anio <= 2100)) return { success: false, error: 'Las verificaciones se registran desde ' + VERIF_ANIO_MIN + '.' };
+  if (periodo !== 1 && periodo !== 2) return { success: false, error: 'El periodo debe ser 1 o 2.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { success: false, error: 'Pon la fecha de la verificación.' };
+  if (fecha > fechaMexico_()) return { success: false, error: 'La fecha no puede ser futura.' };
+  const [[m]] = await pool.query('SELECT codigo_unidad, placa FROM maquinaria WHERE codigo_unidad = ?', [codigo]);
+  if (!m) return { success: false, error: 'Esa unidad ya no existe en Maquinaria.' };
+  const costo = data.costo === '' || data.costo === null || data.costo === undefined ? null : Number(data.costo);
+  if (costo !== null && !(costo >= 0)) return { success: false, error: 'Revisa el costo.' };
+  let url = null;
+  if (data.archivoDataUrl) {
+    if (!/^data:(application\/pdf|image\/[a-z0-9.+-]+);base64,/i.test(data.archivoDataUrl)) return { success: false, error: 'El comprobante debe ser PDF o foto.' };
+    if (data.archivoDataUrl.length > 14 * 1024 * 1024) return { success: false, error: 'El comprobante es muy grande (máximo 10 MB).' };
+    url = await guardarArchivo_(data.archivoDataUrl);
+  }
+  const t = (v, n) => { const x = String(v === null || v === undefined ? '' : v).trim(); return x ? x.slice(0, n) : null; };
+  await pool.query(
+    `INSERT INTO verificaciones (codigo_unidad, anio, periodo, placa, fecha, holograma, folio, costo, comprobante_url, observaciones, registrado_por)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE placa = VALUES(placa), fecha = VALUES(fecha), holograma = VALUES(holograma), folio = VALUES(folio), costo = VALUES(costo),
+       comprobante_url = COALESCE(VALUES(comprobante_url), comprobante_url), observaciones = VALUES(observaciones), registrado_por = VALUES(registrado_por)`,
+    [codigo, anio, periodo, t(m.placa, 50), fecha, t(data.holograma, 10), t(data.folio, 60), costo, url, t(data.observaciones, 2000), t(nombreUsuario, 255)]);
+  await registrarAuditoria_('verificaciones', codigo, 'verificacion', nombreUsuario, anio + ' periodo ' + periodo + ' · ' + fecha + (data.folio ? ' · folio ' + data.folio : ''));
+  return { success: true };
+}
+
+async function eliminarVerificacion(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'verificaciones', 'capturar');
+  const [[r]] = await pool.query('SELECT codigo_unidad, anio, periodo FROM verificaciones WHERE id = ?', [Number(id) || 0]);
+  if (!r) return { success: false, error: 'Esa verificación ya no existe.' };
+  await pool.query('DELETE FROM verificaciones WHERE id = ?', [Number(id)]);
+  await registrarAuditoria_('verificaciones', r.codigo_unidad, 'borrar_verif', nombreUsuario, r.anio + ' periodo ' + r.periodo);
+  return { success: true };
+}
+
+// Llenar la placa que falta desde Verificaciones (se guarda en Maquinaria).
+async function guardarPlacaVerificacion(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'verificaciones', 'capturar');
+  data = data || {};
+  const codigo = String(data.codigoUnidad || '').trim();
+  const placa = String(data.placa || '').trim().toUpperCase().slice(0, 50);
+  if (!codigo) return { success: false, error: 'Falta la unidad.' };
+  if (!placa) return { success: false, error: 'Escribe la placa.' };
+  if (terminacionPlaca_(placa) === null) return { success: false, error: 'La placa debe traer al menos un número (el último número decide cuándo se verifica).' };
+  const [r] = await pool.query('UPDATE maquinaria SET placa = ? WHERE codigo_unidad = ?', [placa, codigo]);
+  if (!r.affectedRows) return { success: false, error: 'Esa unidad ya no existe en Maquinaria.' };
+  await registrarAuditoria_('maquinaria', codigo, 'placa_verif', nombreUsuario, placa);
+  return { success: true, placa, periodos: periodosVerificacion_(placa) };
+}
+
+async function marcarExentaVerificacion(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'verificaciones', 'capturar');
+  data = data || {};
+  const codigo = String(data.codigoUnidad || '').trim();
+  const [r] = await pool.query('UPDATE maquinaria SET verificacion_exenta = ? WHERE codigo_unidad = ?', [data.exenta ? 1 : 0, codigo]);
+  if (!r.affectedRows) return { success: false, error: 'Esa unidad ya no existe en Maquinaria.' };
+  await registrarAuditoria_('maquinaria', codigo, 'exenta_verif', nombreUsuario, data.exenta ? 'No se verifica' : 'Sí se verifica');
+  return { success: true };
+}
+
 async function eliminarSiniestroSeguro(code, nombreUsuario, id) {
   await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
   const [r] = await pool.query('UPDATE seguros_siniestros SET eliminado = 1, actualizado_por = ? WHERE id = ? AND eliminado = 0', [segTexto_(nombreUsuario, 255), Number(id) || 0]);
@@ -12129,6 +12333,14 @@ module.exports = {
   marcarPagoSeguro,
   guardarSiniestroSeguro,
   eliminarSiniestroSeguro,
+  getVerificaciones,
+  guardarVerificacion,
+  eliminarVerificacion,
+  guardarPlacaVerificacion,
+  marcarExentaVerificacion,
+  terminacionPlaca_,
+  periodosVerificacion_,
+  estadoPeriodoVerif_,
   revisarAvisosSeguros_,
   avisosPendientesSeguros_,
   calendarioPagosSeguro_,

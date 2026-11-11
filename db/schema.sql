@@ -3639,3 +3639,62 @@ CREATE TABLE IF NOT EXISTS avance_plan_dias_extra (
   dia    DATE NOT NULL,
   PRIMARY KEY (huerta, dia)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Verificaciones vehiculares (nov-2026, Carlos): unidades automotrices. El
+-- periodo se calcula con el último número de la placa (5-6 ene-feb/jul-ago,
+-- 7-8 feb-mar/ago-sep, 3-4 mar-abr/sep-oct, 1-2 abr-may/oct-nov, 9-0
+-- may-jun/nov-dic). Aquí se guarda cada verificación hecha (desde 2026) y el
+-- listado del archivo "VERIFICACIONES 2024.xlsx" relacionado con Maquinaria.
+-- Ver getVerificaciones en handlers.js.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS verificaciones (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  codigo_unidad   VARCHAR(50) NOT NULL,
+  anio            SMALLINT NOT NULL,
+  periodo         TINYINT NOT NULL,              -- 1 = primer semestre, 2 = segundo
+  placa           VARCHAR(50) DEFAULT NULL,      -- la placa con que se verificó
+  fecha           DATE NOT NULL,
+  holograma       VARCHAR(10) DEFAULT NULL,      -- 00, 0, 1, 2...
+  folio           VARCHAR(60) DEFAULT NULL,      -- folio del certificado
+  costo           DECIMAL(10,2) DEFAULT NULL,
+  comprobante_url VARCHAR(500) DEFAULT NULL,
+  observaciones   TEXT DEFAULT NULL,
+  registrado_por  VARCHAR(255) DEFAULT NULL,
+  actualizado_en  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_verif (codigo_unidad, anio, periodo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS verificaciones_padron (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  af             INT NOT NULL,
+  combustible    VARCHAR(20) DEFAULT NULL,
+  conductor      VARCHAR(255) DEFAULT NULL,
+  anio_modelo    VARCHAR(10) DEFAULT NULL,
+  marca          VARCHAR(100) DEFAULT NULL,
+  modelo         VARCHAR(100) DEFAULT NULL,
+  color          VARCHAR(50) DEFAULT NULL,
+  placa          VARCHAR(50) DEFAULT NULL,
+  serie          VARCHAR(100) DEFAULT NULL,
+  periodo1       VARCHAR(50) DEFAULT NULL,       -- como venía en el archivo 2024 (referencia)
+  periodo2       VARCHAR(50) DEFAULT NULL,
+  codigo_unidad  VARCHAR(50) DEFAULT NULL,       -- unidad de Maquinaria con la que se relacionó (NULL = no se encontró)
+  relacion       VARCHAR(10) DEFAULT NULL,       -- 'serie' | 'placa' | 'af'
+  placa_cargada  TINYINT(1) NOT NULL DEFAULT 0   -- 1 = la placa de Maquinaria se llenó desde el archivo
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Unidad automotriz que no se verifica (p. ej. una plana): no aparece como pendiente.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'verificacion_exenta');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE maquinaria ADD COLUMN verificacion_exenta TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Permiso de la pestaña nueva: el mismo que cada quien ya tiene en Seguros (una sola vez).
+SET @perm_verif_hecho = (SELECT COUNT(*) FROM configuracion WHERE clave = 'permiso_verificaciones_2026_11');
+UPDATE usuarios
+SET panel_permisos = JSON_SET(panel_permisos, '$.verificaciones', JSON_UNQUOTE(JSON_EXTRACT(panel_permisos, '$.seguros')))
+WHERE @perm_verif_hecho = 0
+  AND panel_permisos IS NOT NULL
+  AND JSON_VALID(panel_permisos)
+  AND JSON_UNQUOTE(JSON_EXTRACT(panel_permisos, '$.seguros')) IN ('visualizar', 'capturar')
+  AND JSON_EXTRACT(panel_permisos, '$.verificaciones') IS NULL;
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('permiso_verificaciones_2026_11', 'hecho');

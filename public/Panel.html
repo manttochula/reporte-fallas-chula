@@ -1462,6 +1462,7 @@
       <div class="panel-tab" id="ptab-refacciones">Refacciones</div>
       <div class="panel-tab" id="ptab-insumos">Insumos</div>
       <div class="panel-tab" id="ptab-seguros">Seguros</div>
+      <div class="panel-tab" id="ptab-verificaciones">Verificaciones</div>
       <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
       <div class="panel-tab" id="ptab-indicadores">Indicadores</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
@@ -4436,6 +4437,61 @@
       </div>
     </div>
 
+    <!-- Verificaciones vehiculares (nov-2026, Carlos). Ver getVerificaciones en handlers.js. -->
+    <div id="pview-verificaciones" style="display:none;">
+      <div class="seg-tarjetas" id="ver-tarjetas"></div>
+      <div class="toolbar">
+        <select id="ver-anio"></select>
+        <input type="text" id="ver-buscar" placeholder="Buscar por unidad, placa, AF o conductor...">
+        <select id="ver-estado">
+          <option value="">Todas</option>
+          <option value="en_periodo">Les toca ahora</option>
+          <option value="vencida">Vencidas sin verificar</option>
+          <option value="proxima">Próximas</option>
+          <option value="verificada">Verificadas</option>
+          <option value="pendiente_dato">Pendientes de llenar dato</option>
+          <option value="exenta">No se verifican</option>
+        </select>
+        <select id="ver-mes"><option value="">Todos los meses</option></select>
+        <button class="export-btn" id="ver-actualizar">Actualizar</button>
+      </div>
+      <div class="seg-sub" style="margin:2px 0 8px;">El periodo se calcula con el último número de la placa: 5-6 ene-feb / jul-ago · 7-8 feb-mar / ago-sep · 3-4 mar-abr / sep-oct · 1-2 abr-may / oct-nov · 9-0 may-jun / nov-dic.</div>
+      <div class="seg-status" id="ver-status"></div>
+      <div class="table-wrap"><table id="ver-tabla">
+        <thead><tr><th>Unidad</th><th>Placa</th><th>Term.</th><th>1er periodo</th><th>2do periodo</th><th>Conductor (archivo 2024)</th><th>Datos pendientes</th></tr></thead>
+        <tbody id="ver-tbody"></tbody>
+      </table></div>
+      <div id="ver-sin-unidad-wrap" style="display:none;margin-top:16px;">
+        <div class="avance-paso" style="margin:0 0 6px;">Del archivo 2024 sin unidad en Maquinaria</div>
+        <div class="seg-sub" style="margin-bottom:6px;">No se encontró su unidad por serie, placa ni número AF. Dala de alta en Maquinaria (marcada como automotriz, con su placa y serie) y aparecerá arriba.</div>
+        <div class="table-wrap"><table><thead><tr><th>AF</th><th>Conductor</th><th>Unidad</th><th>Placa</th><th>Serie</th></tr></thead><tbody id="ver-sin-unidad-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="ver-overlay">
+      <div class="maq-modal" style="max-width:640px;">
+        <button class="maq-modal-close" id="ver-cerrar">&times;</button>
+        <h3 id="ver-titulo">Registrar verificación</h3>
+        <div class="seg-sub" id="ver-subtitulo" style="margin-bottom:10px;"></div>
+        <input type="hidden" id="ver-f-codigo"><input type="hidden" id="ver-f-periodo"><input type="hidden" id="ver-f-id">
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Fecha de la verificación *</label><input type="date" id="ver-f-fecha"></div>
+          <div class="maq-field"><label>Holograma</label><select id="ver-f-holograma"><option value="">—</option><option>00</option><option>0</option><option>1</option><option>2</option><option>Rechazo</option></select></div>
+        </div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Folio del certificado</label><input type="text" id="ver-f-folio"></div>
+          <div class="maq-field"><label>Costo pagado</label><input type="number" id="ver-f-costo" min="0" step="0.01"></div>
+        </div>
+        <div class="maq-field"><label>Comprobante (PDF o foto)</label><input type="file" id="ver-f-archivo" accept="application/pdf,image/*"><div class="seg-pdf-actual" id="ver-f-archivo-actual"></div></div>
+        <div class="maq-field"><label>Observaciones</label><textarea id="ver-f-obs"></textarea></div>
+        <div class="maq-modal-actions">
+          <button class="seg-quitar" id="ver-borrar" style="margin-right:auto;">Borrar verificación</button>
+          <button class="maq-save-btn" id="ver-guardar">Guardar</button>
+        </div>
+        <div class="maq-modal-status" id="ver-f-status"></div>
+      </div>
+    </div>
+
     <div class="maq-modal-overlay" id="seg-sin-overlay">
       <div class="maq-modal">
         <button class="maq-modal-close" id="seg-sin-cerrar">&times;</button>
@@ -4636,6 +4692,7 @@
             <div class="usr-permiso-row"><label>Refacciones</label><select id="usr-perm-refacciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Insumos</label><select id="usr-perm-insumos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Seguros</label><select id="usr-perm-seguros" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>Verificaciones</label><select id="usr-perm-verificaciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
             <div class="usr-permiso-row"><label>Indicadores</label><select id="usr-perm-indicadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (catálogo de semanas)</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
@@ -4764,7 +4821,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
+  guardarPolizaSeguro: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -5043,7 +5100,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'avance_huerta', 'indicadores', 'usuarios', 'costo_refacciones'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'verificaciones', 'avance_huerta', 'indicadores', 'usuarios', 'costo_refacciones'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -5153,6 +5210,7 @@ function aplicarPermisosPanelUI(){
     ['refacciones', ptabRefacciones, pviewRefacciones],
     ['insumos', ptabInsumos, pviewInsumos],
     ['seguros', ptabSeguros, pviewSeguros],
+    ['verificaciones', ptabVerificaciones, pviewVerificaciones],
     ['avance_huerta', ptabAvanceHuerta, pviewAvanceHuerta],
     ['indicadores', ptabIndicadores, pviewIndicadores],
     ['usuarios', ptabUsuarios, pviewUsuarios],
@@ -7401,6 +7459,7 @@ const ptabServiciosAutomotrices = document.getElementById('ptab-servicios-automo
 const ptabRefacciones = document.getElementById('ptab-refacciones');
 const ptabInsumos = document.getElementById('ptab-insumos');
 const ptabSeguros = document.getElementById('ptab-seguros');
+const ptabVerificaciones = document.getElementById('ptab-verificaciones');
 const ptabAvanceHuerta = document.getElementById('ptab-avancehuerta');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
 const ptabIndicadores = document.getElementById('ptab-indicadores');
@@ -7416,6 +7475,7 @@ const pviewServiciosAutomotrices = document.getElementById('pview-servicios-auto
 const pviewRefacciones = document.getElementById('pview-refacciones');
 const pviewInsumos = document.getElementById('pview-insumos');
 const pviewSeguros = document.getElementById('pview-seguros');
+const pviewVerificaciones = document.getElementById('pview-verificaciones');
 const pviewAvanceHuerta = document.getElementById('pview-avancehuerta');
 const pviewUsuarios = document.getElementById('pview-usuarios');
 const pviewIndicadores = document.getElementById('pview-indicadores');
@@ -7432,8 +7492,8 @@ let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
 let AVANCE_HUERTA_HUERTAS_CARGADAS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabVerificaciones, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewVerificaciones, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -7527,6 +7587,10 @@ ptabInsumos.addEventListener('click', function(){
 ptabSeguros.addEventListener('click', function(){
   activarPanelTab(ptabSeguros, pviewSeguros);
   if(!SEG_CARGADO){ cargarSeguros(); } else { renderSeguros(); }
+});
+ptabVerificaciones.addEventListener('click', function(){
+  activarPanelTab(ptabVerificaciones, pviewVerificaciones);
+  if(!VER_DATOS){ cargarVerificaciones_(); } else { renderVerificaciones_(); }
 });
 ptabAvanceHuerta.addEventListener('click', function(){
   activarPanelTab(ptabAvanceHuerta, pviewAvanceHuerta);
@@ -19916,6 +19980,181 @@ const SEG_SIN_TXT = { abierto: 'Abierto', en_proceso: 'En proceso', cerrado: 'Ce
 const SEG_FORMAS_N = { contado: 1, semestral: 2, trimestral: 4, mensual: 12 };
 
 function segPuede_(){ return puedeCapturarPestana('seguros'); }
+
+// ---------------------------------------------------------------
+// Verificaciones vehiculares (nov-2026, Carlos): una fila por unidad
+// automotriz con sus 2 periodos del año (según el último número de la placa),
+// el estado de cada uno y lo que falta capturar (placa). Registrar = fecha,
+// holograma, folio, costo y comprobante.
+// ---------------------------------------------------------------
+var VER_DATOS = null;
+var VER_FILTRO = '';
+var VER_ESTADO_TXT = { verificada: 'Verificada', en_periodo: 'Le toca ahora', proxima: 'Próxima', vencida: 'Vencida', exenta: 'No se verifica' };
+var VER_ESTADO_CLASE = { verificada: 'pagado', en_periodo: 'proximo', proxima: 'pendiente', vencida: 'atrasado', exenta: 'cancelada' };
+function verPuede_(){ return puedeCapturarPestana('verificaciones'); }
+function verStatus_(t, err){ var el = document.getElementById('ver-status'); el.textContent = t || ''; el.style.color = err ? 'var(--danger)' : ''; }
+function cargarVerificaciones_(){
+  var sel = document.getElementById('ver-anio');
+  verStatus_('Cargando verificaciones...');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ verStatus_((r && r.error) || 'No se pudieron leer las verificaciones.', true); return; }
+      VER_DATOS = r; verStatus_('');
+      sel.innerHTML = r.anios.map(function(a){ return '<option value="' + a + '"' + (a === r.anio ? ' selected' : '') + '>' + a + '</option>'; }).join('');
+      var mes = document.getElementById('ver-mes');
+      if(mes.options.length <= 1){
+        ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'].forEach(function(m, i){ var o = document.createElement('option'); o.value = String(i + 1); o.textContent = 'Les toca en ' + m.toLowerCase(); mes.appendChild(o); });
+      }
+      renderVerificaciones_();
+    })
+    .withFailureHandler(function(e){ verStatus_((e && e.message) || 'No se pudieron leer las verificaciones.', true); })
+    .getVerificaciones(ACCESS_CODE, PANEL_USUARIO, sel.value ? Number(sel.value) : null);
+}
+function verPendienteDato_(u){ return !u.exenta && u.pendientes.length > 0; }
+function verCoincide_(u, estado, mes){
+  if(estado === 'pendiente_dato'){ if(!verPendienteDato_(u)) return false; }
+  else if(estado === 'exenta'){ if(!u.exenta) return false; }
+  else if(estado){ if(!u.periodos.some(function(p){ return p.estado === estado; })) return false; }
+  if(mes){ var m = Number(mes); if(!u.periodos.some(function(p){ return p.mesInicio === m || p.mesFin === m; })) return false; }
+  return true;
+}
+function renderVerificaciones_(){
+  if(!VER_DATOS) return;
+  var d = VER_DATOS;
+  var puede = verPuede_();
+  var q = (document.getElementById('ver-buscar').value || '').trim().toLowerCase();
+  var estado = document.getElementById('ver-estado').value;
+  var mes = document.getElementById('ver-mes').value;
+  var cuenta = function(est){ return d.unidades.filter(function(u){ return u.periodos.some(function(p){ return p.estado === est; }); }).length; };
+  var periodosTot = 0, periodosHechos = 0;
+  d.unidades.forEach(function(u){ if(u.exenta) return; u.periodos.forEach(function(p){ periodosTot++; if(p.estado === 'verificada') periodosHechos++; }); });
+  var tarjeta = function(n, t, cls, filtro){ return '<div class="seg-tarjeta ' + cls + '" data-filtro="' + filtro + '"><div class="n">' + n + '</div><div class="t">' + t + '</div></div>'; };
+  document.getElementById('ver-tarjetas').innerHTML =
+    tarjeta(cuenta('en_periodo'), 'Les toca ahora', 'ambar', 'en_periodo')
+    + tarjeta(cuenta('vencida'), 'Vencidas sin verificar', 'rojo', 'vencida')
+    + tarjeta(periodosHechos + ' / ' + periodosTot, 'Verificaciones ' + d.anio, 'verde', 'verificada')
+    + tarjeta(d.unidades.filter(verPendienteDato_).length, 'Pendientes de llenar dato', 'rojo', 'pendiente_dato')
+    + (d.sinUnidad.length ? tarjeta(d.sinUnidad.length, 'Del archivo sin unidad', 'ambar', 'sin_unidad') : '');
+  document.querySelectorAll('#ver-tarjetas .seg-tarjeta').forEach(function(t){
+    t.addEventListener('click', function(){
+      if(t.dataset.filtro === 'sin_unidad'){ document.getElementById('ver-sin-unidad-wrap').scrollIntoView({ behavior: 'smooth' }); return; }
+      var sel = document.getElementById('ver-estado'); sel.value = sel.value === t.dataset.filtro ? '' : t.dataset.filtro; renderVerificaciones_();
+    });
+  });
+  var lista = d.unidades.filter(function(u){
+    if(q && [u.codigoUnidad, u.unidad, u.placa, u.conductor, String(u.af || ''), u.placaArchivo].join(' ').toLowerCase().indexOf(q) === -1) return false;
+    return verCoincide_(u, estado, mes);
+  });
+  // Primero lo urgente: vencidas, les toca ahora, pendientes de dato.
+  var peso = function(u){ if(u.periodos.some(function(p){ return p.estado === 'vencida'; })) return 0; if(u.periodos.some(function(p){ return p.estado === 'en_periodo'; })) return 1; if(verPendienteDato_(u)) return 2; return 3; };
+  lista.sort(function(a, b){ return peso(a) - peso(b) || a.codigoUnidad.localeCompare(b.codigoUnidad, 'es', { numeric: true }); });
+  var celdaPeriodo = function(u, i){
+    var p = u.periodos[i];
+    if(!p) return '<span class="seg-sub">—</span>';
+    var r = p.registro;
+    var html = '<div><b>' + p.texto + '</b> ' + '<span class="seg-badge ' + VER_ESTADO_CLASE[p.estado] + '">' + VER_ESTADO_TXT[p.estado] + '</span></div>';
+    if(r) html += '<div class="seg-sub">' + segFechaTxt_(r.fecha) + (r.holograma ? ' · holograma ' + escapeHtml(r.holograma) : '') + (r.folio ? ' · folio ' + escapeHtml(r.folio) : '') + (r.costo !== null ? ' · ' + segMoney_(r.costo) : '')
+      + (r.comprobanteUrl ? ' · <a href="' + escapeHtml(r.comprobanteUrl) + '" target="_blank" rel="noopener">comprobante</a>' : '') + '</div>';
+    if(puede && p.estado !== 'exenta') html += '<button type="button" class="seg-btn-claro ver-btn-reg" style="padding:3px 8px;font-size:11.5px;margin-top:3px;" data-codigo="' + escapeHtml(u.codigoUnidad) + '" data-periodo="' + p.periodo + '">' + (r ? 'Ver / editar' : 'Registrar') + '</button>';
+    else if(r) html += '<button type="button" class="seg-btn-claro ver-btn-reg" style="padding:3px 8px;font-size:11.5px;margin-top:3px;" data-codigo="' + escapeHtml(u.codigoUnidad) + '" data-periodo="' + p.periodo + '">Ver</button>';
+    return html;
+  };
+  document.getElementById('ver-tbody').innerHTML = lista.length ? lista.map(function(u){
+    var pend = u.exenta ? '<span class="seg-sub">No se verifica</span>' : (u.pendientes.length ? u.pendientes.map(function(t){ return '<div class="ah-pred-mal" style="font-size:12px;">⚠ ' + escapeHtml(t) + '</div>'; }).join('') : '<span class="ah-pred-ok">✓ Completo</span>');
+    if(puede) pend += '<div style="margin-top:4px;"><label class="seg-sub" style="cursor:pointer;"><input type="checkbox" class="ver-exenta" data-codigo="' + escapeHtml(u.codigoUnidad) + '"' + (u.exenta ? ' checked' : '') + '> No se verifica</label></div>';
+    var placa = u.placa ? '<b>' + escapeHtml(u.placa) + '</b>' + (u.placaCargadaDelArchivo ? '<div class="seg-sub">del archivo 2024</div>' : '') : '<span class="ah-pred-mal">Sin placa</span>';
+    if(puede) placa += '<div><button type="button" class="seg-btn-claro ver-btn-placa" style="padding:2px 7px;font-size:11px;margin-top:3px;" data-codigo="' + escapeHtml(u.codigoUnidad) + '">' + (u.placa ? 'Cambiar' : 'Capturar placa') + '</button></div>';
+    return '<tr><td><b>' + escapeHtml(u.codigoUnidad) + '</b><div class="seg-sub">' + escapeHtml(u.unidad || '') + (u.marca || u.modelo ? ' · ' + escapeHtml([u.marca, u.modelo, u.anio].filter(Boolean).join(' ')) : '') + '</div></td>'
+      + '<td>' + placa + '</td><td style="text-align:center;font-weight:700;">' + (u.terminacion === null ? '—' : u.terminacion) + '</td>'
+      + '<td>' + celdaPeriodo(u, 0) + '</td><td>' + celdaPeriodo(u, 1) + '</td>'
+      + '<td>' + escapeHtml(u.conductor || '') + (u.af ? '<div class="seg-sub">AF ' + u.af + '</div>' : '') + '</td><td>' + pend + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="seg-sub">Ninguna unidad coincide con el filtro.</td></tr>';
+  document.querySelectorAll('#ver-tbody .ver-btn-reg').forEach(function(b){ b.addEventListener('click', function(){ verAbrirRegistro_(b.dataset.codigo, Number(b.dataset.periodo)); }); });
+  document.querySelectorAll('#ver-tbody .ver-btn-placa').forEach(function(b){ b.addEventListener('click', function(){ verCapturarPlaca_(b.dataset.codigo); }); });
+  document.querySelectorAll('#ver-tbody .ver-exenta').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      cb.disabled = true;
+      google.script.run.withSuccessHandler(function(r){ if(!r || !r.success){ alert((r && r.error) || 'No se pudo.'); } cargarVerificaciones_(); })
+        .withFailureHandler(function(){ alert('No se pudo.'); cargarVerificaciones_(); })
+        .marcarExentaVerificacion(ACCESS_CODE, PANEL_USUARIO, { codigoUnidad: cb.dataset.codigo, exenta: cb.checked });
+    });
+  });
+  var su = document.getElementById('ver-sin-unidad-wrap');
+  su.style.display = d.sinUnidad.length ? '' : 'none';
+  document.getElementById('ver-sin-unidad-body').innerHTML = d.sinUnidad.map(function(x){
+    return '<tr><td>' + x.af + '</td><td>' + escapeHtml(x.conductor) + '</td><td>' + escapeHtml([x.marca, x.modelo, x.anio].filter(Boolean).join(' ')) + '</td><td>' + escapeHtml(x.placa || '—') + '</td><td>' + escapeHtml(x.serie) + '</td></tr>';
+  }).join('');
+}
+function verUnidad_(codigo){ return VER_DATOS.unidades.find(function(u){ return u.codigoUnidad === codigo; }); }
+function verCapturarPlaca_(codigo){
+  var u = verUnidad_(codigo);
+  var placa = prompt('Placa de ' + codigo + ' (el último número decide cuándo se verifica):', u.placa || u.placaArchivo || '');
+  if(placa === null) return;
+  google.script.run
+    .withSuccessHandler(function(r){ if(!r || !r.success){ alert((r && r.error) || 'No se pudo guardar.'); return; } cargarVerificaciones_(); })
+    .withFailureHandler(function(e){ alert((e && e.message) || 'No se pudo guardar.'); })
+    .guardarPlacaVerificacion(ACCESS_CODE, PANEL_USUARIO, { codigoUnidad: codigo, placa: placa });
+}
+function verAbrirRegistro_(codigo, periodo){
+  var u = verUnidad_(codigo);
+  var p = u.periodos.find(function(x){ return x.periodo === periodo; });
+  var r = p.registro;
+  var puede = verPuede_();
+  document.getElementById('ver-titulo').textContent = (r ? 'Verificación' : 'Registrar verificación') + ' · ' + codigo;
+  document.getElementById('ver-subtitulo').textContent = (periodo === 1 ? '1er' : '2do') + ' periodo ' + VER_DATOS.anio + ' (' + p.texto + ') · placa ' + (u.placa || '—');
+  document.getElementById('ver-f-codigo').value = codigo;
+  document.getElementById('ver-f-periodo').value = periodo;
+  document.getElementById('ver-f-id').value = r ? r.id : '';
+  document.getElementById('ver-f-fecha').value = r ? r.fecha : ahDiaHoy_();
+  document.getElementById('ver-f-holograma').value = r ? r.holograma : '';
+  document.getElementById('ver-f-folio').value = r ? r.folio : '';
+  document.getElementById('ver-f-costo').value = r && r.costo !== null ? r.costo : '';
+  document.getElementById('ver-f-obs').value = r ? r.observaciones : '';
+  document.getElementById('ver-f-archivo').value = '';
+  document.getElementById('ver-f-archivo-actual').innerHTML = r && r.comprobanteUrl ? 'Actual: <a href="' + escapeHtml(r.comprobanteUrl) + '" target="_blank" rel="noopener">ver comprobante</a> (sube otro para reemplazarlo)' : '';
+  document.getElementById('ver-borrar').style.display = r && puede ? '' : 'none';
+  document.getElementById('ver-guardar').style.display = puede ? '' : 'none';
+  var st = document.getElementById('ver-f-status'); st.className = 'maq-modal-status'; st.textContent = '';
+  document.getElementById('ver-overlay').classList.add('open');
+}
+document.getElementById('ver-cerrar').addEventListener('click', function(){ document.getElementById('ver-overlay').classList.remove('open'); });
+document.getElementById('ver-guardar').addEventListener('click', function(){
+  var btn = this, st = document.getElementById('ver-f-status');
+  var datos = { codigoUnidad: document.getElementById('ver-f-codigo').value, anio: VER_DATOS.anio, periodo: Number(document.getElementById('ver-f-periodo').value),
+    fecha: document.getElementById('ver-f-fecha').value, holograma: document.getElementById('ver-f-holograma').value, folio: document.getElementById('ver-f-folio').value,
+    costo: document.getElementById('ver-f-costo').value, observaciones: document.getElementById('ver-f-obs').value };
+  var enviar = function(){
+    btn.disabled = true; st.textContent = 'Guardando...'; st.className = 'maq-modal-status show';
+    google.script.run
+      .withSuccessHandler(function(r){
+        btn.disabled = false;
+        if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+        document.getElementById('ver-overlay').classList.remove('open');
+        cargarVerificaciones_();
+      })
+      .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+      .guardarVerificacion(ACCESS_CODE, PANEL_USUARIO, datos);
+  };
+  var f = document.getElementById('ver-f-archivo').files[0];
+  if(!f){ enviar(); return; }
+  if(f.size > 10 * 1024 * 1024){ st.textContent = 'El comprobante es muy grande (máximo 10 MB).'; st.className = 'maq-modal-status show err'; return; }
+  var reader = new FileReader();
+  reader.onload = function(){ datos.archivoDataUrl = reader.result; enviar(); };
+  reader.readAsDataURL(f);
+});
+document.getElementById('ver-borrar').addEventListener('click', function(){
+  var id = Number(document.getElementById('ver-f-id').value);
+  if(!id || !confirm('¿Borrar esta verificación?')) return;
+  google.script.run
+    .withSuccessHandler(function(r){ if(!r || !r.success){ alert((r && r.error) || 'No se pudo.'); return; } document.getElementById('ver-overlay').classList.remove('open'); cargarVerificaciones_(); })
+    .withFailureHandler(function(){ alert('No se pudo.'); })
+    .eliminarVerificacion(ACCESS_CODE, PANEL_USUARIO, id);
+});
+document.getElementById('ver-anio').addEventListener('change', cargarVerificaciones_);
+document.getElementById('ver-actualizar').addEventListener('click', cargarVerificaciones_);
+document.getElementById('ver-buscar').addEventListener('input', renderVerificaciones_);
+document.getElementById('ver-estado').addEventListener('change', renderVerificaciones_);
+document.getElementById('ver-mes').addEventListener('change', renderVerificaciones_);
 function segFechaTxt_(iso){ if(!iso) return '—'; const p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
 function segMoney_(n){ return (n === null || n === undefined || n === '') ? '—' : '$' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function segDias_(a, b){ const pa = a.split('-').map(Number), pb = b.split('-').map(Number); return Math.round((Date.UTC(pb[0], pb[1]-1, pb[2]) - Date.UTC(pa[0], pa[1]-1, pa[2])) / 86400000); }

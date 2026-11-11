@@ -4155,7 +4155,7 @@
             <div id="ah-avance-dias-promedios" class="ah-avance-dias-promedios"></div>
             <div class="table-wrap">
               <table class="ah-avance-operadores">
-                <thead><tr><th>Día</th><th>Actividad</th><th>Hectáreas</th><th>% de la huerta</th><th>Pasadas</th><th>Cuadros</th><th>Operador(es) · equipo</th></tr></thead>
+                <thead><tr><th>Operador</th><th>Día</th><th>Actividad</th><th>Hectáreas</th><th>% de la huerta</th><th>Pasadas</th><th>Cuadros</th><th>Equipo(s)</th></tr></thead>
                 <tbody id="ah-avance-dias-body"></tbody>
               </table>
             </div>
@@ -9113,7 +9113,7 @@ function ahResumenPorActividad_(actividades, cuadros){
   var orden = [];
   (actividades || []).forEach(function(a){
     var t = a.trabajo || '';
-    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {}, dias: {} }; orden.push(t); }
+    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {}, dias: {}, opDias: {} }; orden.push(t); }
     var r = porTrabajo[t];
     var ha = haCuadro[a.cuadroId] || 0;
     var completado = a.estado === 'completado';
@@ -9146,6 +9146,12 @@ function ahResumenPorActividad_(actividades, cuadros){
       var d = r.dias[x.dia] || (r.dias[x.dia] = { dia: x.dia, ha: 0, pasadas: 0, cuadros: {}, gente: {} });
       d.ha += ha * usable;
       d.pasadas += p;
+      // Por operador y día (nov-2026, Carlos: "que el avance por día sea por operador").
+      var nomOp = x.operador || 'Sin nombre';
+      var od = r.opDias[nomOp + '|' + x.dia] || (r.opDias[nomOp + '|' + x.dia] = { operador: nomOp, dia: x.dia, ha: 0, pasadas: 0, cuadros: {}, equipos: {} });
+      od.ha += ha * usable;
+      od.pasadas += p;
+      if(p >= 0.05){ od.cuadros[a.cuadroId] = true; if(x.equipo) od.equipos[x.equipo] = true; }
       if(p >= 0.05){
         d.cuadros[a.cuadroId] = true;
         var g = (x.operador || 'Sin nombre') + (x.equipo ? ' · ' + x.equipo : '');
@@ -9172,6 +9178,12 @@ function ahResumenPorActividad_(actividades, cuadros){
         pasadas: Math.round(d.pasadas * 10) / 10, cuadros: Object.keys(d.cuadros).length, gente: Object.keys(d.gente).sort() };
     }).filter(function(d){ return d.cuadros > 0; }).sort(function(a, b){ return a.dia < b.dia ? 1 : a.dia > b.dia ? -1 : 0; });
     delete r.dias;
+    r.porOperadorDia = Object.keys(r.opDias).map(function(k){
+      var d = r.opDias[k];
+      return { operador: d.operador, dia: d.dia, ha: d.ha, pct: totalHa > 0 ? (d.ha / totalHa) * 100 : 0,
+        pasadas: d.pasadas, cuadros: Object.keys(d.cuadros).length, equipos: Object.keys(d.equipos).sort() };
+    }).filter(function(d){ return d.cuadros > 0; });
+    delete r.opDias;
     var haDias = r.porDia.reduce(function(s, d){ return s + d.ha; }, 0);
     r.diasTrabajados = r.porDia.length;
     r.haPorDia = r.diasTrabajados ? Math.round((haDias / r.diasTrabajados) * 100) / 100 : 0;
@@ -9255,14 +9267,34 @@ function ahRenderAvancePorDia_(lista){
         + 'Total en esos días: ' + num(r.haEnDias, 2) + ' ha</div></div>';
     }).join('');
   }
-  var filas = [];
-  acts.forEach(function(r){ r.porDia.forEach(function(d){ filas.push({ trabajo: r.trabajo, d: d }); }); });
-  filas.sort(function(a, b){ return a.d.dia < b.d.dia ? 1 : a.d.dia > b.d.dia ? -1 : a.trabajo.localeCompare(b.trabajo, 'es'); });
-  tbody.innerHTML = filas.map(function(f){
-    var d = f.d;
-    return '<tr><td>' + escapeHtml(ahFechaDia_(d.dia)) + '</td><td>' + escapeHtml(f.trabajo) + '</td><td class="num">' + num(d.ha, 2) + ' ha</td>'
-      + '<td class="num">' + num(d.pct, 1) + '%</td><td class="num">' + num(d.pasadas, 1) + '</td><td class="num">' + d.cuadros + '</td>'
-      + '<td>' + escapeHtml(d.gente.join(', ')) + '</td></tr>';
+  // Un bloque por operador: sus días (lo más reciente arriba) y su promedio por día trabajado.
+  var ops = {};
+  acts.forEach(function(r){
+    (r.porOperadorDia || []).forEach(function(d){
+      var op = ops[d.operador] || (ops[d.operador] = { operador: d.operador, filas: [], dias: {} });
+      op.filas.push({ trabajo: r.trabajo, d: d });
+      var x = op.dias[d.dia] || (op.dias[d.dia] = { ha: 0, pct: 0, pasadas: 0, cuadros: 0 });
+      x.ha += d.ha; x.pct += d.pct; x.pasadas += d.pasadas; x.cuadros += d.cuadros;
+    });
+  });
+  var lista = Object.keys(ops).sort(function(a, b){ return a.localeCompare(b, 'es'); }).map(function(k){ return ops[k]; });
+  tbody.innerHTML = lista.map(function(op){
+    op.filas.sort(function(a, b){ return a.d.dia < b.d.dia ? 1 : a.d.dia > b.d.dia ? -1 : a.trabajo.localeCompare(b.trabajo, 'es'); });
+    var dias = Object.keys(op.dias);
+    var tot = { ha: 0, pct: 0, pasadas: 0, cuadros: 0 };
+    dias.forEach(function(k){ var x = op.dias[k]; tot.ha += x.ha; tot.pct += x.pct; tot.pasadas += x.pasadas; tot.cuadros += x.cuadros; });
+    var n = dias.length || 1;
+    var filas = op.filas.map(function(f, i){
+      var d = f.d;
+      return '<tr>' + (i === 0 ? '<td class="ah-op-nombre" rowspan="' + (op.filas.length + 1) + '">👤 ' + escapeHtml(op.operador) + '</td>' : '')
+        + '<td>' + escapeHtml(ahFechaDia_(d.dia)) + '</td><td>' + escapeHtml(f.trabajo) + '</td><td class="num">' + num(d.ha, 2) + ' ha</td>'
+        + '<td class="num">' + num(d.pct, 1) + '%</td><td class="num">' + num(d.pasadas, 1) + '</td><td class="num">' + d.cuadros + '</td>'
+        + '<td>' + escapeHtml(d.equipos.join(', ')) + '</td></tr>';
+    });
+    filas.push('<tr class="ah-op-total"><td colspan="2">Promedio por día (' + dias.length + ' día' + (dias.length === 1 ? '' : 's') + ' trabajado' + (dias.length === 1 ? '' : 's') + ')</td>'
+      + '<td class="num">' + num(tot.ha / n, 2) + ' ha</td><td class="num">' + num(tot.pct / n, 1) + '%</td><td class="num">' + num(tot.pasadas / n, 1) + '</td>'
+      + '<td class="num">' + num(tot.cuadros / n, 1) + '</td><td>Total: ' + num(tot.ha, 2) + ' ha</td></tr>');
+    return filas.join('');
   }).join('');
 }
 

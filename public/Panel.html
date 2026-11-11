@@ -3150,25 +3150,27 @@
           <small style="color:var(--text-dim);">Con esto el sistema decide solo, al capturar un reporte desde el celular, si va a Órdenes Agrícola o a Órdenes Automotriz.</small>
         </div>
         <div class="maq-field" id="catsimple-f-tucuenta-wrap" style="display:none;">
-          <label>Cuenta contable</label>
+          <label>Cuenta contable (general)</label>
           <select id="catsimple-f-tucuenta"><option value="">Sin cuenta</option></select>
           <small style="color:var(--text-dim);">Es la cuenta que sale en la orden de compra al proveedor y en la nota de su factura para los equipos de este tipo (ej. Tractor → MTTO TRACTORES 59060003000). Las cuentas se dan de alta en "Cuentas contables".</small>
+          <label style="margin-top:10px;">Cuenta en cada empresa</label>
+          <table class="ocx-tabla" style="margin-top:6px;width:100%;"><thead><tr><th>Empresa</th><th>Cuenta</th></tr></thead><tbody id="catsimple-f-tucuenta-empresas"></tbody></table>
+          <small style="color:var(--text-dim);">Si una empresa queda en "La de arriba", sus equipos de este tipo usan la cuenta de arriba.</small>
         </div>
         <div id="catsimple-f-cuenta-wrap" style="display:none;">
+          <div class="maq-field"><label>Empresa</label><select id="catsimple-f-cuenta-empresa"><option value="">Sin empresa</option></select>
+            <small style="color:var(--text-dim);">Cada empresa tiene su propia cuenta aunque se llame igual (ej. MTTO TRACTORES de Chula Brand México y MTTO TRACTORES de Chula Brand del Golfo). En "Tipos de unidad" eliges cuál usa cada empresa.</small></div>
           <div class="maq-field-row">
             <div class="maq-field"><label>No. de cuenta *</label><input type="text" id="catsimple-f-cuenta-numero" maxlength="40" placeholder="Ej. 59060003000"></div>
             <div class="maq-field"><label>Segmento</label><input type="text" id="catsimple-f-cuenta-segmento" maxlength="20" placeholder="Ej. 29"></div>
+            <div class="maq-field"><label>Huerta (nota)</label><input type="text" id="catsimple-f-cuenta-huerta" maxlength="150" list="cce-huertas" placeholder="Ej. PRORRATEABLES"></div>
           </div>
           <div class="maq-field"><label>Descripción en la OC</label><input type="text" id="catsimple-f-cuenta-descripcion" maxlength="150" placeholder="Ej. SERVICIO MTTO. TRACTORES">
             <small style="color:var(--text-dim);">Lo que sale en la columna "Descripción" de cada partida de la orden de compra. Si lo dejas vacío sale "SERVICIO " + el nombre de la cuenta.</small></div>
           <div class="maq-field"><label>Combustible</label><select id="catsimple-f-cuenta-combustible"><option value="">No es de combustible</option><option value="diesel">Diesel</option><option value="gasolina">Gasolina</option><option value="ieps">IEPS</option></select>
-            <small style="color:var(--text-dim);">Si es la cuenta del diesel, la gasolina o el IEPS, va en la nota contable (sello) de las facturas semanales de combustible. La huerta y el segmento de cada recuadro salen de la huerta o de la unidad; si no tienen, de la tabla "por empresa" de abajo.</small></div>
+            <small style="color:var(--text-dim);">Si es la cuenta del diesel, la gasolina o el IEPS de su empresa, va en la nota contable (sello) de las facturas semanales de combustible. La huerta y el segmento de cada recuadro salen de la huerta o de la unidad; si no tienen, de esta cuenta.</small></div>
           <div class="maq-field"><label>Código de producto en Comercial para gastos</label><input type="text" id="catsimple-f-cuenta-codigo" maxlength="30" placeholder="Ej. GTS30">
             <small style="color:var(--text-dim);">Las refacciones sin folio comercial (gastos) de los equipos con esta cuenta se exportan a la OC de CONTPAQi con este código (ej. GTS30 = SERVICIO MTTO. TRACTORES). Vacío = van a la hoja "Gasto directo".</small></div>
-          <div class="maq-field"><label>Huerta, segmento y código de gastos por empresa</label>
-            <small style="color:var(--text-dim);">Según la empresa del equipo (Catálogo de maquinaria). Ej. Chula Brand México → PRORRATEABLES, 29. Si dejas una empresa vacía: huerta de la orden, y el segmento y el código de gastos de arriba. Código gastos: el código de producto en el Comercial de esa empresa (ej. 0020 en Chula Brand del Golfo).</small>
-            <table class="ocx-tabla cce-tabla" style="margin-top:6px;width:100%;"><thead><tr><th>Empresa</th><th>Huerta (nota)</th><th>Segmento</th><th>Código gastos</th></tr></thead><tbody id="catsimple-f-cuenta-empresas"></tbody></table>
-          </div>
         </div>
         <div id="catsimple-f-fiscal-wrap" style="display:none;">
           <div class="mnt-subtext" style="margin:2px 0 6px;">Datos para la orden de compra al proveedor y la nota contable de su factura.</div>
@@ -21577,8 +21579,7 @@ function renderCatalogoSimple(key){
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
     if(cfg.tieneCuentaExtra){
-      const partes = [r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.CodigoComercial ? 'gastos: ' + r.CodigoComercial : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean)
-        .concat((r.PorEmpresa || []).map(function(x){ return x.Empresa.split(',')[0] + ': ' + [x.Huerta, x.Segmento ? 'seg. ' + x.Segmento : '', x.CodigoComercial ? 'gastos ' + x.CodigoComercial : ''].filter(Boolean).join(' '); }));
+      const partes = [r.Empresa ? r.Empresa.split(',')[0] : 'sin empresa', r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.Huerta, r.CodigoComercial ? 'gastos: ' + r.CodigoComercial : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
     if(cfg.tieneFiscal){
@@ -21664,9 +21665,19 @@ function abrirModalCatalogoSimple(key, registro){
     const cuentas = (CATALOGO_SIMPLE_DATOS.cuentascontables || []).slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
     const selCta = document.getElementById('catsimple-f-tucuenta');
     selCta.innerHTML = '<option value="">Sin cuenta</option>' + cuentas.map(function(c){
-      return '<option value="' + c.Id + '">' + escapeHtml(c.Nombre + (c.Numero ? ' — ' + c.Numero : '')) + '</option>';
+      return '<option value="' + c.Id + '">' + escapeHtml(c.Nombre + (c.Numero ? ' — ' + c.Numero : '') + (c.Empresa ? ' (' + c.Empresa.split(',')[0] + ')' : '')) + '</option>';
     }).join('');
     selCta.value = registro && registro.CuentaContableId ? registro.CuentaContableId : '';
+    // Nov-2026: una cuenta por empresa (solo las cuentas de esa empresa o sin empresa).
+    const porEmpTipo = (registro && registro.CuentasPorEmpresa) || [];
+    const empresasTipo = (CATALOGO_SIMPLE_DATOS.empresas || []).slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
+    document.getElementById('catsimple-f-tucuenta-empresas').innerHTML = empresasTipo.map(function(e){
+      const actual = (porEmpTipo.find(function(x){ return x.EmpresaId === e.Id; }) || {}).CuentaId;
+      const opciones = cuentas.filter(function(c){ return !c.EmpresaId || c.EmpresaId === e.Id || c.Id === actual; });
+      return '<tr data-empresa-id="' + e.Id + '"><td>' + escapeHtml(e.Nombre) + '</td><td><select class="tuc-cuenta"><option value="">La de arriba</option>' +
+        opciones.map(function(c){ return '<option value="' + c.Id + '"' + (c.Id === actual ? ' selected' : '') + '>' + escapeHtml(c.Nombre + (c.Numero ? ' — ' + c.Numero : '') + (c.Segmento ? ' (seg. ' + c.Segmento + ')' : '')) + '</option>'; }).join('') +
+        '</select></td></tr>';
+    }).join('') || '<tr><td colspan="2" class="mnt-subtext">Da de alta las empresas primero.</td></tr>';
   } else {
     tuCuentaWrap.style.display = 'none';
   }
@@ -21678,15 +21689,11 @@ function abrirModalCatalogoSimple(key, registro){
     document.getElementById('catsimple-f-cuenta-descripcion').value = (registro && registro.DescripcionOc) || '';
     document.getElementById('catsimple-f-cuenta-codigo').value = (registro && registro.CodigoComercial) || '';
     document.getElementById('catsimple-f-cuenta-combustible').value = (registro && registro.UsoCombustible) || '';
-    const porEmp = (registro && registro.PorEmpresa) || [];
     const empresasCce = (CATALOGO_SIMPLE_DATOS.empresas || []).slice().sort(function(a,b){ return (a.Nombre || '').localeCompare(b.Nombre || '', 'es'); });
-    document.getElementById('catsimple-f-cuenta-empresas').innerHTML = empresasCce.map(function(e){
-      const x = porEmp.find(function(p){ return p.EmpresaId === e.Id; }) || {};
-      return '<tr data-empresa-id="' + e.Id + '"><td>' + escapeHtml(e.Nombre) + '</td>' +
-        '<td><input type="text" class="cce-huerta" maxlength="150" list="cce-huertas" value="' + escapeHtml(x.Huerta || '') + '" placeholder="Huerta de la orden"></td>' +
-        '<td><input type="text" class="cce-segmento" maxlength="20" value="' + escapeHtml(x.Segmento || '') + '" placeholder="General" style="max-width:90px;"></td>' +
-        '<td><input type="text" class="cce-codigo" maxlength="30" value="' + escapeHtml(x.CodigoComercial || '') + '" placeholder="El de arriba" style="max-width:100px;" title="Código de producto para gastos en el Comercial de esta empresa (vacío = el de arriba)"></td></tr>';
-    }).join('') || '<tr><td colspan="4" class="mnt-subtext">Da de alta las empresas primero.</td></tr>';
+    const selEmpCta = document.getElementById('catsimple-f-cuenta-empresa');
+    selEmpCta.innerHTML = '<option value="">Sin empresa</option>' + empresasCce.map(function(e){ return '<option value="' + e.Id + '">' + escapeHtml(e.Nombre) + '</option>'; }).join('');
+    selEmpCta.value = registro && registro.EmpresaId ? String(registro.EmpresaId) : '';
+    document.getElementById('catsimple-f-cuenta-huerta').value = (registro && registro.Huerta) || '';
     let dl = document.getElementById('cce-huertas');
     if(!dl){ dl = document.createElement('datalist'); dl.id = 'cce-huertas'; document.body.appendChild(dl); }
     dl.innerHTML = ['PRORRATEABLES'].concat((CATALOGO_SIMPLE_DATOS.huertas || []).map(function(h){ return h.Nombre; })).map(function(h){ return '<option value="' + escapeHtml(h) + '">'; }).join('');
@@ -21771,6 +21778,9 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
   }
   if(cfg.tieneCuentaTipo){
     data.cuentaContableId = document.getElementById('catsimple-f-tucuenta').value || null;
+    data.cuentasPorEmpresa = Array.from(document.querySelectorAll('#catsimple-f-tucuenta-empresas tr[data-empresa-id]')).map(function(tr){
+      return { empresaId: Number(tr.dataset.empresaId), cuentaId: Number(tr.querySelector('.tuc-cuenta').value) || 0 };
+    }).filter(function(x){ return x.cuentaId; });
   }
   if(cfg.tieneCuentaExtra){
     data.numero = document.getElementById('catsimple-f-cuenta-numero').value.trim();
@@ -21778,9 +21788,8 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
     data.descripcionOc = document.getElementById('catsimple-f-cuenta-descripcion').value.trim();
     data.codigoComercial = document.getElementById('catsimple-f-cuenta-codigo').value.trim();
     data.usoCombustible = document.getElementById('catsimple-f-cuenta-combustible').value;
-    data.porEmpresa = Array.from(document.querySelectorAll('#catsimple-f-cuenta-empresas tr[data-empresa-id]')).map(function(tr){
-      return { empresaId: Number(tr.dataset.empresaId), huerta: tr.querySelector('.cce-huerta').value.trim(), segmento: tr.querySelector('.cce-segmento').value.trim(), codigoComercial: tr.querySelector('.cce-codigo').value.trim() };
-    });
+    data.empresaId = Number(document.getElementById('catsimple-f-cuenta-empresa').value) || null;
+    data.huerta = document.getElementById('catsimple-f-cuenta-huerta').value.trim();
     if(!data.numero){
       statusEl.textContent = 'Escribe el número de cuenta.'; statusEl.className = 'maq-modal-status show err';
       return;
@@ -23830,13 +23839,19 @@ function pintarModalOcp_(d){
   };
   // Huerta/segmento según cuenta + empresa (Catálogo → Cuentas contables).
   document.getElementById('ocp-segmento').value = d.segmento || '';
+  // Nov-2026: cada cuenta es de una empresa y trae UNA huerta y UN segmento.
   const aplicarCuentaEmpresa = function(){
     const c = d.cuentas.find(function(x){ return String(x.Id) === selCta.value; });
-    const pe = c ? (c.PorEmpresa || []).find(function(x){ return String(x.EmpresaId) === selEmp.value; }) : null;
-    document.getElementById('ocp-huerta').value = (pe && pe.Huerta) || d.huertaPorOrden || '';
-    document.getElementById('ocp-segmento').value = (pe && pe.Segmento) || (c ? c.Segmento : '') || '';
+    document.getElementById('ocp-huerta').value = (c && c.Huerta) || d.huertaPorOrden || '';
+    document.getElementById('ocp-segmento').value = (c ? c.Segmento : '') || '';
   };
-  selEmp.addEventListener('change', function(){ aplicarEmpresa(); aplicarCuentaEmpresa(); });
+  selEmp.addEventListener('change', function(){
+    aplicarEmpresa();
+    const m = d.cuentasTipoPorEmpresa || {};
+    const cta = m[selEmp.value] || m.general;
+    if(cta) selCta.value = String(cta);
+    aplicarCuentaEmpresa();
+  });
   selCta.addEventListener('change', aplicarCuentaEmpresa);
   aplicarEmpresa();
   if(!d.cuentaContableId) document.getElementById('ocp-cuenta-aviso').innerHTML = '<span class="ocx-destino-revisar">' + (d.tipoUnidad ? 'El tipo "' + escapeHtml(d.tipoUnidad) + '" no tiene cuenta (Catálogo → Tipos de unidad).' : 'La unidad no tiene tipo de unidad.') + '</span>';

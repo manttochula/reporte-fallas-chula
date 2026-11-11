@@ -3769,9 +3769,46 @@ SET @idx_cta = (SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE table
 SET @sql_alter = IF(@idx_cta IS NULL, 'SELECT 1', CONCAT('ALTER TABLE cuentas_contables DROP INDEX `', @idx_cta, '`'));
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
 
--- Código de producto para GASTOS por empresa (nov-2026, Carlos): la misma
--- cuenta (ej. MTTO TRACTORES) usa GTS30 en CHULA BRAND MEXICO y 0020 en
--- CHULA BRAND DEL GOLFO. Vacío = el de la cuenta (cuentas_contables.codigo_comercial).
-SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables_empresas' AND column_name = 'codigo_comercial');
-SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE cuentas_contables_empresas ADD COLUMN codigo_comercial VARCHAR(30) DEFAULT NULL', 'SELECT 1');
+-- ------------------------------------------------------------
+-- Cuentas contables POR EMPRESA (nov-2026, Carlos): cada empresa tiene su
+-- propia cuenta aunque se llame igual (MTTO TRACTORES de CHULA BRAND MEXICO,
+-- MTTO TRACTORES de CHULA BRAND DEL GOLFO...), con su número, su código de
+-- gastos y UNA huerta y UN segmento. El tipo de unidad elige qué cuenta usar
+-- en cada empresa (tipos_unidad_cuentas); si una empresa no tiene, se usa la
+-- cuenta general del tipo (tipos_unidad.cuenta_contable_id).
+-- La tabla vieja cuentas_contables_empresas (huerta/segmento por empresa) se
+-- pasa UNA vez a cuentas separadas y ya no se usa.
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'cuentas_contables' AND column_name = 'empresa_id');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE cuentas_contables ADD COLUMN empresa_id INT DEFAULT NULL, ADD COLUMN huerta VARCHAR(150) DEFAULT NULL, ADD COLUMN migrada_de INT DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+CREATE TABLE IF NOT EXISTS tipos_unidad_cuentas (
+  tipo_id    INT NOT NULL,
+  empresa_id INT NOT NULL,
+  cuenta_id  INT NOT NULL,
+  PRIMARY KEY (tipo_id, empresa_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @mig_cxe = (SELECT COUNT(*) FROM configuracion WHERE clave = 'cuentas_por_empresa_2026_11');
+-- 1) La cuenta se queda con la fila de CHULA BRAND MEXICO (o la primera empresa que tenga).
+UPDATE cuentas_contables c
+  JOIN (SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento
+          FROM cuentas_contables_empresas x
+         WHERE x.id = (SELECT x2.id FROM cuentas_contables_empresas x2 JOIN empresas e2 ON e2.id = x2.empresa_id
+                        WHERE x2.cuenta_id = x.cuenta_id ORDER BY (e2.nombre LIKE 'CHULA BRAND MEXICO%') DESC, x2.empresa_id LIMIT 1)) p ON p.cuenta_id = c.id
+   SET c.empresa_id = p.empresa_id, c.huerta = NULLIF(p.huerta, ''), c.segmento = COALESCE(NULLIF(p.segmento, ''), c.segmento)
+ WHERE @mig_cxe = 0 AND c.empresa_id IS NULL;
+-- 2) Las demás empresas de esa cuenta pasan a ser cuentas propias (mismo nombre y datos).
+INSERT INTO cuentas_contables (nombre, numero, segmento, descripcion_oc, codigo_comercial, uso_combustible, empresa_id, huerta, migrada_de)
+SELECT c.nombre, c.numero, COALESCE(NULLIF(x.segmento, ''), c.segmento), c.descripcion_oc, c.codigo_comercial, c.uso_combustible, x.empresa_id, NULLIF(x.huerta, ''), c.id
+  FROM cuentas_contables_empresas x JOIN cuentas_contables c ON c.id = x.cuenta_id
+ WHERE @mig_cxe = 0 AND c.empresa_id IS NOT NULL AND x.empresa_id <> c.empresa_id;
+-- 3) Cada tipo de unidad usa en cada empresa su cuenta.
+INSERT IGNORE INTO tipos_unidad_cuentas (tipo_id, empresa_id, cuenta_id)
+SELECT t.id, c.empresa_id, c.id FROM tipos_unidad t JOIN cuentas_contables c ON c.id = t.cuenta_contable_id
+ WHERE @mig_cxe = 0 AND c.empresa_id IS NOT NULL;
+INSERT IGNORE INTO tipos_unidad_cuentas (tipo_id, empresa_id, cuenta_id)
+SELECT t.id, n.empresa_id, n.id FROM cuentas_contables n JOIN tipos_unidad t ON t.cuenta_contable_id = n.migrada_de
+ WHERE @mig_cxe = 0 AND n.migrada_de IS NOT NULL;
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('cuentas_por_empresa_2026_11', 'hecho');

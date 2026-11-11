@@ -4257,9 +4257,12 @@ async function notaFacturaCombustible_(f) {
   const [[emp]] = f.empresaId ? await pool.query('SELECT nombre, siglas FROM empresas WHERE id = ?', [f.empresaId]) : [[]];
   const cuentas = {};
   for (const uso of ['diesel', 'gasolina', 'ieps']) {
-    const [[c]] = await pool.query('SELECT id, nombre, numero, segmento FROM cuentas_contables WHERE uso_combustible = ? ORDER BY id LIMIT 1', [uso]);
-    const pe = c && f.empresaId ? await cuentaPorEmpresa_(c.id, f.empresaId) : null;
-    cuentas[uso] = c ? { cuenta: c.nombre, numero: c.numero || '', huerta: (pe && pe.huerta) || '', segmento: (pe && pe.segmento) || c.segmento || '' }
+    // La de esa empresa; si no hay, la que no tiene empresa; si no, cualquiera.
+    const [[c]] = await pool.query(
+      'SELECT id, nombre, numero, segmento, huerta, empresa_id FROM cuentas_contables WHERE uso_combustible = ? ORDER BY (empresa_id <=> ?) DESC, (empresa_id IS NULL) DESC, id LIMIT 1', [uso, f.empresaId || null]);
+    // Huerta/segmento de la cuenta solo si es de esa empresa (o no tiene empresa): los de otra empresa no aplican.
+    const propia = c && (!c.empresa_id || !f.empresaId || Number(c.empresa_id) === Number(f.empresaId));
+    cuentas[uso] = c ? { cuenta: c.nombre, numero: c.numero || '', huerta: propia ? (c.huerta || '') : '', segmento: propia ? (c.segmento || '') : '' }
       : { cuenta: '', numero: '', huerta: '', segmento: '', falta: true };
   }
   const regs = await registrosProveedorCombustible_(f.proveedorId, f.desde, f.hasta, f.empresaId);
@@ -9027,8 +9030,11 @@ async function getTiposUnidad(code, nombreUsuario) {
             c.nombre AS CuentaNombre, c.numero AS CuentaNumero
      FROM tipos_unidad t LEFT JOIN cuentas_contables c ON c.id = t.cuenta_contable_id ORDER BY t.nombre`
   );
+  // Nov-2026: la cuenta de este tipo en cada empresa (la general es CuentaContableId).
+  const [tuc] = await pool.query('SELECT tipo_id, empresa_id, cuenta_id FROM tipos_unidad_cuentas');
   return rows.map((r) => ({ Id: r.Id, Nombre: r.Nombre, Categoria: r.Categoria || '', CuentaContableId: r.CuentaContableId || null,
-    CuentaNombre: r.CuentaNombre || '', CuentaNumero: r.CuentaNumero || '' }));
+    CuentaNombre: r.CuentaNombre || '', CuentaNumero: r.CuentaNumero || '',
+    CuentasPorEmpresa: tuc.filter((x) => x.tipo_id === r.Id).map((x) => ({ EmpresaId: x.empresa_id, CuentaId: x.cuenta_id })) }));
 }
 
 async function guardarTipoUnidad(code, nombreUsuario, id, data) {
@@ -9046,12 +9052,22 @@ async function guardarTipoUnidad(code, nombreUsuario, id, data) {
       const [c] = await pool.query('SELECT id FROM cuentas_contables WHERE id = ?', [cuentaId]);
       if (!c.length) return { success: false, error: 'Esa cuenta contable ya no existe. Actualiza la página.' };
     }
-    if (id) {
-      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=?, cuenta_contable_id=? WHERE id=?', [nombre, categoria, cuentaId, id]);
-      return { success: true, id: Number(id) };
+    // Cuenta por empresa (nov-2026): [{ empresaId, cuentaId }] (vacío = la general).
+    const porEmpresa = Array.isArray(data.cuentasPorEmpresa)
+      ? data.cuentasPorEmpresa.map((x) => ({ empresaId: Number(x && x.empresaId) || 0, cuentaId: Number(x && x.cuentaId) || 0 })).filter((x) => x.empresaId && x.cuentaId)
+      : null;
+    let tipoId = Number(id) || 0;
+    if (tipoId) {
+      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=?, cuenta_contable_id=? WHERE id=?', [nombre, categoria, cuentaId, tipoId]);
+    } else {
+      const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria, cuenta_contable_id) VALUES (?, ?, ?)', [nombre, categoria, cuentaId]);
+      tipoId = result.insertId;
     }
-    const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria, cuenta_contable_id) VALUES (?, ?, ?)', [nombre, categoria, cuentaId]);
-    return { success: true, id: result.insertId };
+    if (porEmpresa) {
+      await pool.query('DELETE FROM tipos_unidad_cuentas WHERE tipo_id = ?', [tipoId]);
+      for (const x of porEmpresa) await pool.query('INSERT INTO tipos_unidad_cuentas (tipo_id, empresa_id, cuenta_id) VALUES (?, ?, ?)', [tipoId, x.empresaId, x.cuentaId]);
+    }
+    return { success: true, id: tipoId };
   } catch (err) {
     if (err && err.code === 'ER_DUP_ENTRY') {
       return { success: false, error: 'Ya existe el tipo de unidad con ese nombre.' };
@@ -9136,19 +9152,23 @@ async function guardarEmpresa(code, nombreUsuario, id, data) {
 async function getCuentasContables(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_.concat(['refacciones']), 'visualizar');
   const [rows] = await pool.query(
-    `SELECT c.id, c.nombre, c.numero, c.segmento, c.descripcion_oc, c.codigo_comercial, c.uso_combustible, GROUP_CONCAT(t.nombre ORDER BY t.nombre SEPARATOR ', ') AS tipos
-     FROM cuentas_contables c LEFT JOIN tipos_unidad t ON t.cuenta_contable_id = c.id GROUP BY c.id ORDER BY c.nombre`
+    `SELECT c.id, c.nombre, c.numero, c.segmento, c.huerta, c.empresa_id, e.nombre AS empresa, c.descripcion_oc, c.codigo_comercial, c.uso_combustible,
+            (SELECT GROUP_CONCAT(DISTINCT t.nombre ORDER BY t.nombre SEPARATOR ', ') FROM tipos_unidad t
+              WHERE t.cuenta_contable_id = c.id OR EXISTS (SELECT 1 FROM tipos_unidad_cuentas x WHERE x.tipo_id = t.id AND x.cuenta_id = c.id)) AS tipos
+     FROM cuentas_contables c LEFT JOIN empresas e ON e.id = c.empresa_id ORDER BY c.nombre, e.nombre, c.id`
   );
-  const [pe] = await pool.query(
-    'SELECT x.cuenta_id, x.empresa_id, x.huerta, x.segmento, x.codigo_comercial, e.nombre FROM cuentas_contables_empresas x JOIN empresas e ON e.id = x.empresa_id ORDER BY e.nombre'
-  );
-  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', DescripcionOc: r.descripcion_oc || '', CodigoComercial: r.codigo_comercial || '', UsoCombustible: r.uso_combustible || '', TiposUnidad: r.tipos || '',
-    PorEmpresa: pe.filter((x) => x.cuenta_id === r.id).map((x) => ({ EmpresaId: x.empresa_id, Empresa: x.nombre, Huerta: x.huerta || '', Segmento: x.segmento || '', CodigoComercial: x.codigo_comercial || '' })) }));
+  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Numero: r.numero || '', Segmento: r.segmento || '', Huerta: r.huerta || '',
+    EmpresaId: r.empresa_id || null, Empresa: r.empresa || '', DescripcionOc: r.descripcion_oc || '', CodigoComercial: r.codigo_comercial || '', UsoCombustible: r.uso_combustible || '', TiposUnidad: r.tipos || '' }));
 }
 
-// Huerta/segmento de una cuenta para una empresa (null si no tiene fila).
-async function cuentaPorEmpresa_(cuentaId, empresaId) {
-  const [r] = await pool.query('SELECT huerta, segmento FROM cuentas_contables_empresas WHERE cuenta_id = ? AND empresa_id = ?', [Number(cuentaId) || 0, Number(empresaId) || 0]);
+// Cuenta de un tipo de unidad en una empresa: la de esa empresa o, si no tiene, la general.
+const SQL_CUENTA_TIPO_EMPRESA_ = 'COALESCE((SELECT tuc.cuenta_id FROM tipos_unidad_cuentas tuc WHERE tuc.tipo_id = %T.id AND tuc.empresa_id = %M.empresa_id), %T.cuenta_contable_id)';
+function sqlCuentaTipoEmpresa_(aliasTipo, aliasMaq) { return SQL_CUENTA_TIPO_EMPRESA_.replace(/%T/g, aliasTipo).replace(/%M/g, aliasMaq); }
+
+// Huerta/segmento de una cuenta (nov-2026: cada cuenta es de una empresa y
+// tiene UNA huerta y UN segmento; empresaId ya no cambia nada).
+async function cuentaPorEmpresa_(cuentaId, empresaId) { // eslint-disable-line no-unused-vars
+  const [r] = await pool.query('SELECT huerta, segmento FROM cuentas_contables WHERE id = ?', [Number(cuentaId) || 0]);
   return r.length ? { huerta: r[0].huerta || '', segmento: r[0].segmento || '' } : null;
 }
 async function guardarCuentaContable(code, nombreUsuario, id, data) {
@@ -9163,14 +9183,6 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
   if (!numero) return { success: false, error: 'Escribe el número de cuenta (ej. 59060003000).' };
   if (numero.length > 40 || segmento.length > 20 || descripcionOc.length > 150) return { success: false, error: 'Algún dato es demasiado largo.' };
   try {
-    // Huerta y segmento por empresa: [{ empresaId, huerta, segmento }]
-    // (solo se toca si viene en data; filas vacías se borran).
-    const porEmpresa = Array.isArray(data.porEmpresa) ? data.porEmpresa.map((x) => ({
-      empresaId: Number(x.empresaId) || 0,
-      huerta: (x.huerta || '').toString().trim().toUpperCase().slice(0, 150),
-      segmento: (x.segmento || '').toString().trim().slice(0, 20),
-      codigo: (x.codigoComercial || '').toString().trim().toUpperCase().slice(0, 30),
-    })).filter((x) => x.empresaId && (x.huerta || x.segmento || x.codigo)) : null;
     let cuentaId = Number(id) || 0;
     if (cuentaId) {
       await pool.query('UPDATE cuentas_contables SET nombre=?, numero=?, segmento=?, descripcion_oc=?' + ('codigoComercial' in data ? ', codigo_comercial=?' : '') + ' WHERE id=?',
@@ -9179,17 +9191,14 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
       const [res] = await pool.query('INSERT INTO cuentas_contables (nombre, numero, segmento, descripcion_oc, codigo_comercial) VALUES (?, ?, ?, ?, ?)', [nombre, numero, segmento || null, descripcionOc || null, codigoComercial]);
       cuentaId = res.insertId;
     }
+    // Nov-2026: empresa de la cuenta y UNA huerta (si no vienen, no se tocan).
+    if ('empresaId' in data) await pool.query('UPDATE cuentas_contables SET empresa_id = ? WHERE id = ?', [Number(data.empresaId) || null, cuentaId]);
+    if ('huerta' in data) await pool.query('UPDATE cuentas_contables SET huerta = ? WHERE id = ?', [(data.huerta || '').toString().trim().toUpperCase().slice(0, 150) || null, cuentaId]);
     if ('usoCombustible' in data) {
-      // Nov-2026: la cuenta que va en la nota de las facturas de combustible (una por uso).
+      // Nov-2026: la cuenta que va en la nota de las facturas de combustible (una por uso EN CADA EMPRESA).
       const uso = ['diesel', 'gasolina', 'ieps'].indexOf(String(data.usoCombustible || '')) >= 0 ? String(data.usoCombustible) : null;
-      if (uso) await pool.query('UPDATE cuentas_contables SET uso_combustible = NULL WHERE uso_combustible = ? AND id <> ?', [uso, cuentaId]);
+      if (uso) await pool.query('UPDATE cuentas_contables a JOIN cuentas_contables b ON b.id = ? SET a.uso_combustible = NULL WHERE a.uso_combustible = ? AND a.id <> b.id AND a.empresa_id <=> b.empresa_id', [cuentaId, uso]);
       await pool.query('UPDATE cuentas_contables SET uso_combustible = ? WHERE id = ?', [uso, cuentaId]);
-    }
-    if (porEmpresa) {
-      await pool.query('DELETE FROM cuentas_contables_empresas WHERE cuenta_id = ?', [cuentaId]);
-      for (const x of porEmpresa) {
-        await pool.query('INSERT INTO cuentas_contables_empresas (cuenta_id, empresa_id, huerta, segmento, codigo_comercial) VALUES (?, ?, ?, ?, ?)', [cuentaId, x.empresaId, x.huerta || null, x.segmento || null, x.codigo || null]);
-      }
     }
     return { success: true, id: cuentaId };
   } catch (err) {
@@ -9201,6 +9210,7 @@ async function guardarCuentaContable(code, nombreUsuario, id, data) {
 async function eliminarCuentaContable(code, nombreUsuario, id) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'capturar');
   await pool.query('UPDATE tipos_unidad SET cuenta_contable_id = NULL WHERE cuenta_contable_id = ?', [id]);
+  await pool.query('DELETE FROM tipos_unidad_cuentas WHERE cuenta_id = ?', [id]);
   await pool.query('DELETE FROM cuentas_contables_empresas WHERE cuenta_id = ?', [id]);
   await pool.query('DELETE FROM cuentas_contables WHERE id = ?', [id]);
   return { success: true };
@@ -9208,6 +9218,8 @@ async function eliminarCuentaContable(code, nombreUsuario, id) {
 async function eliminarEmpresa(code, nombreUsuario, id) {
   const r = await catalogoEmpresas_.eliminar(code, nombreUsuario, id);
   await pool.query('DELETE FROM cuentas_contables_empresas WHERE empresa_id = ?', [id]);
+  await pool.query('DELETE FROM tipos_unidad_cuentas WHERE empresa_id = ?', [id]);
+  await pool.query('UPDATE cuentas_contables SET empresa_id = NULL WHERE empresa_id = ?', [id]);
   return r;
 }
 
@@ -9431,7 +9443,7 @@ async function partidasOc_(ids) {
             COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial) AS codigoComercial, pce.codigo AS codigoPorEmpresa,
             ref.id AS refaccionId, ref.codigo AS refaccionCodigo, ref.descripcion AS descripcion, ref.no_parte AS noParte, ref.folio_comercial AS folioComercial,
             rep.unidad AS ordenUnidad, rep.codigo_unidad AS codigoUnidad, mq.empresa_id AS empresaId, emp.nombre AS empresa,
-            COALESCE(NULLIF(TRIM(cce.codigo_comercial), ''), cc.codigo_comercial) AS codigoGasto, cc.nombre AS cuentaNombre,
+            cc.codigo_comercial AS codigoGasto, cc.nombre AS cuentaNombre,
             x.tipo AS expTipo, x.serie AS expSerie, x.folio AS expFolio, x.fecha_oc AS expFecha, x.exportado_por AS expPor, x.exportado_en AS expEn
      FROM solicitud_cotizacion_respuesta_items ri
      JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
@@ -9444,8 +9456,7 @@ async function partidasOc_(ids) {
      LEFT JOIN empresas emp ON emp.id = mq.empresa_id
      LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = mq.empresa_id
      LEFT JOIN tipos_unidad tu ON LOWER(TRIM(tu.nombre)) = LOWER(TRIM(mq.tipo_unidad))
-     LEFT JOIN cuentas_contables cc ON cc.id = tu.cuenta_contable_id
-     LEFT JOIN cuentas_contables_empresas cce ON cce.cuenta_id = cc.id AND cce.empresa_id = mq.empresa_id
+     LEFT JOIN cuentas_contables cc ON cc.id = ${sqlCuentaTipoEmpresa_('tu', 'mq')}
      LEFT JOIN oc_exportaciones x ON x.respuesta_item_id = ri.id
      WHERE ri.autorizado = 1 AND s.estado <> 'cancelada'${filtroIds}
      ORDER BY s.orden, p.nombre, ref.descripcion`,
@@ -10157,7 +10168,7 @@ async function partidasPendientesOcProveedor_(orden, proveedorId) {
 async function contextoOrdenOc_(orden) {
   const [rows] = await pool.query(
     `SELECT rep.orden, rep.unidad, rep.codigo_unidad, rep.huerta, mq.empresa_id, mq.tipo_unidad,
-            t.cuenta_contable_id
+            ${sqlCuentaTipoEmpresa_('t', 'mq')} AS cuenta_contable_id
      FROM reportes rep
      LEFT JOIN maquinaria mq ON mq.codigo_unidad = rep.codigo_unidad
      LEFT JOIN tipos_unidad t ON LOWER(TRIM(t.nombre)) = LOWER(TRIM(mq.tipo_unidad))
@@ -10232,6 +10243,13 @@ async function prepararOcProveedor(code, nombreUsuario, orden, proveedorId) {
     empresaId,
     empresas: empresas.map((e) => ({ id: e.id, nombre: e.nombre, siglas: e.siglas || '', faltan: faltantesEmpresaOc_(e) })),
     cuentaContableId: ctx.cuentaContableId,
+    // Nov-2026: la cuenta del tipo de unidad en cada empresa (para cambiarla si cambias la empresa).
+    cuentasTipoPorEmpresa: await (async () => {
+      const [tm] = await pool.query('SELECT t.cuenta_contable_id AS general, x.empresa_id, x.cuenta_id FROM tipos_unidad t LEFT JOIN tipos_unidad_cuentas x ON x.tipo_id = t.id WHERE LOWER(TRIM(t.nombre)) = LOWER(TRIM(?))', [ctx.tipoUnidad || '']);
+      const m = { general: tm.length ? tm[0].general || null : null };
+      tm.forEach((r) => { if (r.empresa_id) m[r.empresa_id] = r.cuenta_id; });
+      return m;
+    })(),
     cuentas,
     // Huerta/segmento: los que se capturaron para esa cuenta y esa empresa
     // (Catálogo → Cuentas contables); si no hay, huerta de la orden y el

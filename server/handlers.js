@@ -1517,9 +1517,11 @@ async function getIndicadorTiemposReparacion(code, nombreUsuario, desdeCodigo, h
   const desde = lista[i].inicio, hasta = lista[j].fin;
   const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
   const [ords] = await pool.query(
-    `SELECT r.orden, r.unidad, r.codigo_unidad, r.huerta, r.descripcion, r.fecha_salida, r.es_soldadura, r.es_automotriz, r.es_llantas, r.es_terceros
+    // También las terminadas que esperan confirmación (nov-2026, Carlos), sin importar las semanas.
+    `SELECT r.orden, r.unidad, r.codigo_unidad, r.huerta, r.descripcion, r.fecha_salida, r.terminada_en, r.es_soldadura, r.es_automotriz, r.es_llantas, r.es_terceros
        FROM reportes r
-      WHERE r.fecha_salida BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM ordenes_tiempos t WHERE t.orden = r.orden)` +
+      WHERE (r.fecha_salida BETWEEN ? AND ? OR (r.fecha_salida IS NULL AND r.terminada_en IS NOT NULL))
+        AND EXISTS (SELECT 1 FROM ordenes_tiempos t WHERE t.orden = r.orden)` +
       (huertasRestringidas ? ' AND UPPER(TRIM(r.huerta)) IN (?)' : '') + ' ORDER BY r.fecha_salida, r.orden',
     huertasRestringidas ? [desde, hasta, huertasRestringidas] : [desde, hasta]);
   const [ts] = ords.length
@@ -1539,7 +1541,8 @@ async function getIndicadorTiemposReparacion(code, nombreUsuario, desdeCodigo, h
     });
     return {
       orden: o.orden, unidad: o.unidad || o.codigo_unidad || '', codigoUnidad: o.codigo_unidad || '', huerta: o.huerta || '', descripcion: o.descripcion || '',
-      fechaSalida: fechaSoloOrNull(o.fecha_salida), seccion: seccionDeFila_(o), mes: (fechaSoloOrNull(o.fecha_salida) || '').slice(0, 7),
+      fechaSalida: fechaSoloOrNull(o.fecha_salida), porConfirmar: !o.fecha_salida, terminadaEn: isoOrNull(o.terminada_en), seccion: seccionDeFila_(o),
+      mes: (fechaSoloOrNull(o.fecha_salida) || (o.terminada_en ? fechaMx_(new Date(o.terminada_en)) : '')).slice(0, 7),
       horas: Math.round(seg / 36) / 100, duracionHoras: primero !== null ? Math.round((ultimo - primero) / 36000) / 100 : 0, ratos: suyos.length,
       mecanicos: Object.keys(mecs).map((m) => ({ nombre: m, horas: Math.round(mecs[m] / 36) / 100 })),
     };

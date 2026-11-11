@@ -4620,7 +4620,7 @@
       </div>
       <!-- Tiempo de reparación (nov-2026): con los botones Iniciar / Queda pendiente / Trabajo finalizado de Taller. -->
       <div class="ind-tarjeta" id="trep-tarjeta">
-        <div class="ind-tarjeta-titulo">Tiempo de reparación por orden <span class="ind-sub">(órdenes cerradas en las semanas elegidas · respeta el "Tipo de orden")</span></div>
+        <div class="ind-tarjeta-titulo">Tiempo de reparación por orden <span class="ind-sub">(órdenes cerradas en las semanas elegidas y las terminadas por confirmar · respeta el "Tipo de orden")</span></div>
         <p class="ind-ayuda">Horas trabajadas = suma de los ratos de todos los mecánicos entre "Iniciar reparación" y "Queda pendiente" / "Trabajo finalizado" (las esperas no cuentan). Duración = desde que se empezó hasta que se terminó, contando esperas. Solo entran las órdenes trabajadas con esos botones en Taller.</p>
         <div class="ind-status" id="trep-status"></div>
         <div class="trep-resumen" id="trep-resumen"></div>
@@ -24321,9 +24321,10 @@ function trepRender_(){
   const totH = ords.reduce(function(s, o){ return s + o.horas; }, 0);
   const totD = ords.reduce(function(s, o){ return s + o.duracionHoras; }, 0);
   const dato = function(n, t){ return '<div class="trep-dato"><div class="n">' + n + '</div><div class="t">' + t + '</div></div>'; };
+  const nPorConfirmar = ords.filter(function(o){ return o.porConfirmar; }).length;
   document.getElementById('trep-resumen').innerHTML = ords.length
-    ? dato(ords.length, 'Órdenes') + dato(trepHoras_(totH / ords.length), 'Promedio trabajado por orden') + dato(trepDuracion_(totD / ords.length), 'Promedio de duración') + dato(trepHoras_(totH), 'Horas trabajadas en total')
-    : '<span class="ind-sub">Todavía no hay órdenes cerradas en estas semanas que se hayan trabajado con los botones de Taller.</span>';
+    ? dato(ords.length, 'Órdenes' + (nPorConfirmar ? ' (' + nPorConfirmar + ' por confirmar)' : '')) + dato(trepHoras_(totH / ords.length), 'Promedio trabajado por orden') + dato(trepDuracion_(totD / ords.length), 'Promedio de duración') + dato(trepHoras_(totH), 'Horas trabajadas en total')
+    : '<span class="ind-sub">Todavía no hay órdenes cerradas en estas semanas (ni terminadas por confirmar) que se hayan trabajado con los botones de Taller.</span>';
   const fila = function(etq, x, porOrden){
     return '<tr><td>' + etq + '</td><td class="ind-num">' + x.ordenes + '</td><td class="ind-num">' + (porOrden ? trepHoras_(x.horas) : trepHoras_(x.promHoras)) + '</td><td class="ind-num">' + (porOrden ? trepHoras_(x.promHoras) : trepDuracion_(x.promDuracion)) + '</td></tr>';
   };
@@ -24339,8 +24340,8 @@ function trepRender_(){
   document.querySelector('#trep-tabla-mecanico tbody').innerHTML = listaMec.map(function(x){ return fila(escapeHtml(x.clave), x, true); }).join('') || vacio;
   const unis = trepAgrupar_(ords, function(o){ return o.unidad; }).sort(function(a, b){ return b.horas - a.horas; }).slice(0, 20);
   document.querySelector('#trep-tabla-unidad tbody').innerHTML = unis.map(function(x){ return fila(escapeHtml(x.clave), x, true); }).join('') || vacio;
-  document.querySelector('#trep-tabla-ordenes tbody').innerHTML = ords.slice().sort(function(a, b){ return String(b.fechaSalida).localeCompare(String(a.fechaSalida)); }).map(function(o){
-    return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad) + '</td><td>' + escapeHtml(TREP_SECCION_TXT[o.seccion] || o.seccion) + '</td><td>' + indFecha_(o.fechaSalida) + '</td>'
+  document.querySelector('#trep-tabla-ordenes tbody').innerHTML = ords.slice().sort(function(a, b){ return (b.porConfirmar ? 1 : 0) - (a.porConfirmar ? 1 : 0) || String(b.fechaSalida).localeCompare(String(a.fechaSalida)); }).map(function(o){
+    return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad) + '</td><td>' + escapeHtml(TREP_SECCION_TXT[o.seccion] || o.seccion) + '</td><td>' + (o.porConfirmar ? '<span class="status-pill info">Por confirmar</span>' : indFecha_(o.fechaSalida)) + '</td>'
       + '<td>' + o.mecanicos.map(function(m){ return escapeHtml(m.nombre) + ' (' + trepHoras_(m.horas) + ')'; }).join(', ') + '</td>'
       + '<td class="ind-num">' + trepHoras_(o.horas) + '</td><td class="ind-num">' + trepDuracion_(o.duracionHoras) + '</td>'
       + '<td>' + (puedeCapturarPestana('indicadores') ? '<button type="button" class="export-btn trep-corregir" data-orden="' + escapeHtml(o.orden) + '" style="padding:3px 8px;font-size:11px;">Corregir</button>' : '') + '</td></tr>';

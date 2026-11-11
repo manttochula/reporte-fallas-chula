@@ -8361,6 +8361,79 @@ async function guardarAportesActividad_(actividadId, aportes) {
   }
 }
 
+// ---- Avance a mano (nov-2026, Carlos) ----
+// El operador no pudo usar la app: se registra en el Panel un recorrido sin GPS
+// con los cuadros que trabajó (y su %) para una actividad; cuenta para el avance
+// de esos cuadros igual que el GPS y el recálculo no lo borra.
+// data: { huerta, trabajo, equipo, operador, fecha 'YYYY-MM-DD', horaInicio 'HH:MM', horaFin, cuadros: [{ cuadroId, porcentaje }] }
+async function registrarAvanceManual(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  data = data || {};
+  const t = (v) => (v === null || v === undefined ? '' : String(v)).trim();
+  const huerta = t(data.huerta), trabajo = t(data.trabajo), equipo = t(data.equipo), operador = t(data.operador);
+  const fecha = t(data.fecha).slice(0, 10), hi = t(data.horaInicio) || '00:00', hf = t(data.horaFin) || hi;
+  if (!huerta) return { success: false, error: 'Elige la huerta.' };
+  if (!trabajo) return { success: false, error: 'Elige la actividad.' };
+  if (!equipo) return { success: false, error: 'Elige el tractor.' };
+  if (!operador) return { success: false, error: 'Elige el operador.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^\d{2}:\d{2}$/.test(hi) || !/^\d{2}:\d{2}$/.test(hf)) return { success: false, error: 'Revisa la fecha y las horas.' };
+  if (hf < hi) return { success: false, error: 'La hora de fin es antes de la de inicio.' };
+  if (fecha + ' ' + hi > fechaMexico_() + ' 23:59') return { success: false, error: 'La fecha no puede ser futura.' };
+  const lista = (Array.isArray(data.cuadros) ? data.cuadros : []).map((c) => ({ cuadroId: Number(c.cuadroId) || 0, porcentaje: Number(c.porcentaje) }))
+    .filter((c) => c.cuadroId);
+  if (!lista.length) return { success: false, error: 'Marca al menos un cuadro.' };
+  if (lista.some((c) => !(c.porcentaje > 0 && c.porcentaje <= 100))) return { success: false, error: 'El % de cada cuadro va de 1 a 100.' };
+  const [acts] = await pool.query(
+    `SELECT a.id, a.cuadro_id, a.trabajo, c.nombre AS cuadro FROM huerta_actividades a JOIN huerta_cuadros c ON c.id = a.cuadro_id
+      WHERE LOWER(TRIM(a.huerta)) = LOWER(TRIM(?)) AND a.cuadro_id IN (?)`, [huerta, lista.map((c) => c.cuadroId)]);
+  const sinActividad = [];
+  const filas = [];
+  for (const c of lista) {
+    const act = acts.find((a) => a.cuadro_id === c.cuadroId && mismoTrabajoAvance_(trabajo, a.trabajo));
+    if (!act) { const [[cu]] = await pool.query('SELECT nombre FROM huerta_cuadros WHERE id = ?', [c.cuadroId]); sinActividad.push(cu ? cu.nombre : '#' + c.cuadroId); continue; }
+    filas.push({ actividadId: act.id, porcentaje: Math.round(c.porcentaje * 100) / 100, cuadroId: c.cuadroId });
+  }
+  if (sinActividad.length) return { success: false, error: 'Estos cuadros no tienen la actividad "' + trabajo + '" planeada: ' + sinActividad.join(', ') + '. Asígnala primero en "Planificar trabajo".' };
+  const [ins] = await pool.query(
+    `INSERT INTO avance_huerta (huerta, nombre, trabajo, porcentaje, fecha_inicio, fecha_fin, codigo_unidad, manual, capturado_por)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, 1, ?)`, [huerta, operador, trabajo, fecha + ' ' + hi + ':00', fecha + ' ' + hf + ':00', equipo, nombreUsuario || null]);
+  for (const f of filas) await pool.query('INSERT INTO huerta_actividades_manual (avance_id, actividad_id, porcentaje) VALUES (?, ?, ?)', [ins.insertId, f.actividadId, f.porcentaje]);
+  for (const cid of Array.from(new Set(filas.map((f) => f.cuadroId)))) await recalcularAvanceActividadesHuerta_(true, { cuadroId: cid });
+  await registrarAuditoria_('avance_huerta', String(ins.insertId), 'avance_manual', nombreUsuario,
+    huerta + ' · ' + trabajo + ' · ' + equipo + ' · ' + operador + ' · ' + fecha + ' ' + hi + '-' + hf + ' · ' + filas.length + ' cuadro(s)');
+  return { success: true, id: ins.insertId, cuadros: filas.length };
+}
+
+// Avances a mano de una huerta (para verlos y poder borrarlos).
+async function getAvancesManuales(code, nombreUsuario, huerta) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'visualizar');
+  const [rows] = await pool.query(
+    `SELECT ah.id, ah.nombre, ah.trabajo, ah.fecha_inicio, ah.fecha_fin, ah.codigo_unidad, ah.capturado_por, m.unidad,
+            GROUP_CONCAT(CONCAT(c.nombre, ' ', ROUND(x.porcentaje), '%') ORDER BY c.nombre SEPARATOR ', ') AS cuadros
+       FROM avance_huerta ah
+       LEFT JOIN maquinaria m ON m.codigo_unidad = ah.codigo_unidad
+       LEFT JOIN huerta_actividades_manual x ON x.avance_id = ah.id
+       LEFT JOIN huerta_actividades a ON a.id = x.actividad_id
+       LEFT JOIN huerta_cuadros c ON c.id = a.cuadro_id
+      WHERE ah.manual = 1 AND LOWER(TRIM(ah.huerta)) = LOWER(TRIM(?))
+      GROUP BY ah.id ORDER BY ah.fecha_inicio DESC LIMIT 100`, [(huerta || '').toString()]);
+  return rows.map((r) => ({ id: r.id, operador: r.nombre, trabajo: r.trabajo || '', equipo: r.unidad || r.codigo_unidad || '', inicio: isoOrNull(r.fecha_inicio), fin: isoOrNull(r.fecha_fin),
+    capturadoPor: r.capturado_por || '', cuadros: r.cuadros || '' }));
+}
+
+async function eliminarAvanceManual(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'avance_huerta', 'capturar');
+  const [[av]] = await pool.query('SELECT id, huerta FROM avance_huerta WHERE id = ? AND manual = 1', [Number(id) || 0]);
+  if (!av) return { success: false, error: 'Ese avance a mano ya no existe.' };
+  const [cuadros] = await pool.query('SELECT DISTINCT a.cuadro_id FROM huerta_actividades_manual x JOIN huerta_actividades a ON a.id = x.actividad_id WHERE x.avance_id = ?', [av.id]);
+  await pool.query('DELETE FROM huerta_actividades_manual WHERE avance_id = ?', [av.id]);
+  await pool.query('DELETE FROM huerta_actividades_aportes WHERE avance_id = ?', [av.id]);
+  await pool.query('DELETE FROM avance_huerta WHERE id = ?', [av.id]);
+  for (const c of cuadros) await recalcularAvanceActividadesHuerta_(true, { cuadroId: c.cuadro_id });
+  await registrarAuditoria_('avance_huerta', String(av.id), 'borrar_av_manual', nombreUsuario, av.huerta);
+  return { success: true };
+}
+
 async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
   const soloCuadro = opciones && Number(opciones.cuadroId) ? Number(opciones.cuadroId) : null;
   const [acts] = await pool.query(
@@ -8376,10 +8449,17 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     const clave = (huerta || '').toString().trim().toLowerCase();
     if (sesionesPorHuerta[clave]) return sesionesPorHuerta[clave];
     const [sesiones] = await pool.query(
-      'SELECT id, nombre, codigo_unidad, trabajo, fecha_inicio FROM avance_huerta WHERE LOWER(TRIM(huerta)) = ? ORDER BY fecha_inicio, id',
+      'SELECT id, nombre, codigo_unidad, trabajo, fecha_inicio, fecha_fin, manual FROM avance_huerta WHERE LOWER(TRIM(huerta)) = ? ORDER BY fecha_inicio, id',
       [clave]
     );
     const ids = sesiones.map((x) => x.id);
+    // Avance a mano (nov-2026): % por actividad de cada recorrido manual.
+    const manuales = sesiones.filter((x) => x.manual).map((x) => x.id);
+    const manualPorSesion = {};
+    if (manuales.length) {
+      const [mm] = await pool.query('SELECT avance_id, actividad_id, porcentaje FROM huerta_actividades_manual WHERE avance_id IN (?)', [manuales]);
+      mm.forEach((m) => { (manualPorSesion[m.avance_id] = manualPorSesion[m.avance_id] || {})[m.actividad_id] = Number(m.porcentaje) || 0; });
+    }
     const puntosPorSesion = {};
     if (ids.length) {
       const [puntos] = await pool.query(
@@ -8391,7 +8471,7 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
         puntosPorSesion[p.avance_id].push({ lat: Number(p.lat), lng: Number(p.lng), t: new Date(p.capturado_en) });
       });
     }
-    sesionesPorHuerta[clave] = sesiones.map((x) => ({ ...x, puntos: filtrarSaltosGps_(puntosPorSesion[x.id] || []) }));
+    sesionesPorHuerta[clave] = sesiones.map((x) => ({ ...x, manualPct: x.manual ? (manualPorSesion[x.id] || {}) : null, puntos: filtrarSaltosGps_(puntosPorSesion[x.id] || []) }));
     return sesionesPorHuerta[clave];
   }
 
@@ -8408,6 +8488,22 @@ async function recalcularAvanceActividadesHuerta_(aplicar, opciones) {
     const aportes = {}; // avance_id -> {pasadas, metros, primera, ultima} (oct-2026: quién aportó)
     for (const ses of sesiones) {
       if (completadoEn) break;
+      if (ses.manualPct) {
+        // Avance capturado a mano en el Panel: cuenta para la actividad que se eligió
+        // (sin revisar equipo/operador asignados: quien lo capturó eligió los cuadros).
+        const pct = ses.manualPct[a.id];
+        if (pct === undefined) continue;
+        const t = new Date(ses.fecha_fin || ses.fecha_inicio);
+        const extra = necesarias !== null ? necesarias * pct / 100 : 0;
+        pasadas += extra;
+        const ap = aportes[ses.id] || (aportes[ses.id] = { pasadas: 0, metros: 0, primera: t, ultima: t });
+        ap.pasadas += extra;
+        if ((necesarias !== null && pasadas >= necesarias - margenCompletado_(necesarias)) || (necesarias === null && pct >= 100)) {
+          completadoEn = t;
+          avanceIdCompleto = ses.id;
+        }
+        continue;
+      }
       if (!mismoTrabajoAvance_(ses.trabajo, a.trabajo)) continue; // solo recorridos de ESTA actividad
       if (!coincideConAsignado_(a.equipo_codigo, ses.codigo_unidad) || !coincideConAsignado_(a.operador_nombre, ses.nombre)) continue;
       for (const [pa, pb] of tramosDeRecorrido_(ses.puntos)) {
@@ -12054,6 +12150,9 @@ module.exports = {
   guardarActividadHuerta,
   eliminarActividadHuerta,
   getActividadesHuerta,
+  registrarAvanceManual,
+  getAvancesManuales,
+  eliminarAvanceManual,
   getActividadesCatalogo,
   guardarActividadCatalogo,
   eliminarActividadCatalogo,

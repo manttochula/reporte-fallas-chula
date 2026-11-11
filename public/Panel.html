@@ -1450,6 +1450,30 @@
     </div>
 
     <!-- PCs con agente de Comercial (nov-2026): cada PC atiende las compras de sus usuarios. -->
+    <div class="maq-modal-overlay" id="ahm-overlay">
+      <div class="maq-modal" style="max-width:640px;">
+        <span class="maq-modal-close" id="ahm-close">&times;</span>
+        <h3 style="margin-top:0;">Registrar avance a mano</h3>
+        <div class="mnt-subtext" style="margin-bottom:8px;">Para cuando el operador no pudo usar la app: el avance cuenta en los cuadros que marques, igual que si lo hubiera registrado el GPS (queda como "a mano", sin recorrido en el mapa).</div>
+        <div class="maq-field"><label>Actividad *</label><select id="ahm-f-trabajo"><option value="">Elige la actividad</option></select></div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Tractor *</label><select id="ahm-f-equipo"><option value="">Elige el tractor</option></select></div>
+          <div class="maq-field"><label>Operador *</label><select id="ahm-f-operador"><option value="">Elige el operador</option></select></div>
+        </div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Fecha *</label><input type="date" id="ahm-f-fecha"></div>
+          <div class="maq-field"><label>De (hora)</label><input type="time" id="ahm-f-hi" value="07:00"></div>
+          <div class="maq-field"><label>A (hora)</label><input type="time" id="ahm-f-hf" value="15:00"></div>
+        </div>
+        <div class="maq-field"><label>Cuadros que trabajó *</label>
+          <span class="mnt-subtext">Palomea cada cuadro y pon cuánto avanzó en ese recorrido (100% = lo terminó).</span>
+          <div id="ahm-cuadros" style="max-height:240px;overflow:auto;margin-top:6px;"></div></div>
+        <div class="maq-modal-status" id="ahm-status"></div>
+        <div class="maq-modal-actions"><button class="maq-save-btn" id="ahm-guardar">Registrar avance</button></div>
+        <div style="margin:16px 0 6px;font-size:13px;font-weight:600;">Avances a mano de esta huerta</div>
+        <div id="ahm-lista" class="mnt-subtext">Cargando...</div>
+      </div>
+    </div>
     <div class="maq-modal-overlay" id="cf-overlay">
       <div class="maq-modal" style="max-width:560px;">
         <span class="maq-modal-close" id="cf-close">&times;</span>
@@ -4013,6 +4037,7 @@
         </div>
         <div id="ah-vista-avance">
           <div style="display:flex; align-items:center; justify-content:flex-end; margin-bottom:10px;">
+            <button type="button" class="ah-btn-marcar" id="ah-btn-avance-manual" style="margin-right:8px;" title="Cuando el operador no pudo usar la app: marca a mano los cuadros que trabajó">✍️ Registrar avance a mano</button>
             <button type="button" class="ah-btn-marcar" id="ah-btn-ver-recorrido">📍 Ver recorrido por fecha</button>
           </div>
           <!-- Oct-2026 (Carlos): se quitó la tabla de "registros de avance" (operador/equipo/trabajo/inicio/fin/puntos): no le era útil y quitaba espacio. Para consultar un día: "Ver recorrido por fecha". -->
@@ -4666,7 +4691,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, permitirOcRepetida: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
+  guardarPolizaSeguro: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -8498,6 +8523,94 @@ function ahCerrarModalRecorrido_(){
 }
 
 document.getElementById('ah-btn-ver-recorrido').addEventListener('click', ahAbrirModalRecorrido_);
+
+// --- Avance a mano (nov-2026, Carlos): el operador no pudo usar la app ---
+function ahmTrabajos_(){
+  var vistos = {}, lista = [];
+  (AH_ACTIVIDADES || []).forEach(function(a){ var k = (a.trabajo || '').trim(); if(k && !vistos[k.toUpperCase()]){ vistos[k.toUpperCase()] = true; lista.push(k); } });
+  return lista.sort(function(a, b){ return a.localeCompare(b, 'es'); });
+}
+function ahmRenderCuadros_(){
+  var trabajo = document.getElementById('ahm-f-trabajo').value;
+  var cont = document.getElementById('ahm-cuadros');
+  if(!trabajo){ cont.innerHTML = '<div class="mnt-subtext">Elige primero la actividad.</div>'; return; }
+  var acts = (AH_ACTIVIDADES || []).filter(function(a){ return (a.trabajo || '').trim().toUpperCase() === trabajo.trim().toUpperCase(); })
+    .sort(function(a, b){ return (a.cuadroNombre || '').localeCompare(b.cuadroNombre || '', 'es', { numeric: true }); });
+  if(!acts.length){ cont.innerHTML = '<div class="mnt-subtext">Ningún cuadro tiene esta actividad planeada.</div>'; return; }
+  cont.innerHTML = acts.map(function(a){
+    var hecho = a.estado === 'completado';
+    var pct = hecho ? 100 : Math.round((Number(a.porcentaje) || 0) * 10) / 10;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--line);">'
+      + '<label style="flex:1;display:flex;align-items:center;gap:6px;margin:0;"><input type="checkbox" class="ahm-chk" data-cuadro="' + a.cuadroId + '" style="width:auto;"' + (hecho ? ' disabled' : '') + '> '
+      + '<b>' + escapeHtml(a.cuadroNombre || '') + '</b> <span class="mnt-subtext" style="display:inline;">' + (hecho ? '(ya completado)' : '(lleva ' + pct + '%)') + '</span></label>'
+      + '<input type="number" class="ahm-pct" data-cuadro="' + a.cuadroId + '" min="1" max="100" step="1" value="100" style="width:70px;"' + (hecho ? ' disabled' : '') + '> %</div>';
+  }).join('');
+}
+function ahmCargarLista_(){
+  var cont = document.getElementById('ahm-lista');
+  google.script.run
+    .withSuccessHandler(function(rows){
+      rows = rows || [];
+      if(!rows.length){ cont.innerHTML = 'Todavía no hay avances registrados a mano en esta huerta.'; return; }
+      cont.innerHTML = rows.map(function(r){
+        return '<div style="padding:5px 0;border-bottom:1px solid var(--line);"><b>' + escapeHtml(r.trabajo) + '</b> · ' + escapeHtml(r.equipo) + ' · ' + escapeHtml(r.operador)
+          + ' · ' + (r.inicio ? new Date(r.inicio).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '') + (r.fin ? '–' + new Date(r.fin).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '')
+          + '<br>' + escapeHtml(r.cuadros) + ' <span style="opacity:.7;">(capturó ' + escapeHtml(r.capturadoPor || '—') + ')</span>'
+          + ' <button type="button" class="export-btn ahm-btn-borrar" data-id="' + r.id + '" style="padding:3px 8px;font-size:11px;">Borrar</button></div>';
+      }).join('');
+      cont.querySelectorAll('.ahm-btn-borrar').forEach(function(b){
+        b.addEventListener('click', function(){
+          if(!confirm('¿Borrar este avance a mano? Los cuadros regresan al avance que tenían sin él.')) return;
+          b.disabled = true;
+          google.script.run
+            .withSuccessHandler(function(x){ if(!x || !x.success){ b.disabled = false; alert((x && x.error) || 'No se pudo.'); return; } ahmCargarLista_(); ahCargarCuadrosYActividades_(AH_HUERTA_ACTUAL); })
+            .withFailureHandler(function(){ b.disabled = false; alert('No se pudo.'); })
+            .eliminarAvanceManual(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.id));
+        });
+      });
+      if(typeof ocultarControlesSoloLectura === 'function') ocultarControlesSoloLectura();
+    })
+    .withFailureHandler(function(){ cont.textContent = 'No se pudo cargar la lista.'; })
+    .getAvancesManuales(ACCESS_CODE, PANEL_USUARIO, AH_HUERTA_ACTUAL);
+}
+document.getElementById('ah-btn-avance-manual').addEventListener('click', function(){
+  if(!AH_HUERTA_ACTUAL){ alert('Elige primero la huerta.'); return; }
+  var selT = document.getElementById('ahm-f-trabajo');
+  selT.innerHTML = '<option value="">Elige la actividad</option>' + ahmTrabajos_().map(function(t){ return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>'; }).join('');
+  document.getElementById('ahm-f-equipo').innerHTML = '<option value="">Elige el tractor</option>' + (AH_RECURSOS.equipos || []).map(function(e){ return '<option value="' + escapeHtml(e.codigo) + '">' + escapeHtml(e.unidad || e.codigo) + '</option>'; }).join('');
+  document.getElementById('ahm-f-operador').innerHTML = '<option value="">Elige el operador</option>' + (AH_RECURSOS.operadores || []).map(function(o){ return '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>'; }).join('');
+  var hoy = new Date(); document.getElementById('ahm-f-fecha').value = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  var st = document.getElementById('ahm-status'); st.className = 'maq-modal-status'; st.textContent = '';
+  document.getElementById('ahm-guardar').disabled = false;
+  ahmRenderCuadros_();
+  ahmCargarLista_();
+  document.getElementById('ahm-overlay').classList.add('open');
+});
+document.getElementById('ahm-f-trabajo').addEventListener('change', ahmRenderCuadros_);
+document.getElementById('ahm-close').addEventListener('click', function(){ document.getElementById('ahm-overlay').classList.remove('open'); });
+document.getElementById('ahm-guardar').addEventListener('click', function(){
+  var st = document.getElementById('ahm-status');
+  var btn = document.getElementById('ahm-guardar');
+  var cuadros = Array.from(document.querySelectorAll('#ahm-cuadros .ahm-chk:checked')).map(function(cb){
+    var pct = document.querySelector('#ahm-cuadros .ahm-pct[data-cuadro="' + cb.dataset.cuadro + '"]');
+    return { cuadroId: Number(cb.dataset.cuadro), porcentaje: Number(pct ? pct.value : 100) };
+  });
+  var datos = { huerta: AH_HUERTA_ACTUAL, trabajo: document.getElementById('ahm-f-trabajo').value, equipo: document.getElementById('ahm-f-equipo').value,
+    operador: document.getElementById('ahm-f-operador').value, fecha: document.getElementById('ahm-f-fecha').value,
+    horaInicio: document.getElementById('ahm-f-hi').value, horaFin: document.getElementById('ahm-f-hf').value, cuadros: cuadros };
+  btn.disabled = true; st.textContent = 'Guardando...'; st.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+      st.textContent = '✓ Avance registrado en ' + r.cuadros + ' cuadro(s).'; st.className = 'maq-modal-status show ok';
+      ahCargarCuadrosYActividades_(AH_HUERTA_ACTUAL);
+      setTimeout(function(){ ahmRenderCuadros_(); }, 1500);
+      ahmCargarLista_();
+    })
+    .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+    .registrarAvanceManual(ACCESS_CODE, PANEL_USUARIO, datos);
+});
 document.getElementById('ah-recorrido-close').addEventListener('click', ahCerrarModalRecorrido_);
 document.getElementById('ah-recorrido-overlay').addEventListener('click', function(ev){
   if(ev.target === document.getElementById('ah-recorrido-overlay')) ahCerrarModalRecorrido_();

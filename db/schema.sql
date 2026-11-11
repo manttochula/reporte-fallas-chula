@@ -3567,3 +3567,23 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'refacciones' AND column_name = 'lleva_lote');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE refacciones ADD COLUMN lleva_lote TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Avance a mano (nov-2026, Carlos): cuando el operador no pudo usar la app,
+-- en el Panel se registra un recorrido "manual" (sin GPS): equipo, operador,
+-- actividad, fecha/horas y los cuadros que trabajó con su % de avance.
+-- avance_huerta.manual = 1 y cada cuadro en huerta_actividades_manual; el
+-- recálculo del avance los suma como si fueran pasadas del GPS.
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'avance_huerta' AND column_name = 'manual');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE avance_huerta ADD COLUMN manual TINYINT(1) NOT NULL DEFAULT 0, ADD COLUMN capturado_por VARCHAR(255) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+CREATE TABLE IF NOT EXISTS huerta_actividades_manual (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  avance_id    INT NOT NULL,
+  actividad_id INT NOT NULL,
+  porcentaje   DECIMAL(5,2) NOT NULL DEFAULT 100,
+  INDEX idx_ham_avance (avance_id),
+  INDEX idx_ham_actividad (actividad_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

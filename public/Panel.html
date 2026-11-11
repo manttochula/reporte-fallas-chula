@@ -204,6 +204,10 @@
   }
   .usr-row:hover{ border-color: var(--amber-dim); }
   .usr-cat{ margin-bottom:14px; }
+  .prov-codigos-empresa{ display:flex; flex-direction:column; gap:6px; }
+  .prov-codigo-empresa-fila{ display:flex; align-items:center; gap:10px; }
+  .prov-codigo-empresa-fila span{ flex:1; font-size:13px; }
+  .maq-field .prov-codigo-empresa-fila input{ width:130px !important; flex:none; }
   .usr-cat > summary{ cursor:pointer; padding:8px 2px; margin-bottom:8px; border-bottom:1px solid var(--line); list-style:revert; }
   .usr-cat-nombre{ font-family:'Oswald',sans-serif; font-size:17px; text-transform:uppercase; letter-spacing:0.03em; }
   .usr-cat-n{ background:var(--amber); color:#1c1c1c; border-radius:10px; padding:1px 8px; font-size:12px; font-weight:700; margin-left:6px; }
@@ -3610,6 +3614,9 @@
         <div class="maq-field"><label>Nombre *</label><input type="text" id="prov-f-nombre"></div>
         <div class="maq-field"><label>Código en Comercial (CONTPAQi)</label><input type="text" id="prov-f-codigo-comercial" placeholder="Ej. 0283" maxlength="20">
           <span class="mnt-subtext">El código de este proveedor en CONTPAQi Comercial (con sus ceros). Sin él, sus refacciones no se pueden exportar como OC.</span></div>
+        <div class="maq-field"><label>Código en Comercial por empresa <span style="font-weight:400;text-transform:none;">(solo si es distinto en alguna empresa)</span></label>
+          <div id="prov-codigos-empresa" class="prov-codigos-empresa"></div>
+          <span class="mnt-subtext">Ej. SAMEI: 0283 en CHULA BRAND MEXICO, 0049 en CHULA BRAND DEL GOLFO, PV0156 en DESARROLLO GENETICO DE PAPAYAS. La empresa que quede vacía usa el código de arriba.</span></div>
         <div class="maq-field"><label>Forma de pago en Comercial</label><input type="text" id="prov-f-forma-pago" placeholder="BAJIO SPEI" maxlength="60">
           <span class="mnt-subtext">La "Forma de Pago" de sus GASTOS EN PESOS en CONTPAQi. Vacío = BAJIO SPEI.</span></div>
         <div class="maq-field-row">
@@ -22375,6 +22382,26 @@ document.getElementById('prov-cont-agregar').addEventListener('click', function(
   renderListaContactosProv();
 });
 
+// Código en Comercial por empresa (nov-2026).
+function pintarCodigosEmpresaProv_(lista){
+  const cont = document.getElementById('prov-codigos-empresa');
+  if(!cont) return;
+  // Para un proveedor nuevo: las empresas de cualquier proveedor ya cargado, vacías.
+  if(!lista || !lista.length){
+    const ref = (ALL_PROVEEDORES || []).find(function(p){ return (p.CodigosEmpresa || []).length; });
+    lista = ref ? ref.CodigosEmpresa.map(function(c){ return { EmpresaId: c.EmpresaId, Empresa: c.Empresa, Codigo: '' }; }) : [];
+  }
+  cont.innerHTML = lista.length ? lista.map(function(c){
+    return '<div class="prov-codigo-empresa-fila"><span>' + escapeHtml(c.Empresa) + '</span>'
+      + '<input type="text" maxlength="20" class="prov-codigo-empresa" data-empresa="' + c.EmpresaId + '" value="' + escapeHtml(c.Codigo || '') + '" placeholder="(el de arriba)"></div>';
+  }).join('') : '<span class="mnt-subtext">No hay empresas dadas de alta.</span>';
+}
+function leerCodigosEmpresaProv_(){
+  return Array.from(document.querySelectorAll('#prov-codigos-empresa .prov-codigo-empresa')).map(function(i){
+    return { empresaId: Number(i.dataset.empresa), codigo: i.value.trim() };
+  });
+}
+
 function limpiarModalProveedor(){
   document.getElementById('prov-f-id').value = '';
   document.getElementById('prov-f-nombre').value = '';
@@ -22389,6 +22416,7 @@ function limpiarModalProveedor(){
   document.getElementById('prov-f-notas').value = '';
   provFormContactos = [];
   renderListaContactosProv();
+  pintarCodigosEmpresaProv_(null);
   const statusEl = document.getElementById('prov-modal-status');
   statusEl.textContent = '';
   statusEl.className = 'maq-modal-status';
@@ -22401,6 +22429,7 @@ function abrirModalProveedor(prov){
     document.getElementById('prov-f-id').value = prov.Id;
     document.getElementById('prov-f-nombre').value = prov.Nombre || '';
     document.getElementById('prov-f-codigo-comercial').value = prov.CodigoComercial || '';
+    pintarCodigosEmpresaProv_(prov.CodigosEmpresa);
     document.getElementById('prov-f-forma-pago').value = prov.FormaPagoComercial || '';
     document.getElementById('prov-f-rfc').value = prov.Rfc || '';
     document.getElementById('prov-f-domicilio').value = prov.Domicilio || '';
@@ -22451,6 +22480,7 @@ document.getElementById('prov-btn-save').addEventListener('click', function(){
     marcas: document.getElementById('prov-f-marcas').value.trim(),
     notas: document.getElementById('prov-f-notas').value.trim(),
     codigoComercial: document.getElementById('prov-f-codigo-comercial').value.trim(),
+    codigosEmpresa: leerCodigosEmpresaProv_(),
     formaPagoComercial: document.getElementById('prov-f-forma-pago').value.trim(),
     rfc: document.getElementById('prov-f-rfc').value.trim(),
     domicilio: document.getElementById('prov-f-domicilio').value.trim(),

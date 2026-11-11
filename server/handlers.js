@@ -9421,7 +9421,8 @@ async function partidasOc_(ids) {
   const filtroIds = Array.isArray(ids) && ids.length ? ' AND ri.id IN (?)' : '';
   const [rows] = await pool.query(
     `SELECT ri.id AS respuestaItemId, sci.cantidad AS cantidad, ri.precio_cotizado AS precioCotizado, r.descuento_pct AS descuentoPct, ri.oc_permitir_repetida AS permitirRepetida,
-            s.folio AS solicitudFolio, s.orden AS orden, s.proveedor_id AS proveedorId, p.nombre AS proveedor, p.codigo_comercial AS codigoComercial,
+            s.folio AS solicitudFolio, s.orden AS orden, s.proveedor_id AS proveedorId, p.nombre AS proveedor,
+            COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial) AS codigoComercial, pce.codigo AS codigoPorEmpresa,
             ref.id AS refaccionId, ref.codigo AS refaccionCodigo, ref.descripcion AS descripcion, ref.no_parte AS noParte, ref.folio_comercial AS folioComercial,
             rep.unidad AS ordenUnidad, rep.codigo_unidad AS codigoUnidad, mq.empresa_id AS empresaId, emp.nombre AS empresa,
             cc.codigo_comercial AS codigoGasto, cc.nombre AS cuentaNombre,
@@ -9435,6 +9436,7 @@ async function partidasOc_(ids) {
      LEFT JOIN reportes rep ON rep.orden = s.orden
      LEFT JOIN maquinaria mq ON mq.codigo_unidad = rep.codigo_unidad
      LEFT JOIN empresas emp ON emp.id = mq.empresa_id
+     LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = mq.empresa_id
      LEFT JOIN tipos_unidad tu ON LOWER(TRIM(tu.nombre)) = LOWER(TRIM(mq.tipo_unidad))
      LEFT JOIN cuentas_contables cc ON cc.id = tu.cuenta_contable_id
      LEFT JOIN oc_exportaciones x ON x.respuesta_item_id = ri.id
@@ -9462,7 +9464,7 @@ async function partidasOc_(ids) {
     if (!(x.folioComercial || '').trim()) { destino = 'gasto'; motivo = 'Sin folio comercial ni código de gasto en la cuenta contable del equipo: gasto directo.'; }
     else if (!(Number(x.cantidad) > 0)) { destino = 'revisar'; motivo = 'Sin cantidad.'; }
     else if (precio === null) { destino = 'revisar'; motivo = 'Sin precio autorizado.'; }
-    else if (!(x.codigoComercial || '').trim()) { destino = 'revisar'; motivo = 'El proveedor no tiene "Código en Comercial".'; }
+    else if (!(x.codigoComercial || '').trim()) { destino = 'revisar'; motivo = 'El proveedor no tiene "Código en Comercial"' + (x.empresa ? ' para ' + x.empresa : '') + '.'; }
     else if (!x.empresaId) { destino = 'revisar'; motivo = 'La unidad ' + (x.ordenUnidad || x.codigoUnidad || '') + ' no tiene empresa: asígnala en el Catálogo de maquinaria.'; }
     return {
       respuestaItemId: x.respuestaItemId,
@@ -10008,6 +10010,16 @@ async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, a
           SET x.cantidad = sci.cantidad,
               x.precio = IF(COALESCE(r.descuento_pct, 0) > 0, ROUND(ri.precio_cotizado * (1 - r.descuento_pct / 100), 2), ri.precio_cotizado)
         WHERE x.empresa_id = ? AND x.serie = ? AND x.folio = ? AND x.agente_estado = 'pendiente' AND ri.precio_cotizado IS NOT NULL`, args);
+    // ...y con el código ACTUAL del proveedor en esa empresa (nov-2026: código por empresa).
+    await pool.query(
+      `UPDATE oc_exportaciones x
+         JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
+         JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+         JOIN solicitudes_cotizacion s ON s.id = r.solicitud_id
+         JOIN proveedores p ON p.id = s.proveedor_id
+         LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = x.empresa_id
+          SET x.codigo_proveedor = COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial, x.codigo_proveedor)
+        WHERE x.empresa_id = ? AND x.serie = ? AND x.folio = ? AND x.agente_estado = 'pendiente'`, args);
   }
   await registrarAuditoria_('oc_exportaciones', args[1] + '-' + args[2], 'agente_' + accion, nombreUsuario, n + ' partida(s)');
   return { success: true, partidas: n };
@@ -10864,6 +10876,13 @@ async function getProveedores(code, nombreUsuario) {
     FROM proveedor_contactos
     ORDER BY nombre
   `);
+  // Código en Comercial por empresa (nov-2026): una fila por empresa, vacía si no tiene.
+  const [empresasRows] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
+  const [codRows] = await pool.query('SELECT proveedor_id, empresa_id, codigo FROM proveedores_codigos_empresa');
+  const codigosDe = (provId) => empresasRows.map((e) => {
+    const c = codRows.find((x) => x.proveedor_id === provId && x.empresa_id === e.id);
+    return { EmpresaId: e.id, Empresa: e.nombre, Codigo: c ? c.codigo : '' };
+  });
   const contactosPorProveedor = {};
   contactosRows.forEach((c) => {
     if (!contactosPorProveedor[c.ProveedorId]) contactosPorProveedor[c.ProveedorId] = [];
@@ -10888,6 +10907,7 @@ async function getProveedores(code, nombreUsuario) {
     Rfc: r.Rfc || '',
     Domicilio: r.Domicilio || '',
     Contactos: contactosPorProveedor[r.Id] || [],
+    CodigosEmpresa: codigosDe(r.Id),
   }));
 }
 
@@ -10929,6 +10949,19 @@ async function guardarProveedor(code, nombreUsuario, id, data) {
         [nombre, correo, telefono, contacto, marcas, notas, codigoComercial, rfc, domicilio]
       );
       proveedorId = result.insertId;
+    }
+    // Código en Comercial por empresa (nov-2026): [{ empresaId, codigo }]. Vacío = usa el general.
+    if (Array.isArray(data.codigosEmpresa)) {
+      const limpios = [];
+      for (const c of data.codigosEmpresa) {
+        const empresaId = Number(c && c.empresaId) || 0;
+        const codigo = String((c && c.codigo) || '').trim().toUpperCase();
+        if (!empresaId || !codigo) continue;
+        if (codigo.length > 20) return { success: false, error: 'El código en Comercial es muy largo (máximo 20 caracteres).' };
+        limpios.push([proveedorId, empresaId, codigo]);
+      }
+      await pool.query('DELETE FROM proveedores_codigos_empresa WHERE proveedor_id = ?', [proveedorId]);
+      if (limpios.length) await pool.query('INSERT INTO proveedores_codigos_empresa (proveedor_id, empresa_id, codigo) VALUES ?', [limpios]);
     }
     // Forma de pago del gasto en Comercial (nov-2026; vacío = BAJIO SPEI). Si no viene (Panel viejo), se conserva.
     if (Object.prototype.hasOwnProperty.call(data, 'formaPagoComercial')) {
@@ -10972,6 +11005,7 @@ async function eliminarProveedor(code, nombreUsuario, id) {
     await pool.query('DELETE FROM solicitud_cotizacion_items WHERE solicitud_id = ?', [s.id]);
   }
   await pool.query('DELETE FROM solicitudes_cotizacion WHERE proveedor_id = ?', [id]);
+  await pool.query('DELETE FROM proveedores_codigos_empresa WHERE proveedor_id = ?', [id]);
   await pool.query('DELETE FROM proveedores WHERE id = ?', [id]);
   return { success: true };
 }

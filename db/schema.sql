@@ -3745,3 +3745,17 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'confirmada_en');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN confirmada_en DATETIME NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- Código del proveedor POR EMPRESA en CONTPAQi Comercial (nov-2026, Carlos):
+-- el mismo proveedor tiene un código distinto en cada empresa (SAMEI: 0283 en
+-- CHULA BRAND MEXICO, 0049 en CHULA BRAND DEL GOLFO, PV0156 en DESARROLLO
+-- GENETICO DE PAPAYAS). Si una empresa no tiene código aquí, se usa
+-- proveedores.codigo_comercial. Ver partidasOc_ en handlers.js.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS proveedores_codigos_empresa (
+  proveedor_id INT NOT NULL,
+  empresa_id   INT NOT NULL,
+  codigo       VARCHAR(20) NOT NULL,
+  PRIMARY KEY (proveedor_id, empresa_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

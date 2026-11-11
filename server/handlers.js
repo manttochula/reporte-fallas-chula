@@ -260,6 +260,14 @@ const REPORTE_SELECT = `
     reportes.semana_en_proceso                          AS SemanaEnProceso,
     reportes.reporte_claro                              AS ReporteClaro,
     reportes.reporte_claro_por                          AS ReporteClaroPor,
+    reportes.terminada_en                               AS TerminadaEn,
+    reportes.terminada_por                              AS TerminadaPor,
+    reportes.lectura_terminada                          AS LecturaTerminada,
+    reportes.regresada_motivo                           AS RegresadaMotivo,
+    reportes.regresada_por                              AS RegresadaPor,
+    reportes.regresada_en                               AS RegresadaEn,
+    reportes.confirmada_por                             AS ConfirmadaPor,
+    reportes.confirmada_en                              AS ConfirmadaEn,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden) AS RefaccionesNecesariasCount,
     (SELECT GROUP_CONCAT(CONCAT(rf.id, '|', rf.url) ORDER BY rf.id SEPARATOR ',') FROM reportes_fotos rf WHERE rf.orden = reportes.orden) AS FotosExtraTexto,
     (SELECT COUNT(*) FROM reportes_refacciones_necesarias rrn WHERE rrn.orden = reportes.orden AND rrn.entregado = 1) AS RefaccionesEntregadasCount,
@@ -770,6 +778,7 @@ async function getReportesTaller(code, nombreUsuario) {
   const where = condiciones.length ? ' WHERE ' + condiciones.join(' AND ') : '';
   const [rows] = await pool.query(REPORTE_SELECT + where + ' ORDER BY reportes.id DESC', params);
   const filas = normalizaFilas(rows);
+  await agregarTiemposAFilas_(filas);
   // Costo de refacciones (nov-2026): solo a quien tiene el permiso; nunca sale del servidor si no.
   if (veCosto) {
     const costos = await costoRefaccionesPorOrden_();
@@ -796,6 +805,159 @@ async function costoRefaccionesPorOrden_() {
   }
   Object.values(res).forEach((c) => { c.detalle = c.detalle.join('\n'); });
   return res;
+}
+
+// ============================================================
+// Tiempo de reparación (nov-2026, Carlos): "obtener el dato de cuánto
+// tiempo en promedio hacen por cada orden... un botón de inicio de
+// reparación y una vez que se acabe... trabajo finalizado u otro que diga
+// queda pendiente... antes de que se den por completadas... un aviso...
+// para que lo confirme el jefe de taller desde el Panel".
+// - Cada mecánico su reloj (ordenes_tiempos); "Queda pendiente" pausa y el
+//   tiempo de la orden es la suma de los ratos trabajados.
+// - "Trabajo finalizado" deja la orden POR CONFIRMAR (terminada_en); la
+//   Fecha de salida la pone la confirmación del jefe de taller en el Panel.
+// - momentoMs: la hora del celular al tocar el botón (se pudo tocar sin
+//   señal y enviarse después). No se aceptan horas futuras ni de hace más
+//   de 30 días.
+// ============================================================
+const TIEMPO_MAX_ATRASO_MS = 30 * 86400000;
+function momentoReparacion_(momentoMs) {
+  const ahora = Date.now();
+  const m = Number(momentoMs);
+  if (!Number.isFinite(m) || m <= 0) return new Date(ahora);
+  if (m > ahora) return new Date(ahora);
+  if (ahora - m > TIEMPO_MAX_ATRASO_MS) return null;
+  return new Date(m);
+}
+
+// Agrega a cada fila de Órdenes sus ratos de trabajo y el tiempo trabajado.
+async function agregarTiemposAFilas_(filas) {
+  if (!filas.length) return filas;
+  const [ts] = await pool.query(
+    'SELECT id, orden, mecanico, inicio, fin, cierre, nota FROM ordenes_tiempos WHERE orden IN (?) ORDER BY inicio, id',
+    [filas.map((f) => f.Orden)]);
+  const porOrden = {};
+  ts.forEach((t) => { (porOrden[t.orden] = porOrden[t.orden] || []).push(t); });
+  const ahora = Date.now();
+  filas.forEach((f) => {
+    const lista = porOrden[f.Orden] || [];
+    f.Tiempos = lista.map((t) => ({ id: t.id, mecanico: t.mecanico, inicio: isoOrNull(t.inicio), fin: isoOrNull(t.fin), cierre: t.cierre || null, nota: t.nota || '' }));
+    f.SegundosTrabajados = Math.round(lista.reduce((s, t) => s + Math.max(0, ((t.fin ? new Date(t.fin).getTime() : ahora) - new Date(t.inicio).getTime()) / 1000), 0));
+  });
+  return filas;
+}
+
+async function ordenParaReparacion_(code, nombreUsuario, orden) {
+  const [rows] = await pool.query(
+    'SELECT orden, huerta, unidad, descripcion, fecha_salida, terminada_en, es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
+  if (!rows.length) throw new Error('No se encontró la orden ' + orden);
+  await requiereAccesoOrdenes_(code, nombreUsuario, 'capturar', permisoDeSeccionOrden_(seccionDeFila_(rows[0])));
+  const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  if (!huertaPermitida_(huertasRestringidas, rows[0].huerta)) throw new Error('Tu usuario no tiene acceso a esta orden.');
+  return rows[0];
+}
+
+async function iniciarReparacion(code, nombreUsuario, orden, momentoMs) {
+  const mecanico = (nombreUsuario || '').toString().trim();
+  if (!mecanico) return { success: false, error: 'Falta quién inicia la reparación.' };
+  const o = await ordenParaReparacion_(code, mecanico, orden);
+  if (o.fecha_salida) return { success: false, error: 'Esta orden ya está cerrada.' };
+  if (o.terminada_en) return { success: false, error: 'Esta orden ya se marcó como terminada; está esperando que el jefe de taller la confirme.' };
+  const momento = momentoReparacion_(momentoMs);
+  if (!momento) return { success: false, error: 'La hora de inicio es de hace más de 30 días.' };
+  const [abierta] = await pool.query('SELECT id FROM ordenes_tiempos WHERE orden = ? AND LOWER(TRIM(mecanico)) = LOWER(?) AND fin IS NULL', [orden, mecanico]);
+  if (abierta.length) return { success: true, yaIniciada: true };
+  // Un mecánico trabaja una orden a la vez: si tenía otra abierta, queda en pausa.
+  const [otras] = await pool.query('SELECT id, orden, inicio FROM ordenes_tiempos WHERE LOWER(TRIM(mecanico)) = LOWER(?) AND fin IS NULL', [mecanico]);
+  for (const t of otras) {
+    const fin = new Date(Math.max(new Date(t.inicio).getTime(), momento.getTime()));
+    await pool.query("UPDATE ordenes_tiempos SET fin = ?, cierre = 'pendiente', nota = ? WHERE id = ?", [fin, 'Se pausó sola al iniciar ' + orden, t.id]);
+  }
+  await pool.query('INSERT INTO ordenes_tiempos (orden, mecanico, inicio) VALUES (?, ?, ?)', [orden, mecanico, momento]);
+  await registrarAuditoria_('reportes', orden, 'inicia_reparacion', mecanico, o.unidad || '');
+  return { success: true, pausadas: otras.map((t) => t.orden) };
+}
+
+async function pausarReparacion(code, nombreUsuario, orden, momentoMs, nota) {
+  const mecanico = (nombreUsuario || '').toString().trim();
+  if (!mecanico) return { success: false, error: 'Falta quién pausa la reparación.' };
+  await ordenParaReparacion_(code, mecanico, orden);
+  const momento = momentoReparacion_(momentoMs);
+  if (!momento) return { success: false, error: 'La hora es de hace más de 30 días.' };
+  const [abiertas] = await pool.query('SELECT id, inicio FROM ordenes_tiempos WHERE orden = ? AND LOWER(TRIM(mecanico)) = LOWER(?) AND fin IS NULL', [orden, mecanico]);
+  if (!abiertas.length) return { success: true, sinAbierta: true };
+  const texto = (nota || '').toString().trim().slice(0, 500) || null;
+  for (const t of abiertas) {
+    const fin = new Date(Math.max(new Date(t.inicio).getTime(), momento.getTime()));
+    await pool.query("UPDATE ordenes_tiempos SET fin = ?, cierre = 'pendiente', nota = ? WHERE id = ?", [fin, texto, t.id]);
+  }
+  await registrarAuditoria_('reportes', orden, 'pausa_reparacion', mecanico, texto || '');
+  return { success: true };
+}
+
+// campos: { TrabajoRealizado (obligatorio), LecturaServicio, evidenciaFoto }
+async function finalizarReparacion(code, nombreUsuario, orden, momentoMs, campos) {
+  const mecanico = (nombreUsuario || '').toString().trim();
+  if (!mecanico) return { success: false, error: 'Falta quién finaliza la reparación.' };
+  const o = await ordenParaReparacion_(code, mecanico, orden);
+  if (o.fecha_salida) return { success: false, error: 'Esta orden ya está cerrada.' };
+  if (o.terminada_en) return { success: true, yaTerminada: true };
+  campos = campos || {};
+  const trabajo = (campos.TrabajoRealizado || '').toString().trim();
+  if (!trabajo) return { success: false, error: 'Escribe qué se hizo antes de dar "Trabajo finalizado".' };
+  const momento = momentoReparacion_(momentoMs);
+  if (!momento) return { success: false, error: 'La hora es de hace más de 30 días.' };
+  const [ts] = await pool.query('SELECT id, inicio, fin FROM ordenes_tiempos WHERE orden = ?', [orden]);
+  if (!ts.length) return { success: false, error: 'Primero da "Iniciar reparación".' };
+  for (const t of ts.filter((x) => !x.fin)) {
+    const fin = new Date(Math.max(new Date(t.inicio).getTime(), momento.getTime()));
+    await pool.query("UPDATE ordenes_tiempos SET fin = ?, cierre = 'finalizado' WHERE id = ?", [fin, t.id]);
+  }
+  // Trabajo realizado y evidencia como siempre (sin Fecha de salida: esa la pone la confirmación).
+  const guardado = await actualizarOrden(code, mecanico, orden, Object.assign({ TrabajoRealizado: trabajo }, campos.evidenciaFoto ? { evidenciaFoto: campos.evidenciaFoto } : {}));
+  if (!guardado || !guardado.success) return guardado;
+  const lectura = campos.LecturaServicio === '' || campos.LecturaServicio === undefined || campos.LecturaServicio === null ? null : Number(campos.LecturaServicio);
+  await pool.query(
+    'UPDATE reportes SET terminada_en = ?, terminada_por = ?, lectura_terminada = ?, regresada_motivo = NULL, regresada_por = NULL, regresada_en = NULL WHERE orden = ?',
+    [momento, mecanico, Number.isFinite(lectura) ? lectura : null, orden]);
+  await registrarAuditoria_('reportes', orden, 'termina_reparacion', mecanico, trabajo.slice(0, 200));
+  return { success: true, evidenciaUrl: guardado.evidenciaUrl || '' };
+}
+
+// Panel (jefe de taller): confirma la orden terminada -> Fecha de salida =
+// el día en que se finalizó, Atendió = los mecánicos que trabajaron.
+async function confirmarOrdenTerminada(code, nombreUsuario, orden) {
+  const [rows] = await pool.query('SELECT terminada_en, terminada_por, lectura_terminada, fecha_salida, es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
+  if (!rows.length) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(rows[0])), 'capturar');
+  const r = rows[0];
+  if (r.fecha_salida) return { success: false, error: 'Esta orden ya estaba cerrada.' };
+  if (!r.terminada_en) return { success: false, error: 'El mecánico todavía no ha dado "Trabajo finalizado".' };
+  const [mecs] = await pool.query('SELECT mecanico FROM ordenes_tiempos WHERE orden = ? GROUP BY mecanico ORDER BY MIN(inicio)', [orden]);
+  const atendio = mecs.length ? mecs.map((m) => m.mecanico).join(', ') : (r.terminada_por || '');
+  const campos = { FechaSalida: fechaMx_(new Date(r.terminada_en)), AtendioPor: atendio.slice(0, 255) };
+  if (r.lectura_terminada !== null && r.lectura_terminada !== undefined) campos.LecturaServicio = Number(r.lectura_terminada);
+  const res = await actualizarOrden(code, nombreUsuario, orden, campos);
+  if (!res || !res.success) return res;
+  await pool.query('UPDATE reportes SET confirmada_por = ?, confirmada_en = NOW() WHERE orden = ?', [(nombreUsuario || '').toString().slice(0, 255), orden]);
+  await registrarAuditoria_('reportes', orden, 'confirma_terminada', nombreUsuario, 'Salida ' + campos.FechaSalida + ' · ' + atendio);
+  return { success: true, fechaSalida: campos.FechaSalida, atendioPor: campos.AtendioPor };
+}
+
+// Panel: no está de acuerdo -> regresa a En proceso con el motivo (el mecánico lo ve en Taller).
+async function regresarOrdenTerminada(code, nombreUsuario, orden, motivo) {
+  const [rows] = await pool.query('SELECT terminada_en, fecha_salida, es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
+  if (!rows.length) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(rows[0])), 'capturar');
+  const texto = (motivo || '').toString().trim().slice(0, 500);
+  if (!texto) return { success: false, error: 'Escribe por qué la regresas.' };
+  if (rows[0].fecha_salida) return { success: false, error: 'Esta orden ya está cerrada.' };
+  if (!rows[0].terminada_en) return { success: false, error: 'Esta orden no está esperando confirmación.' };
+  await pool.query('UPDATE reportes SET terminada_en = NULL, terminada_por = NULL, regresada_motivo = ?, regresada_por = ?, regresada_en = NOW() WHERE orden = ?',
+    [texto, (nombreUsuario || '').toString().slice(0, 255), orden]);
+  await registrarAuditoria_('reportes', orden, 'regresa_terminada', nombreUsuario, texto);
+  return { success: true };
 }
 
 async function actualizarOrden(code, nombreUsuario, orden, campos) {
@@ -1329,6 +1491,139 @@ function calcularIndicadorPreparacion_(semanas, fallas, dias, cargas, entregas, 
     };
   });
   return resultado;
+}
+
+// Indicador de tiempo de reparación (nov-2026, Carlos: "cuánto tiempo en
+// promedio hacen por cada orden"). Órdenes cerradas (Fecha de salida) en el
+// rango de semanas que tienen ratos de trabajo de Taller (Iniciar /
+// Pendiente / Finalizado). Por orden: horas trabajadas (suma de todos los
+// mecánicos), duración de principio a fin y lo de cada mecánico. Los
+// promedios por mes / tipo / mecánico / unidad los arma el Panel.
+async function getIndicadorTiemposReparacion(code, nombreUsuario, desdeCodigo, hastaCodigo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'visualizar');
+  const [todas] = await pool.query('SELECT id, codigo, fecha_inicio, fecha_fin FROM semanas ORDER BY fecha_inicio');
+  const lista = todas.map(semanaDeFila_);
+  if (!lista.length) return { success: false, error: 'El catálogo de semanas está vacío.' };
+  let i = lista.findIndex((x) => x.codigo === desdeCodigo);
+  let j = lista.findIndex((x) => x.codigo === hastaCodigo);
+  if (i === -1 || j === -1) {
+    const hoy = fechaMx_(new Date());
+    let actual = lista.findIndex((x) => x.inicio <= hoy && x.fin >= hoy);
+    if (actual === -1) actual = lista.length - 1;
+    if (j === -1) j = actual;
+    if (i === -1) i = Math.max(0, j - 7);
+  }
+  if (i > j) { const t = i; i = j; j = t; }
+  const desde = lista[i].inicio, hasta = lista[j].fin;
+  const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  const [ords] = await pool.query(
+    `SELECT r.orden, r.unidad, r.codigo_unidad, r.huerta, r.descripcion, r.fecha_salida, r.es_soldadura, r.es_automotriz, r.es_llantas, r.es_terceros
+       FROM reportes r
+      WHERE r.fecha_salida BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM ordenes_tiempos t WHERE t.orden = r.orden)` +
+      (huertasRestringidas ? ' AND UPPER(TRIM(r.huerta)) IN (?)' : '') + ' ORDER BY r.fecha_salida, r.orden',
+    huertasRestringidas ? [desde, hasta, huertasRestringidas] : [desde, hasta]);
+  const [ts] = ords.length
+    ? await pool.query('SELECT orden, mecanico, inicio, fin FROM ordenes_tiempos WHERE orden IN (?) AND fin IS NOT NULL ORDER BY inicio', [ords.map((o) => o.orden)])
+    : [[]];
+  const ordenes = ords.map((o) => {
+    const suyos = ts.filter((t) => t.orden === o.orden);
+    const mecs = {};
+    let seg = 0, primero = null, ultimo = null;
+    suyos.forEach((t) => {
+      const a = new Date(t.inicio).getTime(), b = new Date(t.fin).getTime();
+      const d = Math.max(0, (b - a) / 1000);
+      seg += d;
+      mecs[t.mecanico] = (mecs[t.mecanico] || 0) + d;
+      if (primero === null || a < primero) primero = a;
+      if (ultimo === null || b > ultimo) ultimo = b;
+    });
+    return {
+      orden: o.orden, unidad: o.unidad || o.codigo_unidad || '', codigoUnidad: o.codigo_unidad || '', huerta: o.huerta || '', descripcion: o.descripcion || '',
+      fechaSalida: fechaSoloOrNull(o.fecha_salida), seccion: seccionDeFila_(o), mes: (fechaSoloOrNull(o.fecha_salida) || '').slice(0, 7),
+      horas: Math.round(seg / 36) / 100, duracionHoras: primero !== null ? Math.round((ultimo - primero) / 36000) / 100 : 0, ratos: suyos.length,
+      mecanicos: Object.keys(mecs).map((m) => ({ nombre: m, horas: Math.round(mecs[m] / 36) / 100 })),
+    };
+  });
+  // Reparaciones con el reloj corriendo ahora (para corregir si alguien no dio "Queda pendiente").
+  const [abiertas] = await pool.query(
+    `SELECT t.id, t.orden, t.mecanico, t.inicio, r.unidad, r.codigo_unidad, r.huerta, r.es_soldadura, r.es_automotriz, r.es_llantas, r.es_terceros
+       FROM ordenes_tiempos t JOIN reportes r ON r.orden = t.orden
+      WHERE t.fin IS NULL` + (huertasRestringidas ? ' AND UPPER(TRIM(r.huerta)) IN (?)' : '') + ' ORDER BY t.inicio',
+    huertasRestringidas ? [huertasRestringidas] : []);
+  const ahora = Date.now();
+  const enCurso = abiertas.map((t) => ({
+    orden: t.orden, unidad: t.unidad || t.codigo_unidad || '', huerta: t.huerta || '', mecanico: t.mecanico, seccion: seccionDeFila_(t),
+    inicio: isoOrNull(t.inicio), horas: Math.round((ahora - new Date(t.inicio).getTime()) / 36000) / 100,
+  }));
+  return { success: true, desde, hasta, ordenes, enCurso };
+}
+
+// ---- Corregir tiempos desde el Panel (nov-2026, Carlos) ----
+// Solo en Indicadores (el mecánico no ve tiempos). Permiso: Indicadores capturar.
+async function getTiemposOrden(code, nombreUsuario, orden) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'visualizar');
+  const [[r]] = await pool.query('SELECT orden, unidad, codigo_unidad, descripcion, fecha_salida, terminada_en FROM reportes WHERE orden = ?', [orden]);
+  if (!r) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  const [ts] = await pool.query('SELECT id, mecanico, inicio, fin, cierre, nota FROM ordenes_tiempos WHERE orden = ? ORDER BY inicio, id', [orden]);
+  return {
+    success: true, orden: r.orden, unidad: r.unidad || r.codigo_unidad || '', descripcion: r.descripcion || '', fechaSalida: fechaSoloOrNull(r.fecha_salida), terminadaEn: isoOrNull(r.terminada_en),
+    tiempos: ts.map((t) => ({ id: t.id, mecanico: t.mecanico, inicio: isoOrNull(t.inicio), fin: isoOrNull(t.fin), cierre: t.cierre || null, nota: t.nota || '' })),
+  };
+}
+
+// tiempos: [{ id? , mecanico, inicio (ISO), fin (ISO o vacío = sigue trabajando), nota }]
+// Reemplaza los ratos de la orden con esta lista (los que no vengan se borran).
+async function corregirTiemposOrden(code, nombreUsuario, orden, tiempos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'indicadores', 'capturar');
+  const [[r]] = await pool.query('SELECT orden, fecha_salida, terminada_en FROM reportes WHERE orden = ?', [orden]);
+  if (!r) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
+  const lista = Array.isArray(tiempos) ? tiempos : [];
+  const ahora = Date.now() + 60000;
+  const cerrada = !!(r.fecha_salida || r.terminada_en);
+  const limpios = [];
+  for (let k = 0; k < lista.length; k++) {
+    const t = lista[k] || {};
+    const n = k + 1;
+    const mecanico = String(t.mecanico || '').trim().slice(0, 255);
+    const inicio = new Date(t.inicio);
+    const fin = t.fin ? new Date(t.fin) : null;
+    if (!mecanico) return { success: false, error: 'Renglón ' + n + ': falta el mecánico.' };
+    if (isNaN(inicio.getTime())) return { success: false, error: 'Renglón ' + n + ': revisa la hora de inicio.' };
+    if (fin && isNaN(fin.getTime())) return { success: false, error: 'Renglón ' + n + ': revisa la hora de fin.' };
+    if (inicio.getTime() > ahora || (fin && fin.getTime() > ahora)) return { success: false, error: 'Renglón ' + n + ': no puede ser una hora futura.' };
+    if (fin && fin <= inicio) return { success: false, error: 'Renglón ' + n + ': el fin debe ser después del inicio.' };
+    if (!fin && cerrada) return { success: false, error: 'Renglón ' + n + ': la orden ya se terminó; ponle hora de fin.' };
+    limpios.push({ id: Number(t.id) || 0, mecanico, inicio, fin, nota: String(t.nota || '').trim().slice(0, 500) || null });
+  }
+  const abiertasPorMec = {};
+  for (const t of limpios) if (!t.fin) { const k = t.mecanico.toLowerCase(); if (abiertasPorMec[k]) return { success: false, error: t.mecanico + ' tiene dos ratos sin hora de fin.' }; abiertasPorMec[k] = true; }
+  const [actuales] = await pool.query('SELECT id FROM ordenes_tiempos WHERE orden = ?', [orden]);
+  const ids = new Set(actuales.map((x) => x.id));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const quedan = limpios.filter((t) => t.id && ids.has(t.id)).map((t) => t.id);
+    if (quedan.length) await conn.query('DELETE FROM ordenes_tiempos WHERE orden = ? AND id NOT IN (?)', [orden, quedan]);
+    else await conn.query('DELETE FROM ordenes_tiempos WHERE orden = ?', [orden]);
+    for (const t of limpios) {
+      const cierre = t.fin ? (cerrada ? 'finalizado' : 'pendiente') : null;
+      if (t.id && ids.has(t.id)) {
+        await conn.query('UPDATE ordenes_tiempos SET mecanico = ?, inicio = ?, fin = ?, cierre = COALESCE(IF(? IS NULL, NULL, cierre), ?), nota = ? WHERE id = ?',
+          [t.mecanico, t.inicio, t.fin, t.fin, cierre, t.nota, t.id]);
+      } else {
+        await conn.query('INSERT INTO ordenes_tiempos (orden, mecanico, inicio, fin, cierre, nota) VALUES (?, ?, ?, ?, ?, ?)', [orden, t.mecanico, t.inicio, t.fin, cierre, t.nota]);
+      }
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+  const horas = limpios.reduce((sum, t) => sum + ((t.fin ? t.fin.getTime() : Date.now()) - t.inicio.getTime()) / 3600000, 0);
+  await registrarAuditoria_('ordenes_tiempos', orden, 'corrige_tiempos', nombreUsuario, limpios.length + ' rato(s) · ' + (Math.round(horas * 100) / 100) + ' h');
+  return { success: true };
 }
 
 async function getIndicadorPreparacion(code, nombreUsuario, desdeCodigo, hastaCodigo) {
@@ -12382,6 +12677,15 @@ module.exports = {
   getReportes,
   getReportesTaller,
   actualizarOrden,
+  iniciarReparacion,
+  pausarReparacion,
+  finalizarReparacion,
+  confirmarOrdenTerminada,
+  regresarOrdenTerminada,
+  getIndicadorTiemposReparacion,
+  getTiemposOrden,
+  corregirTiemposOrden,
+  momentoReparacion_,
   marcarOrdenEnProceso,
   editarOrden,
   eliminarOrden,

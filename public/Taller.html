@@ -147,6 +147,23 @@
   }
   .status-pill.done{ background: rgba(95,163,106,0.15); color: var(--ok); }
   .status-pill.progress{ background: rgba(232,135,30,0.15); color: var(--amber); }
+  .status-pill.confirmar{ background: rgba(76,141,174,0.18); color: var(--steel); }
+  /* Reparación (nov-2026): Iniciar / Queda pendiente / Trabajo finalizado. */
+  .rep-box{ border:1px solid var(--line); border-radius:6px; padding:12px; margin: 4px 0 16px; background: var(--panel-2); }
+  .rep-titulo{ font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color: var(--text-dim); margin-bottom:6px; }
+  .rep-estado{ font-family:'Oswald', sans-serif; font-size:18px; font-weight:600; }
+  .rep-estado.corriendo{ color: var(--ok); }
+  .rep-sub{ font-size:12px; color: var(--text-dim); margin-top:2px; }
+  .rep-botones{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .rep-btn{ flex:1; min-width:120px; padding:12px 8px; border-radius:4px; border:none; font-family:'Oswald', sans-serif; font-weight:700; font-size:14px; text-transform:uppercase; cursor:pointer; }
+  .rep-btn:disabled{ opacity:0.5; }
+  .rep-btn.iniciar{ background: var(--ok); color:#10170f; }
+  .rep-btn.pendiente{ background: transparent; border:1px solid var(--amber); color: var(--amber); }
+  .rep-btn.finalizar{ background: var(--steel); color:#0f1a20; }
+  .rep-nota{ width:100%; margin-top:8px; background: var(--panel); border:1px solid var(--line); color: var(--text); border-radius:4px; padding:8px; font-family:inherit; font-size:13px; }
+  .rep-aviso{ font-size:12.5px; border-radius:4px; padding:8px 10px; margin-bottom:8px; }
+  .rep-aviso.regresada{ background: rgba(194,75,63,0.12); border:1px solid var(--danger); color: var(--danger); }
+  .rep-aviso.terminada{ background: rgba(76,141,174,0.12); border:1px solid var(--steel); color: var(--steel); }
 
   .order-body{
     display:none; padding: 14px; border-top: 1px dashed var(--line);
@@ -413,7 +430,8 @@ function tlCacheLeer_(clave){
 var TL_COLA_DB = 'taller_offline';
 var TL_COLA_STORE = 'pendientes';
 // Funciones que se pueden guardar en el celular y mandar después (y cómo nombrarlas).
-var TL_ENCOLABLES = { actualizarOrden: 'cambios de la orden', agregarFotosOrden: 'fotos de la orden', guardarRefaccionesNecesarias: 'refacciones de la orden' };
+var TL_ENCOLABLES = { actualizarOrden: 'cambios de la orden', agregarFotosOrden: 'fotos de la orden', guardarRefaccionesNecesarias: 'refacciones de la orden',
+  iniciarReparacion: 'el inicio de reparación de la orden', pausarReparacion: 'el "queda pendiente" de la orden', finalizarReparacion: 'el "trabajo finalizado" de la orden' };
 function tlColaDb_(){
   if(tlColaDb_.promesa) return tlColaDb_.promesa;
   tlColaDb_.promesa = new Promise(function(ok, mal){
@@ -592,6 +610,16 @@ function tlAplicarPendientes_(records){
       if(p.TrabajoRealizado !== undefined) rec.TrabajoRealizado = p.TrabajoRealizado;
       if(p.AtendioPor !== undefined) rec.AtendioPor = p.AtendioPor;
       if(p.LecturaServicio !== undefined) rec.LecturaCierre = p.LecturaServicio === '' ? null : Number(p.LecturaServicio);
+      rec.PendienteDeEnviar = true;
+    });
+    // Botones de reparación tocados sin señal (en el orden en que se tocaron).
+    items.filter(function(it){ return !it.error && /Reparacion$/.test(it.fn); }).forEach(function(it){
+      var rec = (records || []).find(function(r){ return r.Orden === it.args[2]; });
+      if(!rec) return;
+      var mec = it.args[1], momento = it.args[3];
+      if(it.fn === 'iniciarReparacion') tlLocalIniciar_(rec, mec, momento, records);
+      else if(it.fn === 'pausarReparacion') tlLocalPausar_(rec, mec, momento, it.args[4]);
+      else if(it.fn === 'finalizarReparacion') tlLocalFinalizar_(rec, mec, momento, it.args[4]);
       rec.PendienteDeEnviar = true;
     });
     return records;
@@ -799,6 +827,7 @@ window.addEventListener('load', function(){
 
 function estadoDe(r){
   if(r.FechaSalida) return { label: 'Completado', cls: 'done' };
+  if(r.TerminadaEn) return { label: 'Por confirmar', cls: 'confirmar' };
   if(r.FechaAtencion) return { label: 'En proceso', cls: 'progress' };
   if(r.EnProcesoSinFecha) return { label: 'En proceso', cls: 'progress' };
   return { label: 'Pendiente', cls: '' };
@@ -807,7 +836,8 @@ function estadoDe(r){
 function getFiltered(){
   var q = document.getElementById('f-search').value.trim().toUpperCase();
   return ALL_RECORDS.filter(function(r){
-    if(estadoDe(r).label !== 'En proceso') return false;
+    var est = estadoDe(r).label;
+    if(est !== 'En proceso' && est !== 'Por confirmar') return false;
     if(q){
       var haystack = [r.Orden, r.Unidad, r.CodigoUnidad, r.Huerta].join(' ').toUpperCase();
       if(haystack.indexOf(q) === -1) return false;
@@ -1027,18 +1057,13 @@ function buildOrderCard(r){
   fAtencionField.appendChild(roAtencion);
   body.appendChild(fAtencionField);
 
-  // Fecha de salida
-  var fSalidaField = document.createElement('div');
-  fSalidaField.className = 'field';
-  var lblSalida = document.createElement('label');
-  lblSalida.textContent = 'Fecha de salida';
-  var inputSalida = document.createElement('input');
-  inputSalida.type = 'date';
-  inputSalida.id = 'fs-' + orden;
-  inputSalida.value = dateInputValue(r.FechaSalida);
-  fSalidaField.appendChild(lblSalida);
-  fSalidaField.appendChild(inputSalida);
-  body.appendChild(fSalidaField);
+  // Reparación (nov-2026): ya no se captura la Fecha de salida aquí; se pone
+  // cuando el jefe de taller confirma en el Panel el "Trabajo finalizado".
+  var repBox = document.createElement('div');
+  repBox.className = 'rep-box';
+  repBox.id = 'rep-' + orden;
+  body.appendChild(repBox);
+  pintarReparacion_(r, repBox);
 
   // Horometro/kilometraje con el que se hizo el servicio — solo para
   // ordenes generadas desde una regla de Mantenimiento preventivo por
@@ -1079,7 +1104,7 @@ function buildOrderCard(r){
   var trabajoField = document.createElement('div');
   trabajoField.className = 'field';
   var lblTrabajo = document.createElement('label');
-  lblTrabajo.textContent = 'Descripcion de lo realizado (opcional)';
+  lblTrabajo.textContent = 'Descripcion de lo realizado (obligatoria para dar "Trabajo finalizado")';
   var textTrabajo = document.createElement('textarea');
   textTrabajo.id = 'tr-' + orden;
   textTrabajo.placeholder = 'Que se hizo para atender la falla...';
@@ -1584,9 +1609,12 @@ function rnGuardar(orden){
 
 function renderList(){
   var listEl = document.getElementById('order-list');
-  var records = getFiltered().slice().sort(function(a,b){ return new Date(b.Fecha) - new Date(a.Fecha); });
-
-  document.getElementById('filter-summary').textContent = records.length + ' orden(es) en proceso';
+  var records = getFiltered().slice().sort(function(a,b){
+    var pa = a.TerminadaEn ? 1 : 0, pb = b.TerminadaEn ? 1 : 0; // las que esperan confirmación, al final
+    return pa - pb || new Date(b.Fecha) - new Date(a.Fecha);
+  });
+  var nConfirmar = records.filter(function(r){ return !!r.TerminadaEn; }).length;
+  document.getElementById('filter-summary').textContent = (records.length - nConfirmar) + ' orden(es) en proceso' + (nConfirmar ? ' · ' + nConfirmar + ' esperando confirmación' : '');
 
   listEl.innerHTML = '';
 
@@ -1684,8 +1712,147 @@ function toggleOrder(orden){
   if(!isOpen){ body.classList.add('open'); }
 }
 
+// ---------------------------------------------------------------
+// Reparación: Iniciar / Queda pendiente / Trabajo finalizado (nov-2026).
+// Cada mecánico su reloj (r.Tiempos, del servidor), pero aquí NO se muestra
+// ningún tiempo: solo en Indicadores del Panel. Funciona sin señal: el botón
+// se guarda en el celular con la hora en que se tocó y se envía después.
+// ---------------------------------------------------------------
+function tlNombre_(){ return localStorage.getItem('taller_nombre') || ''; }
+function tlMismoNombre_(a, b){ return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
+function tlMiRatoAbierto_(r){
+  var yo = tlNombre_();
+  return (r.Tiempos || []).find(function(t){ return !t.fin && tlMismoNombre_(t.mecanico, yo); }) || null;
+}
+// Cambios locales (también los usa tlAplicarPendientes_ con lo que está en la cola).
+function tlLocalIniciar_(rec, mecanico, momento, lista){
+  if(!rec.Tiempos) rec.Tiempos = [];
+  if(rec.Tiempos.some(function(t){ return !t.fin && tlMismoNombre_(t.mecanico, mecanico); })) return;
+  // un mecánico, una orden a la vez: las demás suyas quedan en pausa
+  (lista || ALL_RECORDS).forEach(function(o){
+    if(o === rec) return;
+    (o.Tiempos || []).forEach(function(t){ if(!t.fin && tlMismoNombre_(t.mecanico, mecanico)){ t.fin = new Date(momento).toISOString(); t.cierre = 'pendiente'; } });
+  });
+  rec.Tiempos.push({ mecanico: mecanico, inicio: new Date(momento).toISOString(), fin: null, cierre: null, nota: '' });
+}
+function tlLocalPausar_(rec, mecanico, momento, nota){
+  (rec.Tiempos || []).forEach(function(t){ if(!t.fin && tlMismoNombre_(t.mecanico, mecanico)){ t.fin = new Date(momento).toISOString(); t.cierre = 'pendiente'; t.nota = nota || ''; } });
+}
+function tlLocalFinalizar_(rec, mecanico, momento, campos){
+  (rec.Tiempos || []).forEach(function(t){ if(!t.fin){ t.fin = new Date(momento).toISOString(); t.cierre = 'finalizado'; } });
+  rec.TerminadaEn = new Date(momento).toISOString();
+  rec.TerminadaPor = mecanico;
+  rec.RegresadaMotivo = null;
+  if(campos && campos.TrabajoRealizado) rec.TrabajoRealizado = campos.TrabajoRealizado;
+}
+
+// Al mecánico NO se le muestra el tiempo (nov-2026, Carlos: "no le tiene que
+// aparecer al mecánico el reloj ni nada que vea que se le mide el tiempo");
+// solo el estado y los botones. El tiempo se ve en Indicadores del Panel.
+function pintarReparacion_(r, box){
+  box = box || document.getElementById('rep-' + r.Orden);
+  if(!box) return;
+  var orden = r.Orden;
+  var mio = tlMiRatoAbierto_(r);
+  var yaEmpezada = (r.Tiempos || []).length > 0;
+  var otros = [];
+  (r.Tiempos || []).forEach(function(t){ if(!t.fin && !tlMismoNombre_(t.mecanico, tlNombre_()) && otros.indexOf(t.mecanico) === -1) otros.push(t.mecanico); });
+  var html = '<div class="rep-titulo">Reparación</div>';
+  if(r.RegresadaMotivo && !r.TerminadaEn){
+    html += '<div class="rep-aviso regresada">Regresada por ' + escapeHtml(r.RegresadaPor || 'el jefe de taller') + ': ' + escapeHtml(r.RegresadaMotivo) + '</div>';
+  }
+  if(r.TerminadaEn){
+    html += '<div class="rep-aviso terminada">✔ Trabajo finalizado' + (r.TerminadaPor ? ' por ' + escapeHtml(r.TerminadaPor) : '') + ' — esperando que el jefe de taller lo confirme.</div>';
+  } else {
+    html += '<div class="rep-estado' + (mio ? ' corriendo' : '') + '">' + (mio ? '🟢 Estás trabajando esta orden' : (yaEmpezada ? '⏸ En pausa' : 'Sin iniciar')) + '</div>';
+    if(otros.length) html += '<div class="rep-sub">También la está trabajando: ' + otros.map(escapeHtml).join(', ') + '</div>';
+    var ultimaPausa = (r.Tiempos || []).filter(function(t){ return t.cierre === 'pendiente' && t.nota; }).pop();
+    if(ultimaPausa && !mio) html += '<div class="rep-sub">Quedó pendiente: ' + escapeHtml(ultimaPausa.nota) + '</div>';
+    html += '<div class="rep-botones">';
+    if(mio){
+      html += '<button type="button" class="rep-btn pendiente" data-accion="pendiente">Queda pendiente</button>';
+      html += '<button type="button" class="rep-btn finalizar" data-accion="finalizar">Trabajo finalizado</button>';
+    } else {
+      html += '<button type="button" class="rep-btn iniciar" data-accion="iniciar">' + (yaEmpezada ? 'Continuar reparación' : 'Iniciar reparación') + '</button>';
+      if(yaEmpezada) html += '<button type="button" class="rep-btn finalizar" data-accion="finalizar">Trabajo finalizado</button>';
+    }
+    html += '</div>';
+    html += '<div id="rep-pend-' + escapeHtml(orden) + '" style="display:none;"><textarea class="rep-nota" id="rep-nota-' + escapeHtml(orden) + '" placeholder="¿Por qué queda pendiente? (ej. falta la refacción)"></textarea>'
+      + '<div class="rep-botones"><button type="button" class="rep-btn pendiente" data-accion="pendiente-ok">Pausar reparación</button><button type="button" class="rep-btn" data-accion="pendiente-cancelar" style="background:transparent;border:1px solid var(--line);color:var(--text-dim);">Cancelar</button></div></div>';
+  }
+  html += '<div class="save-status" id="rep-status-' + escapeHtml(orden) + '"></div>';
+  box.innerHTML = html;
+  box.querySelectorAll('[data-accion]').forEach(function(b){
+    b.addEventListener('click', function(){ accionReparacion_(orden, b.dataset.accion); });
+  });
+}
+
+function repStatus_(orden, texto, tipo){
+  var el = document.getElementById('rep-status-' + orden);
+  if(!el) return;
+  el.textContent = texto || '';
+  el.className = 'save-status' + (texto ? ' show' : '') + (tipo ? ' ' + tipo : '');
+}
+
+function accionReparacion_(orden, accion){
+  var rec = ALL_RECORDS.find(function(x){ return x.Orden === orden; });
+  if(!rec) return;
+  var nombre = tlNombre_();
+  if(accion === 'pendiente'){ document.getElementById('rep-pend-' + orden).style.display = ''; document.getElementById('rep-nota-' + orden).focus(); return; }
+  if(accion === 'pendiente-cancelar'){ document.getElementById('rep-pend-' + orden).style.display = 'none'; return; }
+  var momento = Date.now();
+  var botones = document.querySelectorAll('#rep-' + orden + ' button');
+  var bloquear = function(si){ botones.forEach(function(b){ b.disabled = si; }); };
+  var listo = function(res, aplicar, textoOk){
+    bloquear(false);
+    if(!res || !res.success){ repStatus_(orden, (res && res.error) || 'No se pudo guardar.', 'err'); return; }
+    aplicar();
+    pintarReparacion_(rec);
+    repStatus_(orden, res.encolado ? 'Sin señal: guardado en el celular. Se envía solo cuando haya señal.' : textoOk, 'ok');
+    var pill = document.querySelector('.order-card[data-orden="' + orden + '"] .status-pill');
+    if(pill){ var e = estadoDe(rec); pill.textContent = e.label; pill.className = 'status-pill ' + e.cls; }
+  };
+  var fallo = function(err){ bloquear(false); repStatus_(orden, (err && err.message) || 'No se pudo guardar. Intenta de nuevo.', 'err'); };
+  bloquear(true);
+  repStatus_(orden, 'Guardando...');
+  if(accion === 'iniciar'){
+    google.script.run.withSuccessHandler(function(res){
+      listo(res, function(){ tlLocalIniciar_(rec, nombre, momento); renderOtrasPausadas_(); }, 'Reparación iniciada.');
+    }).withFailureHandler(fallo).iniciarReparacion(ACCESS_CODE, nombre, orden, momento);
+    return;
+  }
+  if(accion === 'pendiente-ok'){
+    var nota = (document.getElementById('rep-nota-' + orden).value || '').trim();
+    google.script.run.withSuccessHandler(function(res){
+      listo(res, function(){ tlLocalPausar_(rec, nombre, momento, nota); }, 'Queda pendiente. Cuando regreses da "Continuar reparación".');
+    }).withFailureHandler(fallo).pausarReparacion(ACCESS_CODE, nombre, orden, momento, nota);
+    return;
+  }
+  if(accion === 'finalizar'){
+    var trabajoEl = document.getElementById('tr-' + orden);
+    var trabajo = trabajoEl ? trabajoEl.value.trim() : '';
+    if(!trabajo){ bloquear(false); repStatus_(orden, 'Escribe abajo qué se hizo ("Descripción de lo realizado") y vuelve a dar "Trabajo finalizado".', 'err'); if(trabajoEl) trabajoEl.focus(); return; }
+    if(!confirm('¿Dar por terminado el trabajo de ' + orden + '? El jefe de taller lo revisará para cerrarla.')){ bloquear(false); repStatus_(orden, ''); return; }
+    var campos = { TrabajoRealizado: trabajo };
+    var lecturaEl = document.getElementById('lc-' + orden);
+    if(lecturaEl) campos.LecturaServicio = lecturaEl.value.trim();
+    if(EVIDENCIA_DATA[orden]) campos.evidenciaFoto = EVIDENCIA_DATA[orden].dataUrl;
+    google.script.run.withSuccessHandler(function(res){
+      listo(res, function(){
+        tlLocalFinalizar_(rec, nombre, momento, campos);
+        if(res && res.evidenciaUrl) rec.EvidenciaURL = urlMedia_(res.evidenciaUrl);
+        delete EVIDENCIA_DATA[orden];
+      }, 'Trabajo finalizado. Falta que el jefe de taller lo confirme.');
+    }).withFailureHandler(fallo).finalizarReparacion(ACCESS_CODE, nombre, orden, momento, campos);
+  }
+}
+// Al iniciar una orden, la que estaba trabajando queda en pausa: repintarla.
+function renderOtrasPausadas_(){
+  ALL_RECORDS.forEach(function(o){ if(document.getElementById('rep-' + o.Orden)) pintarReparacion_(o); });
+}
+
+
 function guardarOrden(orden){
-  var fs = document.getElementById('fs-' + orden).value;
   var trabajoEl = document.getElementById('tr-' + orden);
   var trabajo = trabajoEl ? trabajoEl.value.trim() : '';
   var lecturaEl = document.getElementById('lc-' + orden);
@@ -1698,7 +1865,7 @@ function guardarOrden(orden){
   btn.textContent = 'Guardando...';
   statusEl.classList.remove('show');
 
-  var payload = { FechaSalida: fs, AtendioPor: nombre, TrabajoRealizado: trabajo };
+  var payload = { TrabajoRealizado: trabajo };
   if(lecturaEl){ payload.LecturaServicio = lectura; }
   if(EVIDENCIA_DATA[orden]){ payload.evidenciaFoto = EVIDENCIA_DATA[orden].dataUrl; }
 
@@ -1716,7 +1883,7 @@ function guardarOrden(orden){
       var rec = null;
       for(var i=0; i<ALL_RECORDS.length; i++){ if(ALL_RECORDS[i].Orden === orden){ rec = ALL_RECORDS[i]; break; } }
       if(rec){
-        rec.FechaSalida = fs; rec.AtendioPor = nombre; rec.TrabajoRealizado = trabajo;
+        rec.TrabajoRealizado = trabajo;
         if(lecturaEl){ rec.LecturaCierre = lectura === '' ? null : Number(lectura); }
         if(result.evidenciaUrl){ rec.EvidenciaURL = urlMedia_(result.evidenciaUrl); }
         if(result.encolado){ rec.PendienteDeEnviar = true; }
@@ -1724,7 +1891,7 @@ function guardarOrden(orden){
       delete EVIDENCIA_DATA[orden];
       var card = document.querySelector('.order-card[data-orden="' + orden + '"] .status-pill');
       if(card){
-        var estado = estadoDe({FechaAtencion: rec ? rec.FechaAtencion : null, FechaSalida: fs});
+        var estado = estadoDe(rec || {});
         card.textContent = estado.label;
         card.className = 'status-pill ' + estado.cls;
       }

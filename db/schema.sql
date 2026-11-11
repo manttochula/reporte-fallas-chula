@@ -3698,3 +3698,50 @@ WHERE @perm_verif_hecho = 0
   AND JSON_UNQUOTE(JSON_EXTRACT(panel_permisos, '$.seguros')) IN ('visualizar', 'capturar')
   AND JSON_EXTRACT(panel_permisos, '$.verificaciones') IS NULL;
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('permiso_verificaciones_2026_11', 'hecho');
+
+-- ------------------------------------------------------------
+-- Tiempo de reparación (nov-2026, Carlos): en Taller cada mecánico da
+-- "Iniciar reparación", "Queda pendiente" (pausa) y "Trabajo finalizado".
+-- Cada rato trabajado es una fila (cada mecánico su reloj); el tiempo de la
+-- orden = suma de los ratos. Al finalizar la orden queda "por confirmar":
+-- el jefe de taller la confirma desde el Panel (entonces se pone la Fecha de
+-- salida) o la regresa con un motivo. Ver iniciarReparacion /
+-- pausarReparacion / finalizarReparacion / confirmarOrdenTerminada /
+-- regresarOrdenTerminada / getIndicadorTiemposReparacion en handlers.js.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ordenes_tiempos (
+  id        INT AUTO_INCREMENT PRIMARY KEY,
+  orden     VARCHAR(20)  NOT NULL,
+  mecanico  VARCHAR(255) NOT NULL,
+  inicio    DATETIME     NOT NULL,
+  fin       DATETIME     DEFAULT NULL,      -- NULL = trabajando ahora
+  cierre    VARCHAR(12)  DEFAULT NULL,      -- 'pendiente' | 'finalizado'
+  nota      VARCHAR(500) DEFAULT NULL,      -- motivo de "queda pendiente"
+  creado_en TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ot_orden (orden),
+  INDEX idx_ot_mecanico (mecanico, fin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'terminada_en');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN terminada_en DATETIME NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'terminada_por');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN terminada_por VARCHAR(255) NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'lectura_terminada');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN lectura_terminada DECIMAL(12,2) NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'regresada_motivo');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN regresada_motivo VARCHAR(500) NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'regresada_por');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN regresada_por VARCHAR(255) NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'regresada_en');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN regresada_en DATETIME NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'confirmada_por');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN confirmada_por VARCHAR(255) NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'reportes' AND column_name = 'confirmada_en');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE reportes ADD COLUMN confirmada_en DATETIME NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

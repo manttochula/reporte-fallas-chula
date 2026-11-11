@@ -628,6 +628,21 @@
      "Fecha atención" de la tabla), para no tener que buscar la orden abajo
      — en cuanto se guarda, la orden pasa a "En proceso" y desaparece de
      este letrero. */
+  /* Trabajos terminados en Taller, por confirmar (nov-2026). */
+  .ord-terminadas{ margin-bottom:16px; border-radius:6px; padding:12px 14px; border:1px solid rgba(95,163,106,0.40); background: rgba(95,163,106,0.08); }
+  .ord-terminadas-titulo{ font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; font-weight:600; margin-bottom:10px; color: var(--ok); }
+  .ord-terminadas-lista{ display:flex; flex-direction:column; gap:8px; }
+  .ord-term-item{ display:flex; gap:12px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; background: var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .ord-term-info{ flex:1; min-width:280px; font-size:12.5px; line-height:1.5; }
+  .ord-term-cab{ display:flex; gap:10px; flex-wrap:wrap; align-items:baseline; }
+  .ord-term-orden{ font-family:'IBM Plex Mono',monospace; font-weight:700; }
+  .ord-term-dim{ color: var(--text-dim); }
+  .ord-term-trabajo{ margin-top:4px; }
+  .ord-term-acciones{ display:flex; flex-direction:column; gap:6px; align-items:stretch; min-width:150px; }
+  .ord-term-acciones button{ padding:7px 12px; border-radius:4px; cursor:pointer; font-size:12px; font-weight:600; }
+  .ord-term-confirmar{ background: var(--ok); border:none; color:#10170f; }
+  .ord-term-regresar{ background: transparent; border:1px solid var(--danger); color: var(--danger); }
+  .ord-term-status{ font-size:11.5px; }
   .ord-pend-atencion{
     margin-bottom:16px; border-radius:6px; padding:12px 14px;
     border:1px solid rgba(76,141,174,0.35); background: rgba(76,141,174,0.08);
@@ -1317,6 +1332,14 @@
   .ind-status.show{ display:block; }
   .ind-status.err{ color:#ff8a80; }
   .ind-tarjeta{ background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; margin:12px 0; }
+  .trep-resumen{ display:flex; flex-wrap:wrap; gap:10px; margin:6px 0 10px; }
+  .trep-dato{ background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:8px 12px; min-width:150px; }
+  .trep-dato .n{ font-family:'Oswald',sans-serif; font-size:22px; color:var(--amber); }
+  .trep-dato .t{ font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
+  .trep-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(480px, 1fr)); gap:12px; }
+  #trep-tarjeta .trep-grid table{ min-width:0; }
+  #trep-tarjeta th{ white-space:normal; }
+  #trep-tarjeta td:first-child{ white-space:nowrap; }
   .ind-tarjeta-titulo{ font-family:'Oswald',sans-serif; font-size:15px; letter-spacing:0.03em; color:var(--text); margin-bottom:10px; text-transform:uppercase; }
   .ind-sub{ font-family:'Inter',sans-serif; text-transform:none; color:var(--text-dim); font-size:12px; letter-spacing:0; }
   .ind-tabla-wrap{ border-top:1px solid #ddd; border-radius:6px; background:#fff; }
@@ -1601,6 +1624,11 @@
           <div class="ord-alertas-titulo">⏰ Plazo de atención por vencer</div>
           <div class="ord-alertas-lista" id="ord-alertas-porvencer-lista"></div>
         </div>
+      </div>
+      <!-- Órdenes terminadas por los mecánicos en Taller que esperan la confirmación del jefe de taller (nov-2026). -->
+      <div class="ord-terminadas" id="ord-terminadas" style="display:none;">
+        <div class="ord-terminadas-titulo" id="ord-terminadas-titulo">✔ Trabajos terminados por confirmar</div>
+        <div class="ord-terminadas-lista" id="ord-terminadas-lista"></div>
       </div>
       <div class="ord-pend-atencion" id="ord-pend-atencion" style="display:none;">
         <div class="ord-pend-atencion-titulo" id="ord-pend-atencion-titulo">📋 Reportadas en los últimos 5 días, sin fecha de atención</div>
@@ -4590,6 +4618,39 @@
           </table>
         </div>
       </div>
+      <!-- Tiempo de reparación (nov-2026): con los botones Iniciar / Queda pendiente / Trabajo finalizado de Taller. -->
+      <div class="ind-tarjeta" id="trep-tarjeta">
+        <div class="ind-tarjeta-titulo">Tiempo de reparación por orden <span class="ind-sub">(órdenes cerradas en las semanas elegidas · respeta el "Tipo de orden")</span></div>
+        <p class="ind-ayuda">Horas trabajadas = suma de los ratos de todos los mecánicos entre "Iniciar reparación" y "Queda pendiente" / "Trabajo finalizado" (las esperas no cuentan). Duración = desde que se empezó hasta que se terminó, contando esperas. Solo entran las órdenes trabajadas con esos botones en Taller.</p>
+        <div class="ind-status" id="trep-status"></div>
+        <div class="trep-resumen" id="trep-resumen"></div>
+        <div class="trep-grid">
+          <div><div class="ind-sub prep-subtitulo">Por mes</div><div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-mes"><thead><tr><th>Mes</th><th class="ind-num">Órdenes</th><th class="ind-num">Promedio h trabajadas</th><th class="ind-num">Promedio duración</th></tr></thead><tbody></tbody></table></div></div>
+          <div><div class="ind-sub prep-subtitulo">Por tipo de orden</div><div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-seccion"><thead><tr><th>Tipo</th><th class="ind-num">Órdenes</th><th class="ind-num">Promedio h trabajadas</th><th class="ind-num">Promedio duración</th></tr></thead><tbody></tbody></table></div></div>
+          <div><div class="ind-sub prep-subtitulo">Por mecánico</div><div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-mecanico"><thead><tr><th>Mecánico</th><th class="ind-num">Órdenes</th><th class="ind-num">Horas trabajadas</th><th class="ind-num">Promedio h por orden</th></tr></thead><tbody></tbody></table></div></div>
+          <div><div class="ind-sub prep-subtitulo">Por unidad</div><div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-unidad"><thead><tr><th>Unidad</th><th class="ind-num">Órdenes</th><th class="ind-num">Horas trabajadas</th><th class="ind-num">Promedio h por orden</th></tr></thead><tbody></tbody></table></div></div>
+        </div>
+        <div id="trep-encurso-wrap" style="display:none;margin-top:12px;">
+          <div class="ind-sub prep-subtitulo">Reparaciones con el reloj corriendo ahora <span class="ind-sub">(si alguien olvidó dar "Queda pendiente", corrígelo aquí)</span></div>
+          <div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-encurso"><thead><tr><th>Orden</th><th>Unidad</th><th>Mecánico</th><th>Desde</th><th class="ind-num">Lleva</th><th></th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <details style="margin-top:10px;"><summary class="ind-sub" style="cursor:pointer;">Ver cada orden (y corregir sus tiempos)</summary>
+          <div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-ordenes"><thead><tr><th>Orden</th><th>Unidad</th><th>Tipo</th><th>Salida</th><th>Mecánicos</th><th class="ind-num">Horas trabajadas</th><th class="ind-num">Duración</th><th></th></tr></thead><tbody></tbody></table></div>
+        </details>
+      </div>
+      <div class="maq-modal-overlay" id="trep-overlay">
+        <div class="maq-modal" style="max-width:880px;">
+          <button class="maq-modal-close" id="trep-cerrar">&times;</button>
+          <h3 id="trep-modal-titulo">Corregir tiempos</h3>
+          <div class="seg-sub" id="trep-modal-sub" style="margin-bottom:10px;"></div>
+          <table class="seg-mini"><thead><tr><th style="width:22%;">Mecánico</th><th style="width:27%;">Inicio</th><th style="width:27%;">Fin <span style="text-transform:none;">(vacío = sigue)</span></th><th>Nota</th><th style="width:70px;"></th></tr></thead><tbody id="trep-modal-body"></tbody></table>
+          <datalist id="trep-dl-mecanicos"></datalist>
+          <button type="button" class="seg-btn-claro" id="trep-agregar" style="margin-top:8px;">+ Agregar rato</button>
+          <div class="seg-sub" id="trep-modal-total" style="margin-top:8px;"></div>
+          <div class="maq-modal-actions"><button class="maq-save-btn" id="trep-guardar">Guardar tiempos</button></div>
+          <div class="maq-modal-status" id="trep-modal-status"></div>
+        </div>
+      </div>
       <div class="ind-tarjeta" id="prep-tarjeta">
         <div class="ind-tarjeta-titulo">Preparación de tierras <span class="ind-sub">(maquinaria del departamento Preparación · mismas semanas de arriba · toca una semana para ver el detalle)</span></div>
         <p class="ind-ayuda">Fallas: órdenes correctivas de los equipos de Preparación (sin preventivos). Reportes claros: los marcas tú en el detalle de cada semana. Mano de obra: salario diario de cada operador × días que trabajó con un equipo de Preparación (según sus recorridos de Avance de huerta). Diesel: litros cargados a esos equipos × precio por litro de las entregas a granel de la semana (o la más reciente con precio).</p>
@@ -4826,7 +4887,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
+  guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -5991,6 +6052,87 @@ function renderOrdenesSinAtencionReciente_(){
   }
 }
 
+// ---------------------------------------------------------------
+// Trabajos terminados por confirmar (nov-2026, Carlos): cuando el mecánico
+// da "Trabajo finalizado" en Taller, la orden aparece aquí con quién la
+// atendió, cuánto tiempo y el resumen; el jefe de taller la confirma (se
+// pone la Fecha de salida) o la regresa con un motivo.
+// ---------------------------------------------------------------
+function ordFmtDur_(seg){
+  seg = Math.max(0, Math.round(Number(seg) || 0));
+  const h = Math.floor(seg / 3600), m = Math.floor((seg % 3600) / 60);
+  return h ? h + ' h ' + (m < 10 ? '0' : '') + m + ' min' : m + ' min';
+}
+function ordTerminadasPorConfirmar_(){
+  return ALL_RECORDS.filter(function(r){ return r.TerminadaEn && !r.FechaSalida && puedeCapturarPestana(permisoDeSeccionUI_(seccionDeOrden_(r))); })
+    .sort(function(a, b){ return String(a.TerminadaEn).localeCompare(String(b.TerminadaEn)); });
+}
+function permisoDeSeccionUI_(seccion){
+  return { soldadura: 'ordenes_soldadura', automotriz: 'ordenes_automotriz', llantas: 'ordenes_llantas', terceros: 'ordenes_terceros' }[seccion] || 'ordenes';
+}
+function itemTerminadaHtml_(r){
+  // Sin tiempos aquí (Carlos: el tiempo solo se ve en Indicadores).
+  const nombresMec = [];
+  (r.Tiempos || []).forEach(function(t){ if(nombresMec.indexOf(t.mecanico) === -1) nombresMec.push(t.mecanico); });
+  const mecs = nombresMec.map(escapeHtml).join(', ') || escapeHtml(r.TerminadaPor || '');
+  const term = new Date(r.TerminadaEn);
+  const ev = r.EvidenciaURL ? ' · <a href="' + escapeHtml(r.EvidenciaURL.replace(/^VID:/, '')) + '" target="_blank" rel="noopener">ver evidencia</a>' : '';
+  const ref = Number(r.RefaccionesNecesariasCount) ? ' · ' + r.RefaccionesNecesariasCount + ' refacción(es)' : '';
+  const o = escapeHtml(r.Orden);
+  return '<div class="ord-term-item">'
+    + '<div class="ord-term-info">'
+    + '<div class="ord-term-cab"><span class="ord-term-orden">' + o + '</span><span>' + escapeHtml(r.Unidad || r.CodigoUnidad || '') + '</span><span class="ord-term-dim">' + escapeHtml(r.Huerta || '') + '</span>'
+    + '<span class="ord-term-dim">Terminada ' + term.toLocaleDateString('es-MX') + ' ' + term.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) + '</span></div>'
+    + '<div class="ord-term-dim">Falla: ' + escapeHtml((r.Descripcion || '').slice(0, 140)) + '</div>'
+    + '<div class="ord-term-trabajo"><b>Lo que se hizo:</b> ' + escapeHtml(r.TrabajoRealizado || '—') + '</div>'
+    + '<div><b>Atendió:</b> ' + mecs + ref + ev + '</div>'
+    + '</div>'
+    + '<div class="ord-term-acciones">'
+    + '<button type="button" class="ord-term-confirmar" onclick="confirmarTerminadaDesdeAviso_(\'' + o + '\')">Confirmar y cerrar</button>'
+    + '<button type="button" class="ord-term-regresar" onclick="regresarTerminadaDesdeAviso_(\'' + o + '\')">Regresar al mecánico</button>'
+    + '<span class="ord-term-status" id="term-status-' + o + '"></span>'
+    + '</div></div>';
+}
+function renderOrdenesTerminadasPorConfirmar_(){
+  const box = document.getElementById('ord-terminadas');
+  if(!box) return;
+  const lista = ordTerminadasPorConfirmar_();
+  box.style.display = lista.length ? '' : 'none';
+  if(!lista.length) return;
+  document.getElementById('ord-terminadas-titulo').textContent = '✔ Trabajos terminados por confirmar (' + lista.length + ')';
+  document.getElementById('ord-terminadas-lista').innerHTML = lista.map(itemTerminadaHtml_).join('');
+}
+function confirmarTerminadaDesdeAviso_(orden){
+  const st = document.getElementById('term-status-' + orden);
+  if(st){ st.textContent = 'Guardando...'; st.style.color = ''; }
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res || !res.success){ if(st){ st.textContent = (res && res.error) || 'No se pudo.'; st.style.color = 'var(--danger)'; } return; }
+      const rec = ALL_RECORDS.find(function(r){ return r.Orden === orden; });
+      if(rec){ rec.FechaSalida = res.fechaSalida; rec.AtendioPor = res.atendioPor; rec.ConfirmadaPor = PANEL_USUARIO; }
+      renderTable();
+      if(typeof renderTodasLasSeccionesOrdenes_ === 'function') renderTodasLasSeccionesOrdenes_();
+    })
+    .withFailureHandler(function(e){ if(st){ st.textContent = (e && e.message) || 'No se pudo.'; st.style.color = 'var(--danger)'; } })
+    .confirmarOrdenTerminada(ACCESS_CODE, PANEL_USUARIO, orden);
+}
+function regresarTerminadaDesdeAviso_(orden){
+  const motivo = prompt('¿Por qué regresas ' + orden + ' al mecánico? (lo verá en Taller)');
+  if(motivo === null) return;
+  if(!motivo.trim()){ alert('Escribe el motivo.'); return; }
+  const st = document.getElementById('term-status-' + orden);
+  if(st){ st.textContent = 'Guardando...'; st.style.color = ''; }
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res || !res.success){ if(st){ st.textContent = (res && res.error) || 'No se pudo.'; st.style.color = 'var(--danger)'; } return; }
+      const rec = ALL_RECORDS.find(function(r){ return r.Orden === orden; });
+      if(rec){ rec.TerminadaEn = null; rec.TerminadaPor = null; rec.RegresadaMotivo = motivo.trim(); rec.RegresadaPor = PANEL_USUARIO; }
+      renderTable();
+    })
+    .withFailureHandler(function(e){ if(st){ st.textContent = (e && e.message) || 'No se pudo.'; st.style.color = 'var(--danger)'; } })
+    .regresarOrdenTerminada(ACCESS_CODE, PANEL_USUARIO, orden, motivo.trim());
+}
+
 // Asigna la Fecha de atención directo desde el letrero de arriba, sin tener
 // que buscar/seleccionar la orden en la tabla — mismo actualizarOrden que
 // usa guardarFila() para la columna "Fecha atención" de la tabla. En cuanto
@@ -6104,7 +6246,7 @@ function filaOrdenHtml_(r){
     <td class="desc-cell" data-col="descripcion" title="${escapeHtml(r.Descripcion)}">${escapeHtml(r.Descripcion)}</td>
     <td data-col="reporto">${escapeHtml(r.Nombre)}</td>
     <td data-col="fecha_reporte">${new Date(r.Fecha).toLocaleDateString('es-MX')}</td>
-    <td data-col="estatus"><span class="status-pill ${estado.cls}">${estado.label}</span></td>
+    <td data-col="estatus"><span class="status-pill ${estado.cls}">${estado.label}</span>${(r.TerminadaEn && !r.FechaSalida) ? ' <span class="status-pill info" title="El mecánico dio Trabajo finalizado; falta confirmarla arriba">Por confirmar</span>' : ''}</td>
     <td class="readonly-cell" data-col="dias_atencion">${(r.DiasAtencion === null || r.DiasAtencion === undefined || r.DiasAtencion === '') ? 'Mismo día' : (r.DiasAtencion + (Number(r.DiasAtencion) === 1 ? ' día' : ' días'))}</td>
     <td data-col="fecha_atencion">
       <input type="date" id="fa-${orden}" value="${dateInputValue(r.FechaAtencion)}">
@@ -6128,6 +6270,7 @@ function renderTable(){
   const tbody = document.getElementById('table-body');
   renderAlertasDiasAtencion();
   renderOrdenesSinAtencionReciente_();
+  renderOrdenesTerminadasPorConfirmar_();
   let records = ordenarOrdenes_(getFiltered());
 
   const totalPrincipal = ALL_RECORDS.filter(r => seccionDeOrden_(r) === 'principal').length;
@@ -24128,6 +24271,165 @@ function indCargarSemanas_(alTerminar){
     .getSemanas(ACCESS_CODE, PANEL_USUARIO);
 }
 
+// ---------------------------------------------------------------
+// Tiempo de reparación por orden (nov-2026, Carlos: "cuánto tiempo en
+// promedio hacen por cada orden"). Datos: getIndicadorTiemposReparacion.
+// ---------------------------------------------------------------
+var TREP_DATOS = null;
+var TREP_SECCION_TXT = { principal: 'Agrícola', soldadura: 'Soldadura', automotriz: 'Automotriz', llantas: 'Llantas y Ponches', terceros: 'Reparaciones con terceros' };
+var TREP_MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function trepHoras_(h){
+  if(h === null || h === undefined || !isFinite(Number(h))) return '—';
+  const min = Math.round(Number(h) * 60);
+  const hh = Math.floor(min / 60), mm = min % 60;
+  return hh ? hh + ' h ' + (mm < 10 ? '0' : '') + mm + ' min' : mm + ' min';
+}
+function trepDuracion_(h){
+  if(h === null || h === undefined || !isFinite(Number(h))) return '—';
+  return Number(h) >= 24 ? (Math.round(Number(h) / 24 * 10) / 10) + ' días' : trepHoras_(h);
+}
+function trepCargar_(desde, hasta){
+  if(!document.getElementById('trep-tarjeta')) return;
+  indMostrarStatus_('trep-status', 'Calculando...', false);
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ indMostrarStatus_('trep-status', (r && r.error) || 'No se pudo calcular.', true); return; }
+      TREP_DATOS = r;
+      indMostrarStatus_('trep-status', '', false);
+      trepRender_();
+    })
+    .withFailureHandler(function(e){ indMostrarStatus_('trep-status', (e && e.message) || 'No se pudo calcular.', true); })
+    .getIndicadorTiemposReparacion(ACCESS_CODE, PANEL_USUARIO, desde, hasta);
+}
+// Agrupa órdenes -> [{ clave, ordenes, horas, duracion }]
+function trepAgrupar_(ordenes, claveDe){
+  const g = {};
+  ordenes.forEach(function(o){
+    const k = claveDe(o);
+    const x = g[k] || (g[k] = { clave: k, ordenes: 0, horas: 0, duracion: 0 });
+    x.ordenes++; x.horas += o.horas; x.duracion += o.duracionHoras;
+  });
+  return Object.keys(g).map(function(k){ const x = g[k]; x.promHoras = x.horas / x.ordenes; x.promDuracion = x.duracion / x.ordenes; return x; });
+}
+function trepRender_(){
+  if(!TREP_DATOS || !document.getElementById('trep-tarjeta')) return;
+  const seccion = document.getElementById('ind-f-seccion').value || 'todas';
+  const ords = TREP_DATOS.ordenes.filter(function(o){ return seccion === 'todas' || o.seccion === seccion; });
+  const totH = ords.reduce(function(s, o){ return s + o.horas; }, 0);
+  const totD = ords.reduce(function(s, o){ return s + o.duracionHoras; }, 0);
+  const dato = function(n, t){ return '<div class="trep-dato"><div class="n">' + n + '</div><div class="t">' + t + '</div></div>'; };
+  document.getElementById('trep-resumen').innerHTML = ords.length
+    ? dato(ords.length, 'Órdenes') + dato(trepHoras_(totH / ords.length), 'Promedio trabajado por orden') + dato(trepDuracion_(totD / ords.length), 'Promedio de duración') + dato(trepHoras_(totH), 'Horas trabajadas en total')
+    : '<span class="ind-sub">Todavía no hay órdenes cerradas en estas semanas que se hayan trabajado con los botones de Taller.</span>';
+  const fila = function(etq, x, porOrden){
+    return '<tr><td>' + etq + '</td><td class="ind-num">' + x.ordenes + '</td><td class="ind-num">' + (porOrden ? trepHoras_(x.horas) : trepHoras_(x.promHoras)) + '</td><td class="ind-num">' + (porOrden ? trepHoras_(x.promHoras) : trepDuracion_(x.promDuracion)) + '</td></tr>';
+  };
+  const vacio = '<tr><td colspan="4" class="maq-empty">—</td></tr>';
+  const meses = trepAgrupar_(ords, function(o){ return o.mes; }).sort(function(a, b){ return b.clave.localeCompare(a.clave); });
+  document.querySelector('#trep-tabla-mes tbody').innerHTML = meses.map(function(x){ const p = x.clave.split('-'); return fila(TREP_MESES[Number(p[1]) - 1] + ' ' + p[0], x); }).join('') || vacio;
+  const secs = trepAgrupar_(ords, function(o){ return o.seccion; }).sort(function(a, b){ return b.ordenes - a.ordenes; });
+  document.querySelector('#trep-tabla-seccion tbody').innerHTML = secs.map(function(x){ return fila(escapeHtml(TREP_SECCION_TXT[x.clave] || x.clave), x); }).join('') || vacio;
+  // Por mecánico: sus horas en cada orden en que trabajó.
+  const mecs = {};
+  ords.forEach(function(o){ o.mecanicos.forEach(function(m){ const x = mecs[m.nombre] || (mecs[m.nombre] = { clave: m.nombre, ordenes: 0, horas: 0 }); x.ordenes++; x.horas += m.horas; }); });
+  const listaMec = Object.keys(mecs).map(function(k){ const x = mecs[k]; x.promHoras = x.horas / x.ordenes; return x; }).sort(function(a, b){ return b.horas - a.horas; });
+  document.querySelector('#trep-tabla-mecanico tbody').innerHTML = listaMec.map(function(x){ return fila(escapeHtml(x.clave), x, true); }).join('') || vacio;
+  const unis = trepAgrupar_(ords, function(o){ return o.unidad; }).sort(function(a, b){ return b.horas - a.horas; }).slice(0, 20);
+  document.querySelector('#trep-tabla-unidad tbody').innerHTML = unis.map(function(x){ return fila(escapeHtml(x.clave), x, true); }).join('') || vacio;
+  document.querySelector('#trep-tabla-ordenes tbody').innerHTML = ords.slice().sort(function(a, b){ return String(b.fechaSalida).localeCompare(String(a.fechaSalida)); }).map(function(o){
+    return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad) + '</td><td>' + escapeHtml(TREP_SECCION_TXT[o.seccion] || o.seccion) + '</td><td>' + indFecha_(o.fechaSalida) + '</td>'
+      + '<td>' + o.mecanicos.map(function(m){ return escapeHtml(m.nombre) + ' (' + trepHoras_(m.horas) + ')'; }).join(', ') + '</td>'
+      + '<td class="ind-num">' + trepHoras_(o.horas) + '</td><td class="ind-num">' + trepDuracion_(o.duracionHoras) + '</td>'
+      + '<td>' + (puedeCapturarPestana('indicadores') ? '<button type="button" class="export-btn trep-corregir" data-orden="' + escapeHtml(o.orden) + '" style="padding:3px 8px;font-size:11px;">Corregir</button>' : '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="maq-empty">—</td></tr>';
+  const enCurso = TREP_DATOS.enCurso || [];
+  document.getElementById('trep-encurso-wrap').style.display = enCurso.length ? '' : 'none';
+  document.querySelector('#trep-tabla-encurso tbody').innerHTML = enCurso.map(function(t){
+    const d = new Date(t.inicio);
+    return '<tr><td><b>' + escapeHtml(t.orden) + '</b></td><td>' + escapeHtml(t.unidad) + '</td><td>' + escapeHtml(t.mecanico) + '</td><td>' + d.toLocaleDateString('es-MX') + ' ' + d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) + '</td>'
+      + '<td class="ind-num"' + (t.horas >= 10 ? ' style="color:var(--danger);font-weight:700;"' : '') + '>' + trepHoras_(t.horas) + '</td>'
+      + '<td>' + (puedeCapturarPestana('indicadores') ? '<button type="button" class="export-btn trep-corregir" data-orden="' + escapeHtml(t.orden) + '" style="padding:3px 8px;font-size:11px;">Corregir</button>' : '') + '</td></tr>';
+  }).join('');
+  document.querySelectorAll('#trep-tarjeta .trep-corregir').forEach(function(b){ b.addEventListener('click', function(){ trepAbrirCorregir_(b.dataset.orden); }); });
+}
+
+// ---- Corregir tiempos de una orden (nov-2026) ----
+var TREP_EDITANDO = null;
+function trepLocalInput_(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  const z = function(n){ return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + 'T' + z(d.getHours()) + ':' + z(d.getMinutes());
+}
+function trepFilaModal_(t){
+  return '<tr data-id="' + (t.id || '') + '">'
+    + '<td><input type="text" class="trep-m-mec" list="trep-dl-mecanicos" value="' + escapeHtml(t.mecanico || '') + '"></td>'
+    + '<td><input type="datetime-local" class="trep-m-ini" value="' + trepLocalInput_(t.inicio) + '"></td>'
+    + '<td><input type="datetime-local" class="trep-m-fin" value="' + trepLocalInput_(t.fin) + '"></td>'
+    + '<td><input type="text" class="trep-m-nota" value="' + escapeHtml(t.nota || '') + '"></td>'
+    + '<td><button type="button" class="seg-quitar trep-m-quitar">Quitar</button></td></tr>';
+}
+function trepLeerModal_(){
+  return Array.from(document.querySelectorAll('#trep-modal-body tr')).map(function(tr){
+    const ini = tr.querySelector('.trep-m-ini').value, fin = tr.querySelector('.trep-m-fin').value;
+    return { id: Number(tr.dataset.id) || null, mecanico: tr.querySelector('.trep-m-mec').value.trim(),
+      inicio: ini ? new Date(ini).toISOString() : '', fin: fin ? new Date(fin).toISOString() : null, nota: tr.querySelector('.trep-m-nota').value };
+  });
+}
+function trepTotalModal_(){
+  let seg = 0;
+  trepLeerModal_().forEach(function(t){ if(t.inicio){ const a = new Date(t.inicio).getTime(), b = t.fin ? new Date(t.fin).getTime() : Date.now(); if(b > a) seg += (b - a) / 1000; } });
+  document.getElementById('trep-modal-total').textContent = 'Total trabajado: ' + trepHoras_(seg / 3600);
+}
+function trepPintarModal_(tiempos){
+  const body = document.getElementById('trep-modal-body');
+  body.innerHTML = tiempos.map(trepFilaModal_).join('') || '';
+  body.querySelectorAll('.trep-m-quitar').forEach(function(b){ b.addEventListener('click', function(){ b.closest('tr').remove(); trepTotalModal_(); }); });
+  body.querySelectorAll('input').forEach(function(i){ i.addEventListener('change', trepTotalModal_); });
+  trepTotalModal_();
+}
+function trepAbrirCorregir_(orden){
+  const st = document.getElementById('trep-modal-status'); st.className = 'maq-modal-status'; st.textContent = '';
+  document.getElementById('trep-modal-titulo').textContent = 'Corregir tiempos · ' + orden;
+  document.getElementById('trep-modal-sub').textContent = 'Cargando...';
+  document.getElementById('trep-modal-body').innerHTML = '';
+  document.getElementById('trep-overlay').classList.add('open');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ document.getElementById('trep-modal-sub').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+      TREP_EDITANDO = r;
+      document.getElementById('trep-modal-sub').textContent = r.unidad + ' · ' + (r.descripcion || '').slice(0, 120) + (r.fechaSalida ? ' · cerrada el ' + indFecha_(r.fechaSalida) : (r.terminadaEn ? ' · por confirmar' : ' · en proceso'));
+      const nombres = {};
+      (TREP_DATOS && TREP_DATOS.ordenes || []).forEach(function(o){ o.mecanicos.forEach(function(m){ nombres[m.nombre] = 1; }); });
+      r.tiempos.forEach(function(t){ nombres[t.mecanico] = 1; });
+      document.getElementById('trep-dl-mecanicos').innerHTML = Object.keys(nombres).sort().map(function(n){ return '<option value="' + escapeHtml(n) + '">'; }).join('');
+      trepPintarModal_(r.tiempos);
+    })
+    .withFailureHandler(function(e){ document.getElementById('trep-modal-sub').textContent = (e && e.message) || 'No se pudo cargar.'; })
+    .getTiemposOrden(ACCESS_CODE, PANEL_USUARIO, orden);
+}
+document.getElementById('trep-cerrar').addEventListener('click', function(){ document.getElementById('trep-overlay').classList.remove('open'); });
+document.getElementById('trep-agregar').addEventListener('click', function(){
+  const body = document.getElementById('trep-modal-body');
+  const actuales = trepLeerModal_();
+  body.insertAdjacentHTML('beforeend', trepFilaModal_({ mecanico: actuales.length ? actuales[actuales.length - 1].mecanico : '' }));
+  trepPintarModal_(trepLeerModal_());
+});
+document.getElementById('trep-guardar').addEventListener('click', function(){
+  if(!TREP_EDITANDO) return;
+  const btn = this, st = document.getElementById('trep-modal-status');
+  btn.disabled = true; st.textContent = 'Guardando...'; st.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+      document.getElementById('trep-overlay').classList.remove('open');
+      trepCargar_(document.getElementById('ind-f-desde').value, document.getElementById('ind-f-hasta').value);
+    })
+    .withFailureHandler(function(e){ btn.disabled = false; st.textContent = (e && e.message) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; })
+    .corregirTiemposOrden(ACCESS_CODE, PANEL_USUARIO, TREP_EDITANDO.orden, trepLeerModal_());
+});
+
 function indMostrarStatus_(id, texto, esError){
   const el = document.getElementById(id);
   if(!el) return;
@@ -24139,6 +24441,7 @@ function indCargarIndicador_(){
   const desde = document.getElementById('ind-f-desde').value;
   const hasta = document.getElementById('ind-f-hasta').value;
   prepCargar_(desde, hasta);
+  trepCargar_(desde, hasta);
   indMostrarStatus_('ind-status', 'Calculando...', false);
   google.script.run
     .withSuccessHandler(function(r){
@@ -24330,6 +24633,7 @@ document.getElementById('ind-sem-cancelar').addEventListener('click', function()
 document.getElementById('ind-btn-actualizar').addEventListener('click', indCargarIndicador_);
 document.getElementById('ind-f-seccion').addEventListener('change', function(){
   indRenderSemanas_();
+  trepRender_();
   if(IND_SEMANA_DETALLE) indRenderDetalle_(IND_SEMANA_DETALLE);
 });
 document.getElementById('ind-f-desde').addEventListener('change', indCargarIndicador_);

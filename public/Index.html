@@ -1586,8 +1586,12 @@ function appTieneModulo_(modulos, m){
 function appAplicarModulos_(datos){
   datos = datos || {};
   var nombre = localStorage.getItem('reporte_usuario') || '';
-  // Servidor viejo (sin "modulos"): como siempre, solo Reportar.
-  var modulos = Array.isArray(datos.modulos) && datos.modulos.length ? datos.modulos : ['Reportar'];
+  // Sin "modulos" (servidor viejo o datos guardados sin ellos): los últimos
+  // que se guardaron en este celular; si no hay, como siempre, solo Reportar.
+  var guardados = null;
+  try { guardados = JSON.parse(localStorage.getItem('app_modulos') || 'null'); } catch(e){}
+  var modulos = Array.isArray(datos.modulos) && datos.modulos.length ? datos.modulos
+    : (Array.isArray(guardados) && guardados.length ? guardados : ['Reportar']);
   try { localStorage.setItem('app_modulos', JSON.stringify(modulos)); } catch(e){}
   var tieneTaller = appTieneModulo_(modulos, 'taller');
   var tieneReportar = appTieneModulo_(modulos, 'reportar');
@@ -1748,8 +1752,12 @@ function intentarLogin(){
       btn.disabled = false;
       btn.textContent = 'Entrar';
       if(res && res.success){
-        loginOfflineGuardar_(nombre, pass, res);
-        ocultarLogin(nombre, res);
+        // Primero se guarda la huella para entrar sin señal y DESPUÉS se entra:
+        // a quien solo tiene Taller la app lo manda en ese momento a Taller y,
+        // si se iba antes, la huella no alcanzaba a guardarse (nov-2026: un
+        // mecánico ya no pudo entrar sin señal).
+        var entrar = function(){ ocultarLogin(nombre, res); };
+        loginOfflineGuardar_(nombre, pass, res).then(entrar, entrar);
       } else {
         loginStatus.textContent = (res && res.error) || 'No se pudo iniciar sesión.';
         loginStatus.classList.add('show');
@@ -1789,9 +1797,11 @@ function asegurarUsuario(){
     .withSuccessHandler(aplicarHuerta)
     .withFailureHandler(function(){
       // Sin señal y sin copia de esta consulta: los datos que se guardaron
-      // al entrar en este celular (huertas, pestañas...).
+      // al entrar en este celular (huertas, pestañas...). Si tampoco hay, al
+      // menos sus módulos (para que quien solo tiene Taller se vaya a Taller).
       var reg = loginOfflineLeer_()[nombre];
       if(reg && reg.datos) aplicarHuerta(reg.datos);
+      else appAplicarModulos_({});
     })
     .getHuertaPorUsuario(nombre);
 }

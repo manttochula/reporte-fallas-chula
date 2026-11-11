@@ -4212,7 +4212,7 @@
             <div class="ah-pred-titulo" style="margin-top:10px;">Día con día: esperado contra real</div>
             <div class="table-wrap">
               <table class="ah-avance-operadores">
-                <thead><tr><th>Día</th><th>Tractores</th><th>Esperado</th><th>Real</th><th>Acum. esperado</th><th>Acum. real</th><th>Diferencia</th></tr></thead>
+                <thead><tr><th>Día</th><th>Tractores presupuestados</th><th>Tractores reales</th><th>Esperado</th><th>Real</th><th>Acum. esperado</th><th>Acum. real</th><th>Diferencia</th></tr></thead>
                 <tbody id="ah-pred-dias-body"></tbody>
               </table>
             </div>
@@ -9170,7 +9170,7 @@ function ahResumenPorActividad_(actividades, cuadros){
   var orden = [];
   (actividades || []).forEach(function(a){
     var t = a.trabajo || '';
-    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {}, dias: {}, opDias: {}, equipoDias: {} }; orden.push(t); }
+    if(!porTrabajo[t]){ porTrabajo[t] = { trabajo: t, haCompletadas: 0, haPonderadas: 0, haAsignadas: 0, cuadros: 0, completados: 0, enAvance: 0, operadores: {}, dias: {}, opDias: {}, equipoDias: {}, equipoNombres: {} }; orden.push(t); }
     var r = porTrabajo[t];
     var ha = haCuadro[a.cuadroId] || 0;
     var completado = a.estado === 'completado';
@@ -9211,7 +9211,7 @@ function ahResumenPorActividad_(actividades, cuadros){
       if(p >= 0.05){ od.cuadros[a.cuadroId] = true; if(x.equipo) od.equipos[x.equipo] = true; }
       // Por tractor y día (predicción de avance): ha de cada tractor cada día.
       var eq = x.equipoCodigo || x.equipo || '';
-      if(eq){ var ed = r.equipoDias[eq] || (r.equipoDias[eq] = {}); ed[x.dia] = (ed[x.dia] || 0) + ha * usable; }
+      if(eq){ var ed = r.equipoDias[eq] || (r.equipoDias[eq] = {}); ed[x.dia] = (ed[x.dia] || 0) + ha * usable; r.equipoNombres[eq] = x.equipo || eq; }
       if(p >= 0.05){
         d.cuadros[a.cuadroId] = true;
         var g = (x.operador || 'Sin nombre') + (x.equipo ? ' · ' + x.equipo : '');
@@ -9430,7 +9430,13 @@ function ahPrediccion_(r, plan, hoy){
   var esperadoDe = function(dia){
     if(!ahDiaLaborable_(dia, plan.diasExtra)) return { ha: 0, eqs: [] };
     var eqs = equipos.filter(function(eq){ return trabajoDe(eq, dia) === trabajo; });
-    return { ha: eqs.reduce(function(s, eq){ return s + (rendDe[eq] || 0); }, 0), eqs: eqs.map(function(eq){ return nombres[eq]; }) };
+    return { ha: eqs.reduce(function(s, eq){ return s + (rendDe[eq] || 0); }, 0), eqs: eqs.map(function(eq){ return nombres[eq]; }), codigos: eqs };
+  };
+  // Tractores que de verdad trabajaron la actividad ese día (con sus ha).
+  var realesDe = function(dia){
+    return Object.keys(ed).filter(function(eq){ return (ed[eq][dia] || 0) > 0.0005; }).map(function(eq){
+      return { codigo: eq, equipo: nombres[eq] || (r.equipoNombres || {})[eq] || eq, ha: ed[eq][dia], presupuestado: false };
+    });
   };
   var realDe = {};
   (r.porDia || []).forEach(function(d){ realDe[d.dia] = d.ha; });
@@ -9453,7 +9459,9 @@ function ahPrediccion_(r, plan, hoy){
     var lab = ahDiaLaborable_(d, plan.diasExtra);
     if(lab || real > 0){
       acE += eHa; acR += real;
-      out.dias.push({ dia: d, tractores: e.eqs, esperado: eHa, real: real, acumEsperado: acE, acumReal: acR, laborable: lab, hoy: d === hoy, futuro: false });
+      var reales = realesDe(d);
+      reales.forEach(function(x){ x.presupuestado = (e.codigos || []).indexOf(x.codigo) !== -1; });
+      out.dias.push({ dia: d, tractores: e.eqs, codigos: e.codigos, reales: reales, esperado: eHa, real: real, acumEsperado: acE, acumReal: acR, laborable: lab, hoy: d === hoy, futuro: false });
     }
     if(!finPlan && objetivo > 0 && acE >= objetivo - 0.005) finPlan = d;
     d = ahDiaSumar_(d, 1);
@@ -9479,7 +9487,7 @@ function ahPrediccion_(r, plan, hoy){
     var paso = Math.min(ef.ha, falta);
     if(paso > 0 || ahDiaLaborable_(dp, plan.diasExtra)){
       falta -= paso; acc += paso;
-      if(futuras++ < 730) out.dias.push({ dia: dp, tractores: ef.eqs, esperado: paso, real: null, acumEsperado: null, acumReal: acc, laborable: true, hoy: dp === hoy, futuro: true });
+      if(futuras++ < 730) out.dias.push({ dia: dp, tractores: ef.eqs, codigos: ef.codigos, reales: [], esperado: paso, real: null, acumEsperado: null, acumReal: acc, laborable: true, hoy: dp === hoy, futuro: true });
     }
     if(falta <= 0.005){ fin = dp; break; }
     dp = ahDiaSumar_(dp, 1);
@@ -9487,6 +9495,25 @@ function ahPrediccion_(r, plan, hoy){
   out.fin = fin;
   out.ritmo = esperadoDe(dp).ha;
   return out;
+}
+
+// Presupuestados: en rojo y tachado el que estaba asignado y no trabajó ese día.
+function ahPredTractoresPresup_(x){
+  if(x.futuro) return escapeHtml(x.tractores.join(', '));
+  var trabajaron = (x.reales || []).map(function(r){ return r.codigo; });
+  return x.tractores.map(function(nom, i){
+    var cod = (x.codigos || [])[i];
+    var ok = trabajaron.indexOf(cod) !== -1;
+    return ok ? escapeHtml(nom) : '<span class="ah-pred-mal" style="text-decoration:line-through;" title="Estaba presupuestado y no trabajó la actividad">' + escapeHtml(nom) + '</span>';
+  }).join(', ') || '<small>—</small>';
+}
+// Reales: cada tractor con sus ha; marcado ⚠ el que trabajó sin estar presupuestado.
+function ahPredTractoresReales_(x){
+  if(x.futuro) return '';
+  if(!x.reales || !x.reales.length) return '<span class="ah-pred-mal">Ninguno</span>';
+  return x.reales.map(function(r){
+    return (r.presupuestado ? '' : '<span title="Trabajó sin estar presupuestado en esta actividad">⚠ </span>') + escapeHtml(r.equipo) + ' <small>(' + Number(r.ha).toFixed(2) + ' ha)</small>';
+  }).join('<br>');
 }
 
 function ahCargarPlan_(huerta){
@@ -9588,15 +9615,16 @@ function ahRenderPrediccion_(res){
     var dif = x.futuro ? null : x.acumReal - x.acumEsperado;
     var cumple = x.real + 0.005 >= x.esperado;
     return '<tr class="' + cls + '"><td>' + escapeHtml(ahFechaDia_(x.dia)) + (x.futuro ? ' <small>(proyectado)</small>' : '') + (!x.laborable ? ' <small>(no laborable)</small>' : '') + '</td>'
-      + '<td>' + escapeHtml(x.tractores.join(', ')) + '</td>'
+      + '<td>' + ahPredTractoresPresup_(x) + '</td>'
+      + '<td>' + ahPredTractoresReales_(x) + '</td>'
       + '<td class="num">' + num(x.esperado, 2) + ' ha</td>'
       + '<td class="num">' + (x.futuro ? '' : '<span class="' + (cumple ? 'ah-pred-ok' : 'ah-pred-mal') + '" title="' + (cumple ? 'Llegó a lo esperado' : 'No llegó a lo esperado') + '">' + num(x.real, 2) + ' ha ' + (cumple ? '✓' : '✗') + '</span>') + '</td>'
       + '<td class="num">' + (x.futuro ? '' : num(x.acumEsperado, 2) + ' ha') + '</td>'
       + '<td class="num">' + num(x.acumReal, 2) + ' ha</td>'
       + '<td class="num">' + (dif === null ? '' : '<span class="' + (dif >= -0.005 ? 'ah-pred-ok' : 'ah-pred-mal') + '">' + (dif >= 0 ? '+' : '') + num(dif, 2) + '</span>') + '</td>'
       + '</tr>';
-  }).join('') + (pr.restante > 0.005 ? '<tr class="ah-op-total"><td colspan="7">' + (pr.fin ? '🏁 Termina el ' + escapeHtml(ahFechaDia_(pr.fin)) : 'Sin fecha de terminación: no hay tractores con rendimiento asignados') + '</td></tr>' : '')
-    : '<tr><td colspan="7" class="ah-pred-ayuda">Asigna tractores a la actividad para ver el esperado día con día.</td></tr>';
+  }).join('') + (pr.restante > 0.005 ? '<tr class="ah-op-total"><td colspan="8">' + (pr.fin ? '🏁 Termina el ' + escapeHtml(ahFechaDia_(pr.fin)) : 'Sin fecha de terminación: no hay tractores con rendimiento asignados') + '</td></tr>' : '')
+    : '<tr><td colspan="8" class="ah-pred-ayuda">Asigna tractores a la actividad para ver el esperado día con día.</td></tr>';
 }
 
 document.getElementById('ah-pred-trabajo').addEventListener('change', function(){ AH_PRED_TRABAJO = this.value; document.getElementById('ah-pred-f-trabajo').value = this.value; ahRenderPrediccion_(); });

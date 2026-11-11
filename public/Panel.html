@@ -6097,10 +6097,13 @@ function renderOrdenesTerminadasPorConfirmar_(){
   const box = document.getElementById('ord-terminadas');
   if(!box) return;
   const lista = ordTerminadasPorConfirmar_();
-  box.style.display = lista.length ? '' : 'none';
-  if(!lista.length) return;
-  document.getElementById('ord-terminadas-titulo').textContent = '✔ Trabajos terminados por confirmar (' + lista.length + ')';
-  document.getElementById('ord-terminadas-lista').innerHTML = lista.map(itemTerminadaHtml_).join('');
+  // Siempre visible para quien puede confirmar (igual que el letrero de abajo),
+  // aunque no haya ninguna: así se sabe que el aviso existe.
+  const puede = puedeCapturarPestana(['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros']);
+  box.style.display = (puede && ALL_RECORDS.length > 0) ? '' : 'none';
+  document.getElementById('ord-terminadas-titulo').textContent = '✔ Trabajos terminados por confirmar' + (lista.length ? ' (' + lista.length + ')' : '');
+  document.getElementById('ord-terminadas-lista').innerHTML = lista.length ? lista.map(itemTerminadaHtml_).join('')
+    : '<div class="ord-pend-atencion-vacio">No hay trabajos por confirmar. Aquí aparecen cuando un mecánico da "Trabajo finalizado" en Taller.</div>';
 }
 function confirmarTerminadaDesdeAviso_(orden){
   const st = document.getElementById('term-status-' + orden);

@@ -3812,3 +3812,16 @@ INSERT IGNORE INTO tipos_unidad_cuentas (tipo_id, empresa_id, cuenta_id)
 SELECT t.id, n.empresa_id, n.id FROM cuentas_contables n JOIN tipos_unidad t ON t.cuenta_contable_id = n.migrada_de
  WHERE @mig_cxe = 0 AND n.migrada_de IS NOT NULL;
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('cuentas_por_empresa_2026_11', 'hecho');
+
+-- ------------------------------------------------------------
+-- Nov-2026 (Edith): el agente pone en la OC de Comercial la Referencia (del
+-- equipo), Observaciones (el activo) y Elaboró (quien pidió la cotización).
+-- datos_estado: pendiente / hecho / error (NULL = no aplica, OC anteriores).
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'oc_exportaciones' AND column_name = 'datos_estado');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE oc_exportaciones ADD COLUMN datos_estado VARCHAR(20) DEFAULT NULL, ADD COLUMN datos_mensaje TEXT DEFAULT NULL, ADD COLUMN datos_en DATETIME DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @mig_dat = (SELECT COUNT(*) FROM configuracion WHERE clave = 'oc_datos_comercial_2026_11');
+-- Las que se cargaron desde el 11-nov-2026 también se completan.
+UPDATE oc_exportaciones SET datos_estado = 'pendiente' WHERE @mig_dat = 0 AND tipo = 'oc' AND agente_estado = 'cargada' AND agente_en >= '2026-11-11' AND datos_estado IS NULL;
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('oc_datos_comercial_2026_11', 'hecho');

@@ -9847,7 +9847,7 @@ async function agenteOcTrabajo(token, info) {
   if (ag.principal) await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
   else await pool.query('UPDATE agentes_comercial SET visto = ? WHERE id = ?', [visto, ag.id]);
   await encolarOcAutomaticas_();
-  return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, empresas: await ocsPendientesAgente_(ag), facturas: await facturasPorArchivar_(ag), gastos: await gastosPorConvertir_(ag) };
+  return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, empresas: await ocsPendientesAgente_(ag), facturas: await facturasPorArchivar_(ag), gastos: (await datosOcPorCompletar_(ag)).concat(await gastosPorConvertir_(ag)) };
 }
 
 // resultados: [{ empresaId, serie, folio, ok, mensaje, total }]
@@ -9884,8 +9884,8 @@ async function agenteOcResultado(token, resultados) {
     const mensaje = (r.mensaje || '').toString().slice(0, 1000) || null;
     const total = r.total === null || r.total === undefined || r.total === '' ? null : Number(r.total);
     await pool.query(
-      'UPDATE oc_exportaciones SET folio = ?, agente_estado = ?, agente_mensaje = ?, agente_total = ?, agente_en = NOW() WHERE id IN (?)',
-      [folio, r.ok ? 'cargada' : 'error', mensaje, Number.isFinite(total) ? total : null, ids]
+      'UPDATE oc_exportaciones SET folio = ?, agente_estado = ?, agente_mensaje = ?, agente_total = ?, agente_en = NOW(), datos_estado = ?, datos_mensaje = NULL WHERE id IN (?)',
+      [folio, r.ok ? 'cargada' : 'error', mensaje, Number.isFinite(total) ? total : null, r.ok ? 'pendiente' : null, ids]
     );
     const [ords] = await pool.query('SELECT DISTINCT orden FROM oc_exportaciones WHERE id IN (?) AND orden IS NOT NULL', [ids]);
     for (const o of ords) {
@@ -9912,6 +9912,7 @@ async function getCargaComercial(code, nombreUsuario) {
   const [empresas] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
   const [cola] = await pool.query(
     `SELECT x.empresa_id, x.serie, x.folio, x.agente_estado, MAX(x.agente_mensaje) AS mensaje, MAX(x.agente_total) AS total, MAX(x.agente_en) AS en,
+            MAX(x.datos_estado) AS datos_estado, MAX(x.datos_mensaje) AS datos_mensaje,
             MIN(x.exportado_en) AS encolado, COUNT(*) AS partidas, GROUP_CONCAT(DISTINCT x.orden) AS ordenes, MAX(p.nombre) AS proveedor
      FROM oc_exportaciones x LEFT JOIN proveedores p ON p.id = x.proveedor_id
      WHERE x.agente_estado IS NOT NULL AND (x.agente_estado <> 'cargada' OR x.agente_en > NOW() - INTERVAL 7 DAY)
@@ -9923,7 +9924,8 @@ async function getCargaComercial(code, nombreUsuario) {
     agente: agente ? { en: agente.en, version: agente.version, equipo: agente.equipo, empresasHoja: agente.empresasHoja || [], error: agente.error || '', conectado } : null,
     empresas: empresas.map((e) => ({ id: e.id, nombre: e.nombre, automatico: v['oc_auto_e' + e.id] === '1', aviso: v['agente_oc_aviso_e' + e.id] || '' })),
     cola: cola.map((c) => ({ empresaId: c.empresa_id, serie: c.serie, folio: c.folio, estado: c.agente_estado, mensaje: c.mensaje || '', total: c.total === null ? null : Number(c.total),
-      en: isoOrNull(c.en), encolado: isoOrNull(c.encolado), partidas: Number(c.partidas), ordenes: c.ordenes || '', proveedor: c.proveedor || '' })),
+      en: isoOrNull(c.en), encolado: isoOrNull(c.encolado), partidas: Number(c.partidas), ordenes: c.ordenes || '', proveedor: c.proveedor || '',
+      datosEstado: c.datos_estado || '', datosMensaje: c.datos_mensaje || '' })),
   };
 }
 
@@ -10025,6 +10027,10 @@ async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, a
     // Comercial y, si ese folio ya es de otra OC, toma el siguiente libre.
     const [u] = await pool.query("UPDATE oc_exportaciones SET agente_estado = 'pendiente', agente_mensaje = 'Marcada como NO creada en Comercial; se vuelve a cargar.', agente_total = NULL WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'cargada'", args);
     n = u.affectedRows;
+  } else if (accion === 'datos') {
+    // Nov-2026: volver a pedir al agente la referencia/activo/elaboró de la OC.
+    const [u] = await pool.query("UPDATE oc_exportaciones SET datos_estado = 'pendiente', datos_mensaje = NULL WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'cargada'", args);
+    n = u.affectedRows;
   } else return { success: false, error: 'Acción no válida.' };
   if (!n) return { success: false, error: 'Esa OC ya cambió de estado. Actualiza la lista.' };
   if (accion === 'noEsta' || accion === 'reintentar') {
@@ -10048,6 +10054,10 @@ async function accionOcComercial(code, nombreUsuario, empresaId, serie, folio, a
          LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = x.empresa_id
           SET x.codigo_proveedor = COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial, x.codigo_proveedor)
         WHERE x.empresa_id = ? AND x.serie = ? AND x.folio = ? AND x.agente_estado = 'pendiente'`, args);
+    // ...y con el almacén ACTUAL de esa empresa (nov-2026: "El Almacén solicitado no existe"
+    // en el Golfo; se corrige el almacén en la ventana y se reintenta).
+    const cfgEmp = await leerConfigOc_(args[0]);
+    if (cfgEmp.almacen) await pool.query("UPDATE oc_exportaciones SET almacen = ? WHERE empresa_id = ? AND serie = ? AND folio = ? AND agente_estado = 'pendiente'", [cfgEmp.almacen].concat(args));
   }
   await registrarAuditoria_('oc_exportaciones', args[1] + '-' + args[2], 'agente_' + accion, nombreUsuario, n + ' partida(s)');
   return { success: true, partidas: n };
@@ -10695,6 +10705,37 @@ async function datosAdicionalesGasto_(r) {
   };
 }
 
+// ---- Nov-2026 (Edith): la OC que crea el agente en Comercial lleva, como el gasto,
+// Referencia (la del equipo), Observaciones (el equipo/activo) y Elaboró (quien pidió
+// la cotización). La Hoja Electrónica no los manda, así que el agente abre la OC en
+// Comercial y los llena (convertir_gasto.ps1, trabajo tipo 'datosOc', id 'D<id>').
+async function datosOcPorCompletar_(ag) {
+  const cfgAg = await leerConfigAgente_();
+  const [rows0] = await pool.query(
+    `SELECT MIN(x.id) AS id, x.empresa_id, e.nombre AS e_nombre, x.serie, x.folio, MAX(x.concepto) AS concepto, MIN(x.orden) AS orden,
+            MIN(s.nombre_solicito) AS dueno
+       FROM oc_exportaciones x JOIN empresas e ON e.id = x.empresa_id
+       LEFT JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
+       LEFT JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+       LEFT JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+      WHERE x.tipo = 'oc' AND x.agente_estado = 'cargada' AND x.datos_estado = 'pendiente'
+      GROUP BY x.empresa_id, e.nombre, x.serie, x.folio ORDER BY MIN(x.agente_en) LIMIT 20`);
+  const atiende = await filtroAgente_(ag);
+  const rows = rows0.filter((r) => cfgAg['oc_auto_e' + r.empresa_id] === '1' && atiende(r.dueno)).slice(0, 10);
+  const out = [];
+  for (const r of rows) {
+    const [eq] = await pool.query(
+      `SELECT rp.unidad, rp.codigo_unidad, m.referencia_comercial AS ref FROM reportes rp LEFT JOIN maquinaria m ON m.codigo_unidad = rp.codigo_unidad WHERE rp.orden = ? LIMIT 1`, [r.orden || '']);
+    const u = eq[0] || {};
+    out.push({
+      tipo: 'datosOc', id: 'D' + r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
+      ocSerie: r.serie, ocFolio: Number(r.folio), ocConcepto: (r.concepto || '').toUpperCase(),
+      referencia: u.ref || '', observaciones: eq.length ? ocProv.observacionDeUnidad(u.unidad, u.codigo_unidad) : '', elaboro: r.dueno || '',
+    });
+  }
+  return out;
+}
+
 async function gastosPorConvertir_(ag) {
   const [todas] = await pool.query(
     `SELECT o.*, e.nombre AS e_nombre, ${SQL_DUENO_OC_} AS dueno,
@@ -10729,8 +10770,16 @@ async function gastosPorConvertir_(ag) {
     const fecha = fechaSoloOrNull(r.factura_fecha);
     if (!fecha) { await falla('La factura no trae fecha.'); continue; }
     if (!r.factura_folio) { await falla('La factura no trae folio.'); continue; }
+    // Nov-2026: con piezas que llevan LOTE, Comercial no guarda la conversión (OF-00025 / SB 10406
+    // quedó como convertida y no existía). Esas se convierten a mano.
+    const lotes = await refaccionesConLoteDeOc_(r.id);
+    if (lotes.length) { await falla('Requiere lote: ' + lotes.join(', ') + ' maneja lote en Comercial. Conviértela a mano (captura cantidad y lote) y márcala como hecha.'); continue; }
+    const [[pc]] = await pool.query(
+      `SELECT COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial) AS codigo FROM proveedores p
+         LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = ? WHERE p.id = ?`, [r.empresa_id, r.proveedor_id]);
     const extra = await datosAdicionalesGasto_(r);
     out.push({
+      codigoProveedor: (pc && pc.codigo) || '',
       ...extra,
       id: r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
       ocSerie: serie || '', ocFolio: folio, ocConcepto: ocConcepto || '', destino, facturaSerie: r.factura_serie || '', facturaFolio: r.factura_folio,
@@ -10759,6 +10808,17 @@ async function agenteGastosResultado(token, resultados) {
   if (resultados && !Array.isArray(resultados) && Array.isArray(resultados.value)) resultados = resultados.value;
   let ok = 0, err = 0;
   for (const r of (Array.isArray(resultados) ? resultados : [])) {
+    const md = /^D(\d+)$/.exec(String(r.id || ''));
+    if (md) {   // nov-2026: datos de la OC (referencia, activo, elaboró)
+      const [[x]] = await pool.query('SELECT empresa_id, serie, folio FROM oc_exportaciones WHERE id = ?', [Number(md[1])]);
+      if (!x) continue;
+      const k = [x.empresa_id, x.serie, x.folio];
+      if (r.esperar) { await pool.query("UPDATE oc_exportaciones SET datos_mensaje = ? WHERE empresa_id = ? AND serie = ? AND folio = ? AND datos_estado = 'pendiente'", [String(r.mensaje || '').slice(0, 1000)].concat(k)); continue; }
+      if (r.ok) ok++; else err++;
+      const msj = String(r.mensaje || (r.ok ? 'Datos puestos por el agente' : 'sin detalle')).slice(0, 1000);
+      await pool.query('UPDATE oc_exportaciones SET datos_estado = ?, datos_mensaje = ?, datos_en = NOW() WHERE empresa_id = ? AND serie = ? AND folio = ?', [r.ok ? 'hecho' : 'error', r.ok ? msj : (r.paso ? r.paso + ': ' : '') + msj].concat(k));
+      continue;
+    }
     const id = Number(r.id) || 0;
     if (!id) continue;
     if (r.esperar) {   // la PC estaba ocupada o Comercial no estaba listo: sigue pendiente

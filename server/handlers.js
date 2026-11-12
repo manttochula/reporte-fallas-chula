@@ -6367,20 +6367,25 @@ async function guardarSeccionManualPartes(code, nombreUsuario, manualId, seccion
     'INSERT INTO manuales_partes_secciones (manual_id, orden, codigo, titulo, aplica, serie, grupo, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [id, Number(seccion.orden) || 0, corta(seccion.codigo, 20), titulo.slice(0, 255), corta(seccion.aplica, 100), corta(seccion.serie, 100), corta(seccion.grupo, 255), imagenUrl]
   );
+  // Nov-2026: los códigos que se actualizaron a mano (el proveedor los cambió) se respetan al volver a subir el PDF.
+  const cambios = await codigosActualizados_();
   const piezas = (Array.isArray(seccion.piezas) ? seccion.piezas : []).slice(0, 1000)
     .map((p) => {
       p = p || {};
-      const codigo = corta(p.codigo, 40);
+      let codigo = corta(p.codigo, 40);
       const descripcion = corta(p.descripcion, 255);
       if (!codigo && !descripcion) return null;
       const cant = Number(p.cantidad);
+      let anterior = null;
+      const cam = codigo ? cambios.get(normalizarCodigoParte_(codigo)) : null;
+      if (cam) { anterior = codigo; codigo = cam; }
       return [id, r.insertId, corta(p.ref, 10), codigo, normalizarCodigoParte_(codigo) || null, descripcion,
-        p.cantidad !== null && p.cantidad !== '' && !isNaN(cant) ? cant : null, corta(p.serie, 100), corta(p.observaciones, 255)];
+        p.cantidad !== null && p.cantidad !== '' && !isNaN(cant) ? cant : null, corta(p.serie, 100), corta(p.observaciones, 255), anterior];
     })
     .filter(Boolean);
   if (piezas.length) {
     await pool.query(
-      'INSERT INTO manuales_partes_piezas (manual_id, seccion_id, ref, codigo, codigo_norm, descripcion, cantidad, serie, observaciones) VALUES ?',
+      'INSERT INTO manuales_partes_piezas (manual_id, seccion_id, ref, codigo, codigo_norm, descripcion, cantidad, serie, observaciones, codigo_anterior) VALUES ?',
       [piezas]
     );
   }
@@ -6456,7 +6461,7 @@ async function datosManualPartes_(manualId) {
     [manualId]
   );
   const [pzs] = await pool.query(
-    'SELECT id, seccion_id, ref, codigo, codigo_norm, descripcion, cantidad, serie, observaciones FROM manuales_partes_piezas WHERE manual_id = ? ORDER BY id',
+    'SELECT id, seccion_id, ref, codigo, codigo_norm, codigo_anterior, descripcion, cantidad, serie, observaciones FROM manuales_partes_piezas WHERE manual_id = ? ORDER BY id',
     [manualId]
   );
   const buscar = await mapaRefaccionesPorParte_();
@@ -6469,6 +6474,7 @@ async function datosManualPartes_(manualId) {
       id: p.id,
       ref: p.ref || '',
       codigo: p.codigo || '',
+      codigoAnterior: p.codigo_anterior || '',
       descripcion: p.descripcion || '',
       cantidad: p.cantidad !== null ? Number(p.cantidad) : null,
       serie: p.serie || '',
@@ -6489,6 +6495,47 @@ async function datosManualPartes_(manualId) {
       grupo: s.grupo || '', imagenUrl: s.imagen_url || '', piezas: porSeccion.get(s.id) || [],
     })),
   };
+}
+
+// ---- Nov-2026 (Carlos): actualizar el código de una pieza del manual ----
+// El proveedor va cambiando los códigos de algunas piezas. Se cambia en TODOS los
+// manuales donde salga ese código, se guarda el anterior ("antes: …", y se encuentra
+// buscando por él), se actualiza el No. de parte de la refacción ligada y se recuerda
+// para cuando se vuelva a subir el PDF.
+async function codigosActualizados_() {
+  const [rows] = await pool.query('SELECT codigo_anterior_norm, codigo_nuevo FROM partes_codigos_actualizados');
+  return new Map(rows.map((x) => [x.codigo_anterior_norm, x.codigo_nuevo]));
+}
+async function actualizarCodigoPiezaManual(code, nombreUsuario, piezaId, codigoNuevo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const nuevo = (codigoNuevo || '').toString().trim().toUpperCase().replace(/\s+/g, ' ').slice(0, 40);
+  const nuevoNorm = normalizarCodigoParte_(nuevo);
+  if (nuevoNorm.length < 3) return { success: false, error: 'Escribe el código nuevo de la pieza.' };
+  const [[p]] = await pool.query('SELECT id, codigo, codigo_norm, codigo_anterior FROM manuales_partes_piezas WHERE id = ?', [Number(piezaId) || 0]);
+  if (!p) return { success: false, error: 'No se encontró esa pieza. Actualiza la página.' };
+  if (!p.codigo_norm) return { success: false, error: 'Esa pieza no tiene código (no se vende sola).' };
+  if (p.codigo_norm === nuevoNorm) return { success: false, error: 'Es el mismo código que ya tiene.' };
+  const viejo = p.codigo, viejoNorm = p.codigo_norm;
+  // Refacción ligada por el código viejo (antes de cambiarlo).
+  const buscar = await mapaRefaccionesPorParte_();
+  const ref = buscar(viejoNorm);
+  // Todas las apariciones en todos los manuales; el "antes" se queda con el código ORIGINAL.
+  const [u] = await pool.query(
+    'UPDATE manuales_partes_piezas SET codigo_anterior = COALESCE(codigo_anterior, codigo), codigo = ?, codigo_norm = ? WHERE codigo_norm = ?',
+    [nuevo, nuevoNorm, viejoNorm]);
+  // Se recuerda: el original y los intermedios apuntan al nuevo.
+  await pool.query('UPDATE partes_codigos_actualizados SET codigo_nuevo = ?, codigo_nuevo_norm = ?, usuario = ?, actualizado_en = NOW() WHERE codigo_nuevo_norm = ?', [nuevo, nuevoNorm, (nombreUsuario || '').toString().slice(0, 100), viejoNorm]);
+  await pool.query(
+    'INSERT INTO partes_codigos_actualizados (codigo_anterior, codigo_anterior_norm, codigo_nuevo, codigo_nuevo_norm, usuario) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE codigo_nuevo = VALUES(codigo_nuevo), codigo_nuevo_norm = VALUES(codigo_nuevo_norm), usuario = VALUES(usuario), actualizado_en = NOW()',
+    [viejo, viejoNorm, nuevo, nuevoNorm, (nombreUsuario || '').toString().slice(0, 100)]);
+  await pool.query('DELETE FROM partes_codigos_actualizados WHERE codigo_anterior_norm = codigo_nuevo_norm');
+  let refaccion = null;
+  if (ref) {
+    await pool.query('UPDATE refacciones SET no_parte = ? WHERE id = ?', [nuevo, ref.id]);
+    refaccion = { id: ref.id, codigo: ref.codigo || '', descripcion: ref.descripcion || '', noParteAntes: ref.no_parte || '' };
+  }
+  await registrarAuditoria_('manuales_partes_piezas', viejo, 'codigo actualizado', nombreUsuario, viejo + ' → ' + nuevo + (ref ? ' (refacción ' + (ref.codigo || ref.id) + ')' : ''));
+  return { success: true, codigo: nuevo, anterior: viejo, piezas: u.affectedRows, refaccion };
 }
 
 async function manualesDisponibles_() {
@@ -12752,6 +12799,7 @@ async function revisarAvisosSeguros_(opciones) {
 module.exports = {
   gastosPorConvertir_,
   agenteGastosResultado,
+  actualizarCodigoPiezaManual,
   pedirGastoComercial,
   facturasPorArchivar_,
   agenteFacturasResultado,

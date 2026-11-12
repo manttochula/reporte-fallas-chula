@@ -4898,7 +4898,7 @@ var PANEL_SOLO_EN_LINEA = {
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
-  corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
+  actualizarCodigoPiezaManual: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -14050,7 +14050,7 @@ function abrirCatalogoRefnec_(proponer){
   if(!REFNEC_ORDEN_ACTUAL) return;
   if(!window.CatalogoPartes){ alert('No se pudo cargar el catálogo de partes. Revisa tu conexión a internet y recarga la página.'); return; }
   window.CatalogoPartes.abrir({
-    code: ACCESS_CODE, usuario: PANEL_USUARIO, orden: REFNEC_ORDEN_ACTUAL, proponerAlAbrir: !!proponer,
+    code: ACCESS_CODE, usuario: PANEL_USUARIO, orden: REFNEC_ORDEN_ACTUAL, proponerAlAbrir: !!proponer, puedeEditarCodigo: puedeCapturarPestana('refacciones'),
     onAgregar: function(item){
       const ya = REFNEC_LISTA_TRABAJO.find(function(it){
         return (item.refaccionId && it.refaccionId === item.refaccionId) || (item.piezaManualId && it.piezaManualId === item.piezaManualId);
@@ -21441,7 +21441,7 @@ function renderManualesPartes(){
 
 function verManualPartes(id){
   if(!window.CatalogoPartes){ alert('No se pudo cargar el visor del catálogo. Revisa tu conexión y recarga la página.'); return; }
-  window.CatalogoPartes.abrir({ code: ACCESS_CODE, usuario: PANEL_USUARIO, manualId: id });
+  window.CatalogoPartes.abrir({ code: ACCESS_CODE, usuario: PANEL_USUARIO, manualId: id, puedeEditarCodigo: puedeCapturarPestana('refacciones'), onCodigoActualizado: function(){ if(typeof cargarRefacciones === 'function') cargarRefacciones(); } });
 }
 
 function eliminarManualPartesPanel(id){

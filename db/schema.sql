@@ -3825,3 +3825,23 @@ SET @mig_dat = (SELECT COUNT(*) FROM configuracion WHERE clave = 'oc_datos_comer
 -- Las que se cargaron desde el 11-nov-2026 también se completan.
 UPDATE oc_exportaciones SET datos_estado = 'pendiente' WHERE @mig_dat = 0 AND tipo = 'oc' AND agente_estado = 'cargada' AND agente_en >= '2026-11-11' AND datos_estado IS NULL;
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('oc_datos_comercial_2026_11', 'hecho');
+
+-- ------------------------------------------------------------
+-- Nov-2026 (Carlos): actualizar códigos de piezas en los manuales (el proveedor
+-- los va cambiando). codigo_anterior = el que traía el PDF; la tabla recuerda el
+-- cambio para cuando se vuelva a subir el manual.
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes_piezas' AND column_name = 'codigo_anterior');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes_piezas ADD COLUMN codigo_anterior VARCHAR(40) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+CREATE TABLE IF NOT EXISTS partes_codigos_actualizados (
+  id                    INT AUTO_INCREMENT PRIMARY KEY,
+  codigo_anterior       VARCHAR(40) NOT NULL,
+  codigo_anterior_norm  VARCHAR(40) NOT NULL,
+  codigo_nuevo          VARCHAR(40) NOT NULL,
+  codigo_nuevo_norm     VARCHAR(40) NOT NULL,
+  usuario               VARCHAR(100) DEFAULT NULL,
+  actualizado_en        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_pca_anterior (codigo_anterior_norm),
+  INDEX idx_pca_nuevo (codigo_nuevo_norm)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

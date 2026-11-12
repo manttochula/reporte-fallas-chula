@@ -76,6 +76,8 @@
     '.cp-vacio{color:#888;font-style:italic;padding:20px 0;}',
     '.cp-sec-movil{display:none;margin-top:3px;}',
     '.cp-col-codigo{white-space:nowrap;}',
+    '.cp-editar-codigo{border:0;background:transparent;cursor:pointer;color:inherit;opacity:.6;padding:0 2px;font-size:13px;}',
+    '.cp-editar-codigo:hover{opacity:1;}',
     '.cp-ir{border:none;background:none;color:#0b5cad;cursor:pointer;padding:0;font-size:12px;text-decoration:underline;}',
     // El Panel tiene estilos generales para tablas/inputs (tema oscuro,
     // tablas de 1200px): aquí se anulan dentro del visor.
@@ -384,7 +386,9 @@
     return '<tr data-pieza="' + p.id + '" class="' + (motivo !== undefined ? 'cp-propuesta' : '') + (V.resaltarPieza === p.id ? ' cp-resaltada' : '') + '">' +
       (conSeccion ? '<td class="cp-col-sec"><button type="button" class="cp-ir" data-ir="' + seccion.id + '" data-ir-pieza="' + p.id + '">' + esc_(seccion.titulo) + '</button></td>' : '') +
       '<td class="cp-col-no">' + esc_(p.ref) + '</td>' +
-      '<td class="cp-col-codigo">' + esc_(p.codigo || '—') + '</td>' +
+      '<td class="cp-col-codigo">' + esc_(p.codigo || '—') +
+        (V.opts.puedeEditarCodigo && p.codigo ? ' <button type="button" class="cp-editar-codigo" data-editar-codigo="' + p.id + '" title="Actualizar el código (el proveedor lo cambió)">✎</button>' : '') +
+        (p.codigoAnterior ? '<br><span class="cp-notas" title="Código que traía el manual">antes: ' + esc_(p.codigoAnterior) + '</span>' : '') + '</td>' +
       '<td>' + esc_(p.descripcion) + (motivo ? '<span class="cp-motivo">✨ ' + esc_(motivo) + '</span>' : '') +
       (p.cantidad !== null && p.cantidad !== undefined ? '<span class="cp-sec-movil cp-notas">Lleva ' + esc_(p.cantidad) + '</span>' : '') +
       (conSeccion ? '<span class="cp-sec-movil"><button type="button" class="cp-ir" data-ir="' + seccion.id + '" data-ir-pieza="' + p.id + '">' + esc_(seccion.titulo) + '</button></span>' : '') + '</td>' +
@@ -414,8 +418,8 @@
       m.secciones.forEach(function (s) {
         var tit = norm_(s.titulo);
         s.piezas.forEach(function (p) {
-          var texto = norm_(p.descripcion + ' ' + p.observaciones + ' ' + p.codigo + ' ' + p.refaccionCodigo + ' ' + p.folioComercial) + ' ' + tit;
-          var porCodigo = qCodigo.length >= 4 && p.codigo.toUpperCase().replace(/[^0-9A-Z]/g, '').indexOf(qCodigo) !== -1;
+          var texto = norm_(p.descripcion + ' ' + p.observaciones + ' ' + p.codigo + ' ' + (p.codigoAnterior || '') + ' ' + p.refaccionCodigo + ' ' + p.folioComercial) + ' ' + tit;
+          var porCodigo = qCodigo.length >= 4 && (p.codigo + ' ' + (p.codigoAnterior || '')).toUpperCase().replace(/[^0-9A-Z ]/g, '').split(' ').some(function (c) { return c.indexOf(qCodigo) !== -1; });
           if (porCodigo || palabras.every(function (w) { return texto.indexOf(w) !== -1; })) res.push({ p: p, s: s });
         });
       });
@@ -443,6 +447,9 @@
     Array.prototype.forEach.call(det.querySelectorAll('[data-agregar]'), function (b) {
       b.addEventListener('click', function () { agregar_(Number(b.getAttribute('data-agregar')), b); });
     });
+    Array.prototype.forEach.call(det.querySelectorAll('[data-editar-codigo]'), function (b) {
+      b.addEventListener('click', function () { editarCodigo_(Number(b.getAttribute('data-editar-codigo')), b); });
+    });
     Array.prototype.forEach.call(det.querySelectorAll('[data-ir]'), function (b) {
       b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-ir')), Number(b.getAttribute('data-ir-pieza'))); });
     });
@@ -455,6 +462,31 @@
       if (p) return { p: p, s: m.secciones[i] };
     }
     return null;
+  }
+
+  // Nov-2026 (Panel): el proveedor cambió el código de la pieza. Se cambia en todos los manuales
+  // y en la refacción ligada; el anterior queda como "antes".
+  function editarCodigo_(id, boton) {
+    var x = buscarPieza_(id);
+    if (!x) return;
+    var p = x.p;
+    var nuevo = window.prompt('Código nuevo para "' + p.descripcion + '"\n(ahora: ' + p.codigo + (p.codigoAnterior ? ', antes: ' + p.codigoAnterior : '') + ').\n\nSe cambia en todos los catálogos donde salga ese código y en el No. de parte de la refacción ligada.', p.codigo);
+    if (nuevo === null) return;
+    nuevo = nuevo.trim().toUpperCase();
+    if (!nuevo || nuevo === p.codigo) return;
+    boton.disabled = true;
+    llamar_('actualizarCodigoPiezaManual', V.opts.code, V.opts.usuario, id, nuevo).then(function (r) {
+      if (!r || !r.success) { boton.disabled = false; window.alert((r && r.error) || 'No se pudo actualizar el código.'); return; }
+      var viejoNorm = p.codigo.toUpperCase().replace(/[^0-9A-Z]/g, '');
+      V.manual.secciones.forEach(function (s) {
+        s.piezas.forEach(function (q) {
+          if (q.codigo && q.codigo.toUpperCase().replace(/[^0-9A-Z]/g, '') === viejoNorm) { q.codigoAnterior = q.codigoAnterior || q.codigo; q.codigo = r.codigo; }
+        });
+      });
+      aviso_('Código actualizado: ' + r.anterior + ' → ' + r.codigo + ' (' + r.piezas + ' pieza(s) en los catálogos' + (r.refaccion ? '; refacción ' + (r.refaccion.codigo || '') + ' con el No. de parte nuevo' : '; no estaba ligada a ninguna refacción') + ').');
+      pintarDetalle_();
+      if (typeof V.opts.onCodigoActualizado === 'function') V.opts.onCodigoActualizado(r);
+    }).catch(function (e) { boton.disabled = false; window.alert('No se pudo actualizar el código: ' + e.message); });
   }
 
   function agregar_(id, boton) {

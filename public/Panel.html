@@ -22645,7 +22645,7 @@ function cargarSolicitudesCotizacion(onListo){
 function renderSolicitudesCotizacion(){
   const tbody = document.getElementById('cot-table-body');
   const visibles = ALL_SOLICITUDES_COTIZACION.filter(function(s){ return COT_FILTRO_ESTATUS.has(estadoMostradoCot(s)); });
-  document.getElementById('cot-summary').textContent = ALL_SOLICITUDES_COTIZACION.length + ' solicitudes · ' +
+  document.getElementById('cot-summary').textContent = ALL_SOLICITUDES_COTIZACION.length + ' solicitudes (una por proveedor) · ' +
     ALL_SOLICITUDES_COTIZACION.filter(function(s){ return estadoMostradoCot(s) === 'pendiente'; }).length + ' pendientes' +
     (visibles.length !== ALL_SOLICITUDES_COTIZACION.length ? ' · ' + visibles.length + ' visibles con el filtro actual' : '');
   if(ALL_SOLICITUDES_COTIZACION.length === 0){
@@ -22656,29 +22656,57 @@ function renderSolicitudesCotizacion(){
     tbody.innerHTML = '<tr><td colspan="8"><div class="empty">No hay solicitudes que coincidan con el filtro de estatus.</div></td></tr>';
     return;
   }
-  tbody.innerHTML = visibles.map(function(s){
-    const estadoMostrado = estadoMostradoCot(s);
-    const estadoCls = estadoMostrado === 'cancelada' ? 'danger' : (estadoMostrado === 'autorizada' ? 'done' : (estadoMostrado === 'respondida' ? 'info' : 'progress'));   // autorizada = verde, respondida = azul
-    const numRespuestas = (s.Respuestas || []).length;
-    const estadoLabel = estadoMostrado === 'cancelada'
-      ? 'Cancelada'
-      : (estadoMostrado === 'autorizada' ? 'Autorizada' : (estadoMostrado === 'respondida' ? ('Respondida' + (numRespuestas > 1 ? ' (' + numRespuestas + ')' : '')) : 'Pendiente'));
-    const fecha = s.CreadoEn ? new Date(s.CreadoEn).toLocaleDateString('es-MX') : '';
-    const btnCancelarReactivar = s.Estado === 'cancelada'
-      ? '<button type="button" class="export-btn cot-btn-reactivar" data-id="' + s.Id + '" style="padding:6px 10px;font-size:11px;margin-left:6px;">Reactivar</button>'
-      : '<button type="button" class="export-btn cot-btn-cancelar" data-id="' + s.Id + '" style="padding:6px 10px;font-size:11px;margin-left:6px;">Cancelar</button>';
-    return `
-    <tr>
-      <td>${escapeHtml(s.Folio)}</td>
-      <td>${s.Orden ? escapeHtml(s.Orden) + (s.OrdenUnidad ? '<span class="mnt-subtext">' + escapeHtml(s.OrdenUnidad) + '</span>' : '') : '<span class="mnt-subtext">Sin orden</span>'}</td>
-      <td>${escapeHtml(s.ProveedorNombre)}</td>
-      <td>${s.Items.length}</td>
-      <td><span class="status-pill ${estadoCls}">${estadoLabel}</span></td>
-      <td>${comercialCotHtml_(s.Comercial)}</td>
-      <td>${escapeHtml(fecha)}</td>
-      <td><button type="button" class="export-btn cot-btn-ver" data-id="${s.Id}" style="padding:6px 10px;font-size:11px;">Ver</button>${btnCancelarReactivar}</td>
-    </tr>
-    `;
+  // Nov-2026 (Carlos): una fila por ORDEN con todos sus proveedores juntos (cada
+  // proveedor sigue teniendo su propia solicitud/enlace; "Ver" abre el comparativo).
+  const grupos = [], porOrden = {};
+  ALL_SOLICITUDES_COTIZACION.forEach(function(s){
+    const k = s.Orden ? 'o:' + s.Orden : 's:' + s.Id;
+    if(!porOrden[k]){ porOrden[k] = { sols: [] }; grupos.push(porOrden[k]); }
+    porOrden[k].sols.push(s);
+  });
+  const ordenEst = { autorizada: 4, respondida: 3, pendiente: 2, cancelada: 1 };
+  tbody.innerHTML = grupos.filter(function(g){ return g.sols.some(function(s){ return COT_FILTRO_ESTATUS.has(estadoMostradoCot(s)); }); }).map(function(g){
+    const sols = g.sols.slice().sort(function(a, b){ return a.Id - b.Id; });
+    const s0 = sols[0];
+    const pill = function(s){
+      const e = estadoMostradoCot(s);
+      const cls = e === 'cancelada' ? 'danger' : (e === 'autorizada' ? 'done' : (e === 'respondida' ? 'info' : 'progress'));
+      const n = (s.Respuestas || []).length;
+      const lbl = e === 'cancelada' ? 'Cancelada' : (e === 'autorizada' ? 'Autorizada' : (e === 'respondida' ? 'Respondida' + (n > 1 ? ' (' + n + ')' : '') : 'Pendiente'));
+      return '<span class="status-pill ' + cls + '">' + lbl + '</span>';
+    };
+    const accion = function(s){
+      return s.Estado === 'cancelada'
+        ? '<button type="button" class="export-btn cot-btn-reactivar" data-id="' + s.Id + '" style="padding:2px 8px;font-size:10px;">Reactivar</button>'
+        : '<button type="button" class="export-btn cot-btn-cancelar" data-id="' + s.Id + '" style="padding:2px 8px;font-size:10px;" title="Cancelar solo la de este proveedor">Cancelar</button>';
+    };
+    const varios = sols.length > 1;
+    const provs = sols.map(function(s){
+      return '<div class="cot-prov-linea" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:2px 0;">' + escapeHtml(s.ProveedorNombre) +
+        (varios ? ' ' + pill(s) + ' <span style="font-size:11px;color:var(--text-dim);">' + escapeHtml(s.Folio) + '</span> ' + accion(s) : '') + '</div>';
+    }).join('');
+    // Estatus general: el más avanzado entre los proveedores (autorizada > respondida > pendiente).
+    const mejor = sols.slice().sort(function(a, b){ return ordenEst[estadoMostradoCot(b)] - ordenEst[estadoMostradoCot(a)]; })[0];
+    const resp = sols.filter(function(s){ return s.Estado !== 'cancelada' && estadoMostradoCot(s) !== 'pendiente'; }).length;
+    const activas = sols.filter(function(s){ return s.Estado !== 'cancelada'; }).length;
+    const estadoGral = varios ? pill(mejor) + '<div class="mnt-subtext">' + resp + ' de ' + activas + ' proveedores respondieron</div>' : pill(s0);
+    const refs = {}; sols.forEach(function(s){ (s.Items || []).forEach(function(it){ refs[it.RefaccionId || it.Descripcion] = 1; }); });
+    const comercial = sols.map(function(s){ return s.Comercial; }).filter(Boolean)[0] || null;
+    const fecha = sols.map(function(s){ return s.CreadoEn; }).filter(Boolean).sort().pop();
+    const folios = varios ? escapeHtml(sols[0].Folio) + '<span class="mnt-subtext">+' + (sols.length - 1) + ' proveedor' + (sols.length > 2 ? 'es' : '') + '</span>' : escapeHtml(s0.Folio);
+    return '<tr>' +
+      '<td>' + folios + '</td>' +
+      '<td>' + (s0.Orden ? escapeHtml(s0.Orden) + (s0.OrdenUnidad ? '<span class="mnt-subtext">' + escapeHtml(s0.OrdenUnidad) + '</span>' : '') : '<span class="mnt-subtext">Sin orden</span>') + '</td>' +
+      '<td>' + provs + '</td>' +
+      '<td>' + Object.keys(refs).length + '</td>' +
+      '<td>' + estadoGral + '</td>' +
+      '<td>' + comercialCotHtml_(comercial) + '</td>' +
+      '<td>' + escapeHtml(fecha ? new Date(fecha).toLocaleDateString('es-MX') : '') + '</td>' +
+      '<td><button type="button" class="export-btn cot-btn-ver" data-id="' + s0.Id + '" style="padding:6px 10px;font-size:11px;" title="' + (varios ? 'Comparativo de los ' + sols.length + ' proveedores' : 'Ver') + '">' + (varios ? 'Comparar' : 'Ver') + '</button>' +
+        (varios ? '' : (s0.Estado === 'cancelada'
+          ? '<button type="button" class="export-btn cot-btn-reactivar" data-id="' + s0.Id + '" style="padding:6px 10px;font-size:11px;margin-left:6px;">Reactivar</button>'
+          : '<button type="button" class="export-btn cot-btn-cancelar" data-id="' + s0.Id + '" style="padding:6px 10px;font-size:11px;margin-left:6px;">Cancelar</button>')) + '</td>' +
+      '</tr>';
   }).join('');
   tbody.querySelectorAll('.cot-btn-ver').forEach(function(btn){
     btn.addEventListener('click', function(){

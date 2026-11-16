@@ -15630,6 +15630,9 @@ document.getElementById('ent-f-total').addEventListener('input', function(){ ent
 // ---- Nov-2026: ventana "Registrar entrega a huerta" + formato para la gasolinera ----
 function abrirModalEntregaHuerta_(huerta, idFormato){
   const ov = document.getElementById('ent-reg-overlay');
+  // La ventana vive dentro de la sección de entregas; si esa sección está oculta (o
+  // dentro de algo con transform/overflow), no se ve. Se mueve al body (nov-2026).
+  if(ov.parentNode !== document.body) document.body.appendChild(ov);
   document.getElementById('ent-status').textContent = '';
   document.getElementById('ent-status').className = 'dz-entregas-status';
   document.getElementById('ent-formato').style.display = 'none';

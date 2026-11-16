@@ -3845,15 +3845,55 @@ async function submitDieselEntrega(code, nombreUsuario, data) {
     }
     const { precioLitro, total } = derivarCostoEntrega_(data, Number(data.litros));
     const folio = await siguienteFolio_(pool, 'entrega', 'ENT', 5);
-    await pool.query(
-      `INSERT INTO diesel_entregas (folio, huerta, litros, nombre, fecha, comentario, precio_litro, total)
-       VALUES (?, ?, ?, ?, NOW(), ?, ?, ?)`,
-      [folio, data.huerta, data.litros, data.nombre || '', data.comentario || null, precioLitro, total]
+    const token = require('crypto').randomBytes(16).toString('hex');
+    const [ins] = await pool.query(
+      `INSERT INTO diesel_entregas (folio, huerta, litros, nombre, fecha, comentario, precio_litro, total, token)
+       VALUES (?, ?, ?, ?, NOW(), ?, ?, ?, ?)`,
+      [folio, data.huerta, data.litros, data.nombre || '', data.comentario || null, precioLitro, total, token]
     );
-    return { success: true, folio };
+    return { success: true, folio, id: ins.insertId };
   } catch (err) {
     return { success: false, error: err.toString() };
   }
+}
+
+// ---- Nov-2026 (Carlos): formato de la entrega para la gasolinera ----
+// Datos de la entrega + gasolinera (proveedor de la huerta) y sus correos.
+async function datosFormatoEntrega_(where, valor) {
+  const [[e]] = await pool.query(
+    `SELECT d.id, d.folio, d.huerta, d.litros, d.nombre, d.fecha, d.comentario, d.token, h.proveedor_id,
+            p.nombre AS gasolinera, p.correo AS correo, e.nombre AS empresa
+       FROM diesel_entregas d
+       LEFT JOIN huertas h ON UPPER(TRIM(h.nombre)) = UPPER(TRIM(d.huerta))
+       LEFT JOIN proveedores p ON p.id = h.proveedor_id
+       LEFT JOIN empresas e ON e.id = h.empresa_id
+      WHERE d.${where} = ? AND d.eliminado_en IS NULL`, [valor]);
+  return e || null;
+}
+async function getFormatoEntregaDiesel(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'visualizar');
+  const e = await datosFormatoEntrega_('id', Number(id) || 0);
+  if (!e) return { success: false, error: 'No se encontró esa entrega.' };
+  if (!e.token) {   // entregas de antes de este formato
+    e.token = require('crypto').randomBytes(16).toString('hex');
+    await pool.query('UPDATE diesel_entregas SET token = ? WHERE id = ?', [e.token, e.id]);
+  }
+  const [cs] = e.proveedor_id ? await pool.query('SELECT correo FROM proveedor_contactos WHERE proveedor_id = ? AND correo IS NOT NULL AND correo <> \'\'', [e.proveedor_id]) : [[]];
+  const correos = [e.correo].concat(cs.map((c) => c.correo)).map((c) => (c || '').trim()).filter(Boolean).filter((c, i, a) => a.indexOf(c) === i);
+  return {
+    success: true, id: e.id, folio: e.folio, huerta: e.huerta, litros: Number(e.litros), nombre: e.nombre || '', fecha: isoOrNull(e.fecha), comentario: e.comentario || '',
+    gasolinera: e.gasolinera || '', empresa: (e.empresa || '').split(',')[0], correos, token: e.token,
+    aviso: !e.proveedor_id ? 'La huerta ' + e.huerta + ' no tiene gasolinera (proveedor) asignada en Catálogo → Huertas.' : (!correos.length ? 'La gasolinera ' + e.gasolinera + ' no tiene correo capturado en Proveedores.' : ''),
+  };
+}
+// Pública (con el token del enlace): el PDF que se le manda a la gasolinera.
+async function pdfEntregaDiesel_(token) {
+  const tk = (token || '').toString();
+  if (tk.length < 16) return null;
+  const e = await datosFormatoEntrega_('token', tk);
+  if (!e) return null;
+  const { generarPdfEntrega } = require('./formatoEntregaDiesel');
+  return { buffer: await generarPdfEntrega({ ...e, empresa: (e.empresa || '').split(',')[0] }), nombre: 'Entrega_' + e.folio + '.pdf' };
 }
 
 async function getDieselEntregas(code, nombreUsuario, incluirEliminados) {
@@ -12858,6 +12898,8 @@ module.exports = {
   gastosPorConvertir_,
   agenteGastosResultado,
   actualizarCodigoPiezaManual,
+  getFormatoEntregaDiesel,
+  pdfEntregaDiesel_,
   guardarFolioComercialCotizacion,
   cambiarRefaccionCotizacion,
   pedirGastoComercial,

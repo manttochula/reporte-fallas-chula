@@ -3845,3 +3845,11 @@ CREATE TABLE IF NOT EXISTS partes_codigos_actualizados (
   UNIQUE KEY uq_pca_anterior (codigo_anterior_norm),
   INDEX idx_pca_nuevo (codigo_nuevo_norm)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Nov-2026 (Carlos): formato de la entrega de diesel para la gasolinera
+-- (enlace público /entrega/pdf?token=...).
+-- ------------------------------------------------------------
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'diesel_entregas' AND column_name = 'token');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE diesel_entregas ADD COLUMN token VARCHAR(40) DEFAULT NULL, ADD INDEX idx_entregas_token (token)', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

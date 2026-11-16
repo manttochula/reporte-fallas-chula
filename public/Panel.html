@@ -2116,6 +2116,7 @@
     </div>
 
     <div id="pview-diesel" style="display:none;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button type="button" class="export-btn" id="ent-btn-abrir-arriba" style="background:var(--accent,#d97706);color:#fff;">⛽ Registrar entrega a huerta</button></div>
       <div class="dz-resumen" id="dzh-container">
         <div class="dz-resumen-header">Diesel por huerta</div>
         <div class="mnt-subtext" style="margin:2px 0 12px;">Cada huerta tiene aquí su propio saldo, su propia captura (de carga y de entrega) y sus propias tablas, con su propio filtro de fechas — independiente de todo lo demás. Haz clic en una huerta para abrirla. Las secciones de abajo siguen mostrando la vista general de todas las huertas juntas.</div>
@@ -2158,17 +2159,28 @@
       </div>
 
       <div class="dz-entregas" id="dz-entregas-container">
-        <div class="dz-entregas-header">Diesel entregado a huertas</div>
-        <div class="dz-entregas-form">
-          <select id="ent-huerta"><option value="" disabled selected>Selecciona huerta</option></select>
-          <input type="number" id="ent-litros" placeholder="Litros entregados" min="0" step="0.01">
-          <input type="number" id="ent-precio-litro" placeholder="Precio/L (opcional)" min="0" step="0.01">
-          <input type="number" id="ent-total" placeholder="Total (opcional)" min="0" step="0.01">
-          <input type="text" id="ent-nombre" placeholder="Quién entrega / registra">
-          <input type="text" id="ent-comentario" placeholder="Comentario (opcional)">
-          <button class="export-btn" id="ent-submit">Registrar entrega</button>
+        <div class="dz-entregas-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">Diesel entregado a huertas
+          <button type="button" class="export-btn" id="ent-btn-abrir" style="background:var(--accent,#d97706);color:#fff;">⛽ Registrar entrega a huerta</button></div>
+        <!-- Nov-2026 (Carlos): la entrega se registra en su propia ventana y genera el formato para la gasolinera -->
+        <div class="maq-modal-overlay" id="ent-reg-overlay">
+          <div class="maq-modal" style="max-width:560px;">
+            <span class="maq-modal-close" id="ent-reg-cerrar">&times;</span>
+            <h3 style="margin-top:0;">Registrar entrega de diesel a huerta</h3>
+            <div id="ent-reg-captura">
+              <div class="maq-field"><label>Huerta *</label><select id="ent-huerta"><option value="" disabled selected>Selecciona huerta</option></select></div>
+              <div class="maq-field-row">
+                <div class="maq-field"><label>Litros entregados *</label><input type="number" id="ent-litros" min="0" step="0.01"></div>
+                <div class="maq-field"><label>Precio/L (opcional)</label><input type="number" id="ent-precio-litro" min="0" step="0.01"></div>
+                <div class="maq-field"><label>Total (opcional)</label><input type="number" id="ent-total" min="0" step="0.01"></div>
+              </div>
+              <div class="maq-field"><label>Quién entrega / registra *</label><input type="text" id="ent-nombre"></div>
+              <div class="maq-field"><label>Comentario (opcional)</label><input type="text" id="ent-comentario"></div>
+              <button class="export-btn" id="ent-submit" style="width:100%;">Registrar entrega</button>
+            </div>
+            <div class="dz-entregas-status" id="ent-status"></div>
+            <div id="ent-formato" style="display:none;"></div>
+          </div>
         </div>
-        <div class="dz-entregas-status" id="ent-status"></div>
         <div class="toolbar" style="margin-bottom:10px;">
           <span class="toolbar-date-group">
             <label class="toolbar-date-label" for="ent-fecha-desde">Desde</label>
@@ -5420,7 +5432,7 @@ function ocultarControlesSoloLectura(){
     document.querySelectorAll('.refnec-item-cantidad-input').forEach(function(el){ el.disabled = true; });
   }
   if(!puedeCapturarPestana('diesel')){
-    ocultar(['#ent-submit', '#dz-btn-add', '#dz-btn-bitacora', '.dz-btn-editar', '.dz-btn-eliminar', '.dz-btn-restaurar', '#dz-btn-save', '.ent-btn-editar', '.ent-btn-eliminar', '.ent-btn-restaurar', '#ent-btn-save', '.rend-btn-guardar', '#rend-th-acciones',
+    ocultar(['#ent-submit', '#ent-btn-abrir', '#ent-btn-abrir-arriba', '#dz-btn-add', '#dz-btn-bitacora', '.dz-btn-editar', '.dz-btn-eliminar', '.dz-btn-restaurar', '#dz-btn-save', '.ent-btn-editar', '.ent-btn-eliminar', '.ent-btn-restaurar', '#ent-btn-save', '.rend-btn-guardar', '#rend-th-acciones',
       '.dzh-btn-registrar-entrega', '.dzh-btn-add-carga', '.dzh-btn-bitacora', '.dzh-btn-editar-carga', '.dzh-btn-eliminar-carga', '.dzh-btn-restaurar-carga', '.dzh-btn-editar-entrega', '.dzh-btn-eliminar-entrega', '.dzh-btn-restaurar-entrega']);
   }
   if(!puedeCapturarPestana('diesel') && !puedeCapturarPestana('combustible_automotriz')){
@@ -15404,7 +15416,8 @@ function renderEntregas(){
     const eliminadoInfo = r.Eliminado ? `<span class="mnt-subtext">Eliminada por ${escapeHtml(r.EliminadoPor || '?')} · ${formatFechaAudit(r.EliminadoEn)}</span>` : '';
     const accion = r.Eliminado
       ? `<button type="button" class="export-btn ent-btn-restaurar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Restaurar</button>`
-      : `<button type="button" class="export-btn ent-btn-editar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Editar</button>
+      : `<button type="button" class="export-btn ent-btn-formato" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;" title="Formato de la entrega para la gasolinera (PDF y correo)">Formato</button>
+        <button type="button" class="export-btn ent-btn-editar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Editar</button>
         <button type="button" class="export-btn ent-btn-eliminar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Eliminar</button>`;
     return `
     <tr${r.Eliminado ? ' style="opacity:.55;"' : ''}>
@@ -15421,6 +15434,9 @@ function renderEntregas(){
     `;
   }).join('');
 
+  tbody.querySelectorAll('.ent-btn-formato').forEach(function(btn){
+    btn.addEventListener('click', function(){ abrirModalEntregaHuerta_(null, Number(btn.dataset.id)); });
+  });
   tbody.querySelectorAll('.ent-btn-editar').forEach(function(btn){
     btn.addEventListener('click', function(){
       const entrega = ALL_ENTREGAS.find(function(r){ return String(r.Id) === btn.dataset.id; });
@@ -15611,6 +15627,63 @@ document.getElementById('ent-f-litros').addEventListener('input', entAutocalcula
 document.getElementById('ent-f-precio-litro').addEventListener('input', entAutocalcularTotal);
 document.getElementById('ent-f-total').addEventListener('input', function(){ entTotalTocado = true; });
 
+// ---- Nov-2026: ventana "Registrar entrega a huerta" + formato para la gasolinera ----
+function abrirModalEntregaHuerta_(huerta, idFormato){
+  const ov = document.getElementById('ent-reg-overlay');
+  document.getElementById('ent-status').textContent = '';
+  document.getElementById('ent-status').className = 'dz-entregas-status';
+  document.getElementById('ent-formato').style.display = 'none';
+  document.getElementById('ent-reg-captura').style.display = idFormato ? 'none' : '';
+  if(huerta){
+    const sel = document.getElementById('ent-huerta');
+    if(![].some.call(sel.options, function(o){ return o.value === huerta; })){ const op = document.createElement('option'); op.value = huerta; op.textContent = huerta; sel.appendChild(op); }
+    sel.value = huerta;
+  }
+  ov.classList.add('open');
+  if(idFormato) mostrarFormatoEntrega_(idFormato);
+}
+document.getElementById('ent-btn-abrir').addEventListener('click', function(){ abrirModalEntregaHuerta_(null); });
+document.getElementById('ent-btn-abrir-arriba').addEventListener('click', function(){ abrirModalEntregaHuerta_(null); });
+document.getElementById('ent-reg-cerrar').addEventListener('click', function(){ document.getElementById('ent-reg-overlay').classList.remove('open'); });
+function enlaceFormatoEntrega_(f){ return baseUrlPublica_() + '/entrega/pdf?token=' + f.token; }
+function textoCorreoEntrega_(f){
+  return 'Buen día,\n\n' +
+    'Les compartimos el formato de la entrega de diesel ' + f.folio + ':\n' +
+    '- Huerta: ' + f.huerta + '\n' +
+    '- Litros: ' + Number(f.litros).toLocaleString('es-MX') + ' L\n' +
+    '- Fecha: ' + (f.fecha ? new Date(f.fecha).toLocaleString('es-MX') : '') + '\n' +
+    '- Registró: ' + f.nombre + '\n\n' +
+    'Formato (PDF):\n' + enlaceFormatoEntrega_(f) + '\n\n' +
+    'Saludos,\n' + (f.empresa || 'Chula Brand');
+}
+function mostrarFormatoEntrega_(id){
+  const caja = document.getElementById('ent-formato');
+  caja.style.display = '';
+  caja.innerHTML = '<div class="mnt-subtext">Preparando el formato…</div>';
+  google.script.run
+    .withSuccessHandler(function(f){
+      if(!f || !f.success){ caja.innerHTML = '<div class="mnt-subtext" style="color:var(--danger);">' + escapeHtml((f && f.error) || 'No se pudo preparar el formato.') + '</div>'; return; }
+      document.getElementById('ent-reg-captura').style.display = 'none';
+      caja.innerHTML = '<div class="maq-field" style="margin-top:6px;"><label>Formato para la gasolinera — ' + escapeHtml(f.folio) + '</label>' +
+        '<div class="mnt-subtext">' + escapeHtml(f.huerta) + ' · ' + escapeHtml(Number(f.litros).toLocaleString('es-MX')) + ' L · ' + escapeHtml(f.fecha ? new Date(f.fecha).toLocaleString('es-MX') : '') + '</div>' +
+        '<div class="mnt-subtext" style="margin-top:4px;">Para: ' + (f.correos.length ? escapeHtml(f.correos.join(', ')) : '<b>sin correo</b>') + (f.gasolinera ? ' (' + escapeHtml(f.gasolinera) + ')' : '') + '</div>' +
+        (f.aviso ? '<div class="ocx-auto-aviso" style="margin-top:4px;">' + escapeHtml(f.aviso) + '</div>' : '') + '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"><a class="row-view" id="ent-formato-pdf" href="' + escapeHtml(enlaceFormatoEntrega_(f)) + '" target="_blank" rel="noopener">📄 Ver formato (PDF)</a>' +
+        botonesCorreoHtml_('row-view ent-btn-correo', '') + '</div>' +
+        '<div class="maq-modal-status" id="ent-formato-status"></div>' +
+        '<button type="button" class="export-btn" id="ent-btn-otra" style="margin-top:10px;">Registrar otra entrega</button>';
+      caja.querySelectorAll('.ent-btn-correo').forEach(function(b){
+        b.addEventListener('click', function(){
+          const msg = enviarCorreoVia_(b.dataset.via || 'app', f.correos, 'Entrega de diesel ' + f.folio + ' — ' + f.huerta + ' (' + Number(f.litros).toLocaleString('es-MX') + ' L)', textoCorreoEntrega_(f));
+          const st = document.getElementById('ent-formato-status'); st.textContent = msg; st.className = 'maq-modal-status show ok';
+        });
+      });
+      document.getElementById('ent-btn-otra').addEventListener('click', function(){ abrirModalEntregaHuerta_(null); });
+    })
+    .withFailureHandler(function(e){ caja.innerHTML = '<div class="mnt-subtext" style="color:var(--danger);">' + escapeHtml((e && e.message) || 'No se pudo preparar el formato.') + '</div>'; })
+    .getFormatoEntregaDiesel(ACCESS_CODE, PANEL_USUARIO, id);
+}
+
 document.getElementById('ent-submit').addEventListener('click', function(){
   const huerta = document.getElementById('ent-huerta').value;
   const litros = document.getElementById('ent-litros').value;
@@ -15648,6 +15721,7 @@ document.getElementById('ent-submit').addEventListener('click', function(){
       }
       statusEl.textContent = 'Entrega registrada: ' + result.folio;
       statusEl.className = 'dz-entregas-status show ok';
+      if(result.id) mostrarFormatoEntrega_(result.id);
       document.getElementById('ent-litros').value = '';
       document.getElementById('ent-precio-litro').value = '';
       document.getElementById('ent-total').value = '';
@@ -15831,14 +15905,7 @@ function dzhCuerpoTarjetaHtml_(i){
 
     <div class="dzh-sub">
       <div class="dzh-sub-header">Registrar entrega a esta huerta</div>
-      <div class="dz-entregas-form">
-        <input type="number" id="dzh-ent-litros-${i}" placeholder="Litros entregados" min="0" step="0.01">
-        <input type="number" id="dzh-ent-precio-${i}" placeholder="Precio/L (opcional)" min="0" step="0.01">
-        <input type="number" id="dzh-ent-total-${i}" placeholder="Total (opcional)" min="0" step="0.01">
-        <input type="text" id="dzh-ent-nombre-${i}" placeholder="Quién entrega / registra">
-        <input type="text" id="dzh-ent-comentario-${i}" placeholder="Comentario (opcional)">
-        <button type="button" class="export-btn dzh-btn-registrar-entrega" data-idx="${i}">Registrar entrega</button>
-      </div>
+      <button type="button" class="export-btn dzh-btn-registrar-entrega" data-idx="${i}">⛽ Registrar entrega a esta huerta</button>
       <div class="dz-entregas-status" id="dzh-ent-status-${i}"></div>
     </div>
 
@@ -16178,6 +16245,7 @@ function dzhEntregasFiltradas_(i, huerta){
 }
 
 function dzhRegistrarEntrega_(i, huerta){
+  abrirModalEntregaHuerta_(huerta); return;   // nov-2026: en su propia ventana (con formato para la gasolinera)
   const litros = document.getElementById('dzh-ent-litros-' + i).value;
   const precioLitro = document.getElementById('dzh-ent-precio-' + i).value;
   const total = document.getElementById('dzh-ent-total-' + i).value;
@@ -16497,14 +16565,7 @@ function dzdHuertaCuerpoTarjetaHtml_(i){
 
     <div class="dzh-sub">
       <div class="dzh-sub-header">Registrar entrega a esta huerta</div>
-      <div class="dz-entregas-form">
-        <input type="number" id="dzh-ent-litros-${i}" placeholder="Litros entregados" min="0" step="0.01">
-        <input type="number" id="dzh-ent-precio-${i}" placeholder="Precio/L (opcional)" min="0" step="0.01">
-        <input type="number" id="dzh-ent-total-${i}" placeholder="Total (opcional)" min="0" step="0.01">
-        <input type="text" id="dzh-ent-nombre-${i}" placeholder="Quién entrega / registra">
-        <input type="text" id="dzh-ent-comentario-${i}" placeholder="Comentario (opcional)">
-        <button type="button" class="export-btn dzh-btn-registrar-entrega" data-idx="${i}">Registrar entrega</button>
-      </div>
+      <button type="button" class="export-btn dzh-btn-registrar-entrega" data-idx="${i}">⛽ Registrar entrega a esta huerta</button>
       <div class="dz-entregas-status" id="dzh-ent-status-${i}"></div>
     </div>
 

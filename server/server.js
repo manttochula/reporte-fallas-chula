@@ -87,6 +87,19 @@ app.get('/oc/pdf', async (req, res) => {
   }
 });
 
+// Nov-2026: formato de la entrega de diesel a huerta (enlace que se manda a la gasolinera).
+app.get('/entrega/pdf', async (req, res) => {
+  try {
+    const r = await handlers.pdfEntregaDiesel_((req.query.token || '').toString());
+    if (!r) return res.status(404).send('Esta entrega no existe.');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', (req.query.descargar ? 'attachment' : 'inline') + '; filename="' + r.nombre + '"');
+    res.send(r.buffer);
+  } catch (err) {
+    res.status(500).send('No se pudo generar el PDF: ' + (err.message || err));
+  }
+});
+
 // --- Despachador genérico de "RPC" -----------------------------------
 // El frontend llama, por ejemplo: google.script.run.withSuccessHandler(cb)
 // .submitReporte(record) — el shim de compatibilidad (ver public/*.html)

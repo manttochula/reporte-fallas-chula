@@ -1952,6 +1952,7 @@ function solLlenarHuertas_(){
 tabSolicitud.addEventListener('click', function(){
   activarPestana(tabSolicitud, viewSolicitud);
   solLlenarHuertas_();
+  if(!document.getElementById('sol-fecha').value) document.getElementById('sol-fecha').value = (function(){ var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); })();   // nov-2026: precarga el día de hoy
   if(!SOL_PAD) SOL_PAD = solPadFirma_(document.getElementById('sol-firma'));
   SOL_PAD.limpiar();
   solCargarLista_();
@@ -1976,7 +1977,7 @@ document.getElementById('btn-submit-solicitud').addEventListener('click', functi
       btn.disabled = false; btn.textContent = 'Enviar solicitud';
       if(!r || !r.success){ msg((r && r.error) || 'No se pudo enviar.', false); return; }
       msg('✓ Solicitud ' + r.folio + ' enviada. Queda por autorizar en la oficina.', true);
-      document.getElementById('sol-litros').value = ''; document.getElementById('sol-fecha').value = '';
+      document.getElementById('sol-litros').value = ''; document.getElementById('sol-fecha').value = (function(){ var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); })();
       SOL_PAD.limpiar();
       solCargarLista_();
     })

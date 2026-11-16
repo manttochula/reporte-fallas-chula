@@ -3901,3 +3901,11 @@ UPDATE usuarios SET pestanas_celular_ocultas = JSON_ARRAY_APPEND(pestanas_celula
  WHERE @mig_sol = 0 AND pestanas_celular_ocultas IS NOT NULL AND JSON_VALID(pestanas_celular_ocultas)
    AND JSON_LENGTH(pestanas_celular_ocultas) > 0 AND NOT JSON_CONTAINS(pestanas_celular_ocultas, '"solicitud"');
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('pestana_solicitud_diesel_2026_11', 'hecho');
+
+-- Nov-2026 (Carlos): nombre completo del usuario (sale en los formatos, p. ej. la solicitud de diesel).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'usuarios' AND column_name = 'nombre_completo');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE usuarios ADD COLUMN nombre_completo VARCHAR(255) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'solicitudes_diesel' AND column_name = 'solicito_nombre');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE solicitudes_diesel ADD COLUMN solicito_nombre VARCHAR(255) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

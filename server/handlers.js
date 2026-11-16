@@ -3080,11 +3080,12 @@ function limpiarPanelPermisos_(panelPermisos) {
 
 async function getUsuarios(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'usuarios', 'visualizar');
-  const [rows] = await pool.query('SELECT nombre, huerta, huertas_adicionales, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos, pestanas_celular_ocultas FROM usuarios ORDER BY nombre');
+  const [rows] = await pool.query('SELECT nombre, nombre_completo, huerta, huertas_adicionales, password_hash, modulos, panel_permisos, huertas_ordenes, ver_letrero_ord_pend, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, diesel_cuadros_ocultos, pestanas_celular_ocultas FROM usuarios ORDER BY nombre');
   return rows
     .filter((r) => r.nombre)
     .map((r) => ({
       Nombre: r.nombre,
+      NombreCompleto: r.nombre_completo || '',
       Huerta: r.huerta || '',
       HuertasAdicionales: parseHuertasJson_(r.huertas_adicionales),
       TieneClave: !!(r.password_hash && r.password_hash.trim()),
@@ -3149,7 +3150,7 @@ async function getUsuarios(code, nombreUsuario) {
 // celular (ver PESTANAS_CELULAR en Panel.html / pestanas_celular_ocultas
 // en db/schema.sql) que esta persona NO debe ver en Index.html.
 // Vacío/ausente guarda NULL — las ve todas, igual que siempre.
-async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales, pestanasCelularOcultas) {
+async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales, pestanasCelularOcultas, nombreCompleto) {
   await requierePermisoPanel_(code, nombreUsuario, 'usuarios', 'capturar');
   if (!nombre) return { success: false, error: 'Falta el nombre.' };
   const modulosStr = Array.isArray(modulos) ? modulos.join(',') : (modulos || '').toString();
@@ -3199,6 +3200,10 @@ async function guardarUsuario(code, nombreUsuario, nombre, huerta, password, mod
           [huerta || '', modulosStr, panelPermisosStr, huertasOrdenesStr, veLetreroOrdPendInt, huertasReportarStr, veCasillaSoldaduraInt, veCasillaAutomotrizInt, dieselCuadrosOcultosStr, huertasAdicionalesStr, pestanasCelularOcultasStr, existe[0].id]
         );
       }
+    }
+    // Nov-2026: nombre completo (sale en los formatos, p. ej. la solicitud de diesel).
+    if (nombreCompleto !== undefined && nombreCompleto !== null) {
+      await pool.query('UPDATE usuarios SET nombre_completo = ? WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [(nombreCompleto || '').toString().trim().replace(/\s+/g, ' ').slice(0, 255) || null, nombre]);
     }
     return { success: true };
   } catch (err) {
@@ -3864,7 +3869,7 @@ async function submitDieselEntrega(code, nombreUsuario, data) {
 function filaSolicitudDiesel_(r) {
   return {
     Id: r.id, Folio: r.folio, Huerta: r.huerta, Litros: Number(r.litros), FechaRequerida: fechaSoloOrNull(r.fecha_requerida),
-    Solicito: r.solicito || '', Origen: r.origen, Estado: r.estado, FirmaUrl: r.firma_url || '', FirmadaPor: r.firmada_por || '', FirmadaEn: isoOrNull(r.firmada_en),
+    Solicito: r.solicito_nombre || r.solicito || '', Origen: r.origen, Estado: r.estado, FirmaUrl: r.firma_url || '', FirmadaPor: r.firmada_por || '', FirmadaEn: isoOrNull(r.firmada_en),
     AutorizadaPor: r.autorizada_por || '', AutorizadaEn: isoOrNull(r.autorizada_en), RechazoMotivo: r.rechazo_motivo || '',
     EntregaId: r.entrega_id || null, EntregaFolio: r.entrega_folio || '', CreadoEn: isoOrNull(r.creado_en),
   };
@@ -3879,14 +3884,21 @@ function validarDatosSolicitudDiesel_(data) {
   return { huerta, litros: Math.round(litros * 100) / 100, fecha: fecha || null };
 }
 function firmaValida_(firma) { return /^data:image\/(png|jpeg);base64,/.test((firma || '').toString()) && firma.length < 3 * 1024 * 1024; }
+// Nombre completo del usuario (Usuarios → "Nombre completo"); si no tiene, el nombre corto.
+async function nombreCompletoUsuario_(nombre) {
+  const [[u]] = await pool.query('SELECT nombre, nombre_completo FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [(nombre || '').toString()]);
+  return u ? (u.nombre_completo || u.nombre) : (nombre || '').toString().trim();
+}
 async function insertarSolicitudDiesel_(v, solicito, origen, firma, firmante) {
+  const completo = await nombreCompletoUsuario_(solicito);
+  firmante = await nombreCompletoUsuario_(firmante || solicito);
   const folio = await siguienteFolio_(pool, 'solicitud_diesel', 'SD', 5);
   let firmaUrl = null;
   if (firma) firmaUrl = await guardarArchivo_(firma);
   const [ins] = await pool.query(
-    `INSERT INTO solicitudes_diesel (folio, huerta, litros, fecha_requerida, solicito, origen, estado, firma_url, firmada_por, firmada_en)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [folio, v.huerta, v.litros, v.fecha, solicito.slice(0, 255), origen, firmaUrl ? 'por_autorizar' : 'por_firmar', firmaUrl, firmaUrl ? (firmante || solicito).slice(0, 255) : null, firmaUrl ? new Date() : null]);
+    `INSERT INTO solicitudes_diesel (folio, huerta, litros, fecha_requerida, solicito, solicito_nombre, origen, estado, firma_url, firmada_por, firmada_en)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [folio, v.huerta, v.litros, v.fecha, solicito.slice(0, 255), completo.slice(0, 255), origen, firmaUrl ? 'por_autorizar' : 'por_firmar', firmaUrl, firmaUrl ? firmante.slice(0, 255) : null, firmaUrl ? new Date() : null]);
   return { success: true, id: ins.insertId, folio, estado: firmaUrl ? 'por_autorizar' : 'por_firmar' };
 }
 // App (Index.html): el encargado pide y firma en el celular.
@@ -3932,12 +3944,13 @@ async function getSolicitudesDiesel(code, nombreUsuario) {
 async function firmarSolicitudDiesel(code, nombreUsuario, id, firma, firmante) {
   await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'capturar');
   if (!firmaValida_(firma)) return { success: false, error: 'Firma la solicitud.' };
-  const [[s]] = await pool.query('SELECT id, estado, solicito FROM solicitudes_diesel WHERE id = ?', [Number(id) || 0]);
+  const [[s]] = await pool.query('SELECT id, estado, solicito, solicito_nombre FROM solicitudes_diesel WHERE id = ?', [Number(id) || 0]);
   if (!s) return { success: false, error: 'No se encontró la solicitud.' };
   if (s.estado !== 'por_firmar') return { success: false, error: 'Esa solicitud ya está firmada.' };
   const url = await guardarArchivo_(firma);
+  const quienFirma = await nombreCompletoUsuario_((firmante || '').toString().trim() || s.solicito);
   await pool.query("UPDATE solicitudes_diesel SET firma_url = ?, firmada_por = ?, firmada_en = NOW(), estado = 'por_autorizar' WHERE id = ? AND estado = 'por_firmar'",
-    [url, ((firmante || '').toString().trim() || s.solicito).slice(0, 255), s.id]);
+    [url, (quienFirma || s.solicito_nombre || s.solicito).slice(0, 255), s.id]);
   return { success: true };
 }
 // Autorizar = registrar la entrega a la huerta (con los litros que se autoricen).
@@ -3951,8 +3964,8 @@ async function autorizarSolicitudDiesel(code, nombreUsuario, id, data) {
   const litros = data.litros !== undefined && data.litros !== '' ? Number(data.litros) : Number(s.litros);
   if (!(litros > 0)) return { success: false, error: 'Escribe los litros que se autorizan.' };
   const quien = (nombreUsuario || '').toString().trim();
-  const comentario = ['Solicitud ' + s.folio + ' de ' + s.solicito, (data.comentario || '').toString().trim()].filter(Boolean).join(' · ');
-  const r = await submitDieselEntrega(code, nombreUsuario, { huerta: s.huerta, litros, nombre: (data.nombre || '').toString().trim() || quien, comentario, precioLitro: data.precioLitro, total: data.total });
+  const comentario = ['Solicitud ' + s.folio + ' de ' + (s.solicito_nombre || s.solicito), (data.comentario || '').toString().trim()].filter(Boolean).join(' · ');
+  const r = await submitDieselEntrega(code, nombreUsuario, { huerta: s.huerta, litros, nombre: (data.nombre || '').toString().trim() || await nombreCompletoUsuario_(quien), comentario, precioLitro: data.precioLitro, total: data.total });
   if (!r.success) return r;
   await pool.query('UPDATE diesel_entregas SET solicitud_id = ? WHERE id = ?', [s.id, r.id]);
   const [u] = await pool.query("UPDATE solicitudes_diesel SET estado = 'autorizada', autorizada_por = ?, autorizada_en = NOW(), entrega_id = ? WHERE id = ? AND estado = 'por_autorizar'", [quien, r.id, s.id]);

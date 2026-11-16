@@ -4793,6 +4793,7 @@
     <div id="pview-usuarios" style="display:none;">
       <div class="usr-form">
         <input type="text" id="usr-nombre" placeholder="Nombre exacto de la persona">
+        <input type="text" id="usr-nombre-completo" maxlength="255" placeholder="Nombre completo (sale en los formatos, ej. la solicitud de diesel)">
         <div class="usr-modulos">
           <label><input type="checkbox" id="usr-mod-reportar"> Reportar</label>
           <label><input type="checkbox" id="usr-mod-taller"> Taller</label>
@@ -14459,6 +14460,7 @@ function renderUsuarios(usuarios){
     const nameSpan = document.createElement('span');
     nameSpan.className = 'name';
     nameSpan.textContent = u.Nombre;
+    if(u.NombreCompleto && u.NombreCompleto.toUpperCase() !== u.Nombre.toUpperCase()) nameSpan.title = u.NombreCompleto;
     const huertaSpan = document.createElement('span');
     huertaSpan.className = 'huerta';
     huertaSpan.textContent = u.Huerta ? '- ' + u.Huerta : '- sin huerta asignada';
@@ -14546,6 +14548,7 @@ function renderUsuarios(usuarios){
 
     left.addEventListener('click', function(){
       document.getElementById('usr-nombre').value = u.Nombre;
+      document.getElementById('usr-nombre-completo').value = u.NombreCompleto || '';
       document.getElementById('usr-huerta').value = u.Huerta || '';
       document.getElementById('usr-password').value = '';
       const huertasOrdenesSel = new Set(u.HuertasOrdenes || []);
@@ -14685,6 +14688,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       statusEl.textContent = 'Guardado correctamente.';
       statusEl.className = 'usr-status ok';
       document.getElementById('usr-nombre').value = '';
+      document.getElementById('usr-nombre-completo').value = '';
       document.getElementById('usr-huerta').value = '';
       document.getElementById('usr-password').value = '';
       document.getElementById('usr-mod-reportar').checked = false;
@@ -14711,7 +14715,7 @@ document.getElementById('usr-save').addEventListener('click', function(){
       statusEl.textContent = 'No se pudo guardar. Intenta de nuevo.';
       statusEl.className = 'usr-status err';
     })
-    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales, pestanasCelularOcultas);
+    .guardarUsuario(ACCESS_CODE, PANEL_USUARIO, nombre, huerta, password, modulos, panelPermisos, huertasOrdenes, veLetreroOrdPend, huertasReportar, veCasillaSoldadura, veCasillaAutomotriz, dieselCuadrosOcultos, huertasAdicionales, pestanasCelularOcultas, document.getElementById('usr-nombre-completo').value.trim());
 });
 
 // --- Rendimiento aceptable por equipo (dentro de la pestaña Diesel) ---
@@ -15756,7 +15760,7 @@ function abrirSolicitudDiesel_(modo, r){
   if(modo !== 'firmar'){
     poblarSelectSimple_('sold-huerta', HUERTAS, true);
     document.getElementById('sold-litros').value = '';
-    document.getElementById('sold-fecha').value = '';
+    document.getElementById('sold-fecha').value = (function(){ var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); })();   // nov-2026: precarga el día de hoy
     document.getElementById('sold-encargado').value = '';
   }
   document.getElementById('sold-status').className = 'maq-modal-status';

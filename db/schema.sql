@@ -3861,3 +3861,5 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'proveedores_combustible' AND column_name = 'correos');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE proveedores_combustible ADD COLUMN correos VARCHAR(500) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+-- Nov-2026: más correos por gasolinera (el 1º "Para", los demás CC).
+ALTER TABLE proveedores_combustible MODIFY COLUMN correos VARCHAR(2000) DEFAULT NULL;

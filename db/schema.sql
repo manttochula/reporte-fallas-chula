@@ -3863,3 +3863,41 @@ SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE proveedores_combustible ADD CO
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
 -- Nov-2026: más correos por gasolinera (el 1º "Para", los demás CC).
 ALTER TABLE proveedores_combustible MODIFY COLUMN correos VARCHAR(2000) DEFAULT NULL;
+
+-- ------------------------------------------------------------
+-- Nov-2026 (Carlos): solicitudes de diesel. El encargado la pide (app o Panel)
+-- y la firma (dibujada); firmada queda como pre-registro de la entrega para
+-- que se autorice en el Panel (al autorizar se crea la entrega a la huerta).
+-- estado: por_firmar / por_autorizar / autorizada / rechazada
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS solicitudes_diesel (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  folio           VARCHAR(20)  NOT NULL UNIQUE,
+  huerta          VARCHAR(255) NOT NULL,
+  litros          DECIMAL(10,2) NOT NULL,
+  fecha_requerida DATE         DEFAULT NULL,
+  solicito        VARCHAR(255) NOT NULL,
+  origen          VARCHAR(10)  NOT NULL DEFAULT 'panel',
+  estado          VARCHAR(20)  NOT NULL DEFAULT 'por_firmar',
+  firma_url       VARCHAR(500) DEFAULT NULL,
+  firmada_por     VARCHAR(255) DEFAULT NULL,
+  firmada_en      DATETIME     DEFAULT NULL,
+  autorizada_por  VARCHAR(255) DEFAULT NULL,
+  autorizada_en   DATETIME     DEFAULT NULL,
+  rechazo_motivo  VARCHAR(255) DEFAULT NULL,
+  entrega_id      INT          DEFAULT NULL,
+  creado_en       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_sold_estado (estado),
+  INDEX idx_sold_solicito (solicito)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'diesel_entregas' AND column_name = 'solicitud_id');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE diesel_entregas ADD COLUMN solicitud_id INT DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+-- La pestaña nueva "Solicitar Diesel" del celular: a quien ya tenía pestañas
+-- ocultas (operadores) se le oculta también; quien las ve todas (encargados) sí
+-- la ve. Se puede cambiar en Usuarios. Una sola vez.
+SET @mig_sol = (SELECT COUNT(*) FROM configuracion WHERE clave = 'pestana_solicitud_diesel_2026_11');
+UPDATE usuarios SET pestanas_celular_ocultas = JSON_ARRAY_APPEND(pestanas_celular_ocultas, '$', 'solicitud')
+ WHERE @mig_sol = 0 AND pestanas_celular_ocultas IS NOT NULL AND JSON_VALID(pestanas_celular_ocultas)
+   AND JSON_LENGTH(pestanas_celular_ocultas) > 0 AND NOT JSON_CONTAINS(pestanas_celular_ocultas, '"solicitud"');
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('pestana_solicitud_diesel_2026_11', 'hecho');

@@ -43,8 +43,16 @@ function generarPdfEntrega(e) {
     fila('Huerta:', t(e.huerta));
     fila('Litros entregados:', litros_(e.litros) + ' L', true);
     fila('Registró:', t(e.nombre));
+    if (e.solicitudFolio) fila('Solicitud:', t(e.solicitudFolio) + (e.solicitudFirmo ? ' · ' + t(e.solicitudFirmo) : ''));
     if (e.comentario) fila('Comentario:', t(e.comentario));
 
+    // Firma del encargado que solicitó (nov-2026)
+    if (e.firmaSolicitud) {
+      y += 6;
+      doc.font('Helvetica').fontSize(10).fillColor(GRIS).text('Firma de quien solicitó:', X, y);
+      try { doc.image(e.firmaSolicitud, X + 160, y - 6, { fit: [220, 70] }); } catch (er) { /* firma ilegible: se omite */ }
+      y += 72;
+    }
     // Firma de recibido
     y += 70;
     const w = 230;

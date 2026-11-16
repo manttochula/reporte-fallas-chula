@@ -3857,17 +3857,132 @@ async function submitDieselEntrega(code, nombreUsuario, data) {
   }
 }
 
+// ---- Nov-2026 (Carlos): solicitudes de diesel con firma del encargado ----
+// El encargado la pide desde la app o se captura en el Panel; se firma (dibujada)
+// y queda como pre-registro de la entrega "por autorizar". Al autorizar en el
+// Panel se crea la entrega a la huerta (con su formato para la gasolinera).
+function filaSolicitudDiesel_(r) {
+  return {
+    Id: r.id, Folio: r.folio, Huerta: r.huerta, Litros: Number(r.litros), FechaRequerida: fechaSoloOrNull(r.fecha_requerida),
+    Solicito: r.solicito || '', Origen: r.origen, Estado: r.estado, FirmaUrl: r.firma_url || '', FirmadaPor: r.firmada_por || '', FirmadaEn: isoOrNull(r.firmada_en),
+    AutorizadaPor: r.autorizada_por || '', AutorizadaEn: isoOrNull(r.autorizada_en), RechazoMotivo: r.rechazo_motivo || '',
+    EntregaId: r.entrega_id || null, EntregaFolio: r.entrega_folio || '', CreadoEn: isoOrNull(r.creado_en),
+  };
+}
+function validarDatosSolicitudDiesel_(data) {
+  const huerta = (data.huerta || '').toString().trim();
+  const litros = Number(data.litros);
+  const fecha = (data.fechaRequerida || '').toString().trim();
+  if (!huerta) return { error: 'Elige la huerta.' };
+  if (!(litros > 0) || litros > 100000) return { error: 'Escribe los litros que se necesitan.' };
+  if (fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { error: 'La fecha no es válida.' };
+  return { huerta, litros: Math.round(litros * 100) / 100, fecha: fecha || null };
+}
+function firmaValida_(firma) { return /^data:image\/(png|jpeg);base64,/.test((firma || '').toString()) && firma.length < 3 * 1024 * 1024; }
+async function insertarSolicitudDiesel_(v, solicito, origen, firma, firmante) {
+  const folio = await siguienteFolio_(pool, 'solicitud_diesel', 'SD', 5);
+  let firmaUrl = null;
+  if (firma) firmaUrl = await guardarArchivo_(firma);
+  const [ins] = await pool.query(
+    `INSERT INTO solicitudes_diesel (folio, huerta, litros, fecha_requerida, solicito, origen, estado, firma_url, firmada_por, firmada_en)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [folio, v.huerta, v.litros, v.fecha, solicito.slice(0, 255), origen, firmaUrl ? 'por_autorizar' : 'por_firmar', firmaUrl, firmaUrl ? (firmante || solicito).slice(0, 255) : null, firmaUrl ? new Date() : null]);
+  return { success: true, id: ins.insertId, folio, estado: firmaUrl ? 'por_autorizar' : 'por_firmar' };
+}
+// App (Index.html): el encargado pide y firma en el celular.
+async function crearSolicitudDieselApp(data) {
+  data = data || {};
+  const nombre = (data.nombre || '').toString().trim();
+  const [us] = await pool.query('SELECT * FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
+  if (!nombre || !us.length) return { success: false, error: 'Vuelve a iniciar sesión en la app.' };
+  const v = validarDatosSolicitudDiesel_(data);
+  if (v.error) return { success: false, error: v.error };
+  const permitidas = huertasEfectivasDeFila_(us[0]);
+  if (permitidas.length && !permitidas.some((h) => (h || '').toUpperCase() === v.huerta.toUpperCase())) return { success: false, error: 'No tienes acceso a la huerta ' + v.huerta + '.' };
+  if (!firmaValida_(data.firma)) return { success: false, error: 'Firma la solicitud.' };
+  return insertarSolicitudDiesel_(v, us[0].nombre, 'app', data.firma, us[0].nombre);
+}
+async function getMisSolicitudesDiesel(nombre) {
+  const [rows] = await pool.query(
+    `SELECT s.*, e.folio AS entrega_folio FROM solicitudes_diesel s LEFT JOIN diesel_entregas e ON e.id = s.entrega_id
+      WHERE LOWER(TRIM(s.solicito)) = LOWER(TRIM(?)) ORDER BY s.id DESC LIMIT 30`, [(nombre || '').toString()]);
+  return rows.map(filaSolicitudDiesel_);
+}
+// Panel
+async function crearSolicitudDiesel(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'capturar');
+  data = data || {};
+  const v = validarDatosSolicitudDiesel_(data);
+  if (v.error) return { success: false, error: v.error };
+  const restr = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  if (!huertaPermitida_(restr, v.huerta)) return { success: false, error: 'Tu usuario no tiene acceso a la huerta ' + v.huerta + '.' };
+  const encargado = (data.encargado || '').toString().trim();
+  if (!encargado) return { success: false, error: 'Escribe el nombre del encargado que solicita.' };
+  if (data.firma && !firmaValida_(data.firma)) return { success: false, error: 'La firma no es válida.' };
+  return insertarSolicitudDiesel_(v, encargado, 'panel', data.firma || null, encargado);
+}
+async function getSolicitudesDiesel(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'visualizar');
+  const restr = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  const [rows] = await pool.query(
+    `SELECT s.*, e.folio AS entrega_folio FROM solicitudes_diesel s LEFT JOIN diesel_entregas e ON e.id = s.entrega_id
+      WHERE (s.estado IN ('por_firmar', 'por_autorizar') OR s.creado_en > NOW() - INTERVAL 60 DAY)` + (restr ? ' AND UPPER(TRIM(s.huerta)) IN (?)' : '') + ' ORDER BY s.id DESC LIMIT 300', restr ? [restr] : []);
+  return rows.map(filaSolicitudDiesel_);
+}
+async function firmarSolicitudDiesel(code, nombreUsuario, id, firma, firmante) {
+  await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'capturar');
+  if (!firmaValida_(firma)) return { success: false, error: 'Firma la solicitud.' };
+  const [[s]] = await pool.query('SELECT id, estado, solicito FROM solicitudes_diesel WHERE id = ?', [Number(id) || 0]);
+  if (!s) return { success: false, error: 'No se encontró la solicitud.' };
+  if (s.estado !== 'por_firmar') return { success: false, error: 'Esa solicitud ya está firmada.' };
+  const url = await guardarArchivo_(firma);
+  await pool.query("UPDATE solicitudes_diesel SET firma_url = ?, firmada_por = ?, firmada_en = NOW(), estado = 'por_autorizar' WHERE id = ? AND estado = 'por_firmar'",
+    [url, ((firmante || '').toString().trim() || s.solicito).slice(0, 255), s.id]);
+  return { success: true };
+}
+// Autorizar = registrar la entrega a la huerta (con los litros que se autoricen).
+async function autorizarSolicitudDiesel(code, nombreUsuario, id, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'capturar');
+  data = data || {};
+  const [[s]] = await pool.query('SELECT * FROM solicitudes_diesel WHERE id = ?', [Number(id) || 0]);
+  if (!s) return { success: false, error: 'No se encontró la solicitud.' };
+  if (s.estado === 'por_firmar') return { success: false, error: 'Primero la tiene que firmar el encargado.' };
+  if (s.estado !== 'por_autorizar') return { success: false, error: 'Esa solicitud ya se ' + (s.estado === 'autorizada' ? 'autorizó.' : 'rechazó.') };
+  const litros = data.litros !== undefined && data.litros !== '' ? Number(data.litros) : Number(s.litros);
+  if (!(litros > 0)) return { success: false, error: 'Escribe los litros que se autorizan.' };
+  const quien = (nombreUsuario || '').toString().trim();
+  const comentario = ['Solicitud ' + s.folio + ' de ' + s.solicito, (data.comentario || '').toString().trim()].filter(Boolean).join(' · ');
+  const r = await submitDieselEntrega(code, nombreUsuario, { huerta: s.huerta, litros, nombre: (data.nombre || '').toString().trim() || quien, comentario, precioLitro: data.precioLitro, total: data.total });
+  if (!r.success) return r;
+  await pool.query('UPDATE diesel_entregas SET solicitud_id = ? WHERE id = ?', [s.id, r.id]);
+  const [u] = await pool.query("UPDATE solicitudes_diesel SET estado = 'autorizada', autorizada_por = ?, autorizada_en = NOW(), entrega_id = ? WHERE id = ? AND estado = 'por_autorizar'", [quien, r.id, s.id]);
+  if (!u.affectedRows) return { success: false, error: 'La solicitud cambió mientras tanto; revisa la lista.' };
+  await registrarAuditoria_('solicitudes_diesel', s.folio, 'autorizada', quien, r.folio + ' · ' + litros + ' L');
+  return { success: true, entregaId: r.id, entregaFolio: r.folio };
+}
+async function rechazarSolicitudDiesel(code, nombreUsuario, id, motivo) {
+  await requierePermisoPanel_(code, nombreUsuario, 'diesel', 'capturar');
+  const m = (motivo || '').toString().trim().slice(0, 255);
+  if (!m) return { success: false, error: 'Escribe el motivo.' };
+  const [u] = await pool.query("UPDATE solicitudes_diesel SET estado = 'rechazada', rechazo_motivo = ?, autorizada_por = ?, autorizada_en = NOW() WHERE id = ? AND estado IN ('por_firmar', 'por_autorizar')",
+    [m, (nombreUsuario || '').toString().trim(), Number(id) || 0]);
+  if (!u.affectedRows) return { success: false, error: 'Esa solicitud ya no está pendiente.' };
+  return { success: true };
+}
+
 // ---- Nov-2026 (Carlos): formato de la entrega para la gasolinera ----
 // Datos de la entrega + gasolinera (proveedor de la huerta) y sus correos.
 async function datosFormatoEntrega_(where, valor) {
   const [[e]] = await pool.query(
     `SELECT d.id, d.folio, d.huerta, d.litros, d.nombre, d.fecha, d.comentario, d.token, h.proveedor_id,
             d.confirmada_en, d.confirmada_por, d.ticket_url, d.confirmacion_comentario,
+            sd.folio AS solicitud_folio, sd.firma_url AS solicitud_firma, sd.firmada_por AS solicitud_firmo,
             p.nombre AS gasolinera, p.correos AS correos, e.nombre AS empresa
        FROM diesel_entregas d
        LEFT JOIN huertas h ON UPPER(TRIM(h.nombre)) = UPPER(TRIM(d.huerta))
        LEFT JOIN proveedores_combustible p ON p.id = h.proveedor_id
        LEFT JOIN empresas e ON e.id = h.empresa_id
+       LEFT JOIN solicitudes_diesel sd ON sd.id = d.solicitud_id
       WHERE d.${where} = ? AND d.eliminado = 0`, [valor]);
   return e || null;
 }
@@ -3924,7 +4039,9 @@ async function pdfEntregaDiesel_(token) {
   const e = await datosFormatoEntrega_('token', tk);
   if (!e) return null;
   const { generarPdfEntrega } = require('./formatoEntregaDiesel');
-  return { buffer: await generarPdfEntrega({ ...e, empresa: (e.empresa || '').split(',')[0] }), nombre: 'Entrega_' + e.folio + '.pdf' };
+  let firmaSolicitud = null;
+  if (e.solicitud_firma) { try { firmaSolicitud = await leerArchivoComoBuffer_(e.solicitud_firma); } catch (er) { firmaSolicitud = null; } }
+  return { buffer: await generarPdfEntrega({ ...e, empresa: (e.empresa || '').split(',')[0], solicitudFolio: e.solicitud_folio || '', solicitudFirmo: e.solicitud_firmo || '', firmaSolicitud }), nombre: 'Entrega_' + e.folio + '.pdf' };
 }
 
 async function getDieselEntregas(code, nombreUsuario, incluirEliminados) {
@@ -12949,6 +13066,13 @@ module.exports = {
   agenteGastosResultado,
   actualizarCodigoPiezaManual,
   getFormatoEntregaDiesel,
+  crearSolicitudDieselApp,
+  getMisSolicitudesDiesel,
+  crearSolicitudDiesel,
+  getSolicitudesDiesel,
+  firmarSolicitudDiesel,
+  autorizarSolicitudDiesel,
+  rechazarSolicitudDiesel,
   getEntregaPublica,
   confirmarEntregaPublica,
   pdfEntregaDiesel_,

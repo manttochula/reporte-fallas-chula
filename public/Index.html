@@ -65,12 +65,14 @@
   }
   .tabs{
     display:flex;
+    flex-wrap: wrap; /* nov-2026: con "Solicitar Diesel" ya no caben en una línea del celular */
     gap: 8px;
     margin-top: 16px;
   }
   .tab{
-    flex:1;
-    padding: 10px 0;
+    flex:1 1 0;
+    min-width: 76px;
+    padding: 10px 4px;
     text-align:center;
     font-family:'IBM Plex Mono', monospace;
     font-size: 12px;
@@ -136,12 +138,14 @@
   }
   .tabs{
     display:flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 16px;
   }
   .tab{
-    flex:1;
-    padding: 10px 0;
+    flex:1 1 0;
+    min-width: 76px;
+    padding: 10px 4px;
     text-align:center;
     font-family:'IBM Plex Mono', monospace;
     font-size: 12px;
@@ -697,6 +701,7 @@
       <div class="tab" id="tab-movimientos">Movimientos</div>
       <div class="tab" id="tab-misreportes">Mis Reportes</div>
       <div class="tab" id="tab-avance">Avance Huerta</div>
+      <div class="tab" id="tab-solicitud">Solicitar Diesel</div>
       <div class="tab" id="tab-taller" style="display:none;">Taller</div>
     </div>
   </header>
@@ -872,6 +877,31 @@
 
     <div id="view-misreportes" style="display:none;">
       <div id="mr-list"><div class="loading">Cargando tus reportes...</div></div>
+    </div>
+
+    <!-- Nov-2026 (Carlos): el encargado pide diesel para su huerta y la firma; en el Panel se autoriza -->
+    <div id="view-solicitud" style="display:none;">
+      <div class="field">
+        <label>Huerta <span class="req">*</span></label>
+        <select id="sol-huerta"><option value="" disabled selected>Selecciona una huerta</option></select>
+      </div>
+      <div class="field">
+        <label>Litros que se necesitan <span class="req">*</span></label>
+        <input type="number" id="sol-litros" inputmode="decimal" step="0.1" min="0" placeholder="Ej. 2000">
+      </div>
+      <div class="field">
+        <label>Para el día</label>
+        <input type="date" id="sol-fecha">
+      </div>
+      <div class="field">
+        <label>Tu firma <span class="req">*</span></label>
+        <canvas id="sol-firma" style="width:100%;height:170px;background:#fff;border:1px dashed #999;border-radius:8px;touch-action:none;display:block;"></canvas>
+        <span class="change-user-link" id="sol-firma-limpiar">Borrar firma</span>
+      </div>
+      <button class="submit-btn" id="btn-submit-solicitud">Enviar solicitud</button>
+      <div class="status" id="status-solicitud"></div>
+      <h3 style="margin:22px 0 8px;font-size:15px;">Mis solicitudes</h3>
+      <div id="sol-lista"><div class="loading">Cargando...</div></div>
     </div>
 
     <div id="view-avance" style="display:none;">
@@ -1823,6 +1853,8 @@ var tabDiesel = document.getElementById('tab-diesel');
 var tabMovimientos = document.getElementById('tab-movimientos');
 var tabMisReportes = document.getElementById('tab-misreportes');
 var tabAvance = document.getElementById('tab-avance');
+var tabSolicitud = document.getElementById('tab-solicitud');
+var viewSolicitud = document.getElementById('view-solicitud');
 var viewForm = document.getElementById('view-form');
 var viewDiesel = document.getElementById('view-diesel');
 var viewMovimientos = document.getElementById('view-movimientos');
@@ -1830,8 +1862,8 @@ var viewMisReportes = document.getElementById('view-misreportes');
 var viewAvance = document.getElementById('view-avance');
 
 function activarPestana(tabActivo, viewActivo){
-  [tabForm, tabDiesel, tabMovimientos, tabMisReportes, tabAvance].forEach(function(t){ t.classList.remove('active'); });
-  [viewForm, viewDiesel, viewMovimientos, viewMisReportes, viewAvance].forEach(function(v){ v.style.display = 'none'; });
+  [tabForm, tabDiesel, tabMovimientos, tabMisReportes, tabAvance, tabSolicitud].forEach(function(t){ t.classList.remove('active'); });
+  [viewForm, viewDiesel, viewMovimientos, viewMisReportes, viewAvance, viewSolicitud].forEach(function(v){ v.style.display = 'none'; });
   tabActivo.classList.add('active');
   viewActivo.style.display = 'block';
   if(typeof avanceDetenerIndicadorGps_ === 'function' && viewActivo !== viewAvance) avanceDetenerIndicadorGps_();
@@ -1849,7 +1881,8 @@ var PESTANAS_CELULAR_MAP_ = {
   diesel: tabDiesel,
   movimientos: tabMovimientos,
   misreportes: tabMisReportes,
-  avance: tabAvance
+  avance: tabAvance,
+  solicitud: tabSolicitud
 };
 function aplicarPestanasCelularOcultas_(ocultas){
   var lista = Array.isArray(ocultas) ? ocultas : [];
@@ -1872,6 +1905,83 @@ function aplicarPestanasCelularOcultas_(ocultas){
 
 tabForm.addEventListener('click', function(){
   activarPestana(tabForm, viewForm);
+});
+// ---- Nov-2026: Solicitar Diesel (el encargado pide y firma; se autoriza en el Panel) ----
+var SOL_PAD = null;
+function solPadFirma_(canvas){
+  var ctx = canvas.getContext('2d'), dibujo = false, trazos = 0;
+  function ajustar(){
+    var r = canvas.getBoundingClientRect(), k = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(r.width * k)); canvas.height = Math.max(1, Math.round(r.height * k));
+    ctx.setTransform(k, 0, 0, k, 0, 0); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, r.width, r.height);
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; trazos = 0;
+  }
+  function punto(ev){ var r = canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
+  canvas.addEventListener('pointerdown', function(ev){ ev.preventDefault(); dibujo = true; var p = punto(ev); ctx.beginPath(); ctx.moveTo(p.x, p.y); if(canvas.setPointerCapture) canvas.setPointerCapture(ev.pointerId); });
+  canvas.addEventListener('pointermove', function(ev){ if(!dibujo) return; var p = punto(ev); ctx.lineTo(p.x, p.y); ctx.stroke(); trazos++; });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(t){ canvas.addEventListener(t, function(){ dibujo = false; }); });
+  return { limpiar: ajustar, vacio: function(){ return trazos < 3; }, dataUrl: function(){ return canvas.toDataURL('image/png'); } };
+}
+var SOL_ESTADO_TXT_ = { por_firmar: 'Por firmar', por_autorizar: 'Por autorizar', autorizada: 'Autorizada', rechazada: 'Rechazada' };
+function solCargarLista_(){
+  var nombre = localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim();
+  var cont = document.getElementById('sol-lista');
+  google.script.run
+    .withSuccessHandler(function(rows){
+      rows = rows || [];
+      if(!rows.length){ cont.innerHTML = '<div class="empty-state" style="font-size:13px;opacity:.8;">Todavía no has pedido diesel.</div>'; return; }
+      cont.innerHTML = rows.map(function(r){
+        var ok = r.Estado === 'autorizada';
+        return '<div class="mov-card"><div class="mov-top"><span class="mov-folio">' + escapeHtmlAttr(r.Folio) + '</span><span class="status-pill ' + (ok ? 'confirmado' : 'pendiente') + '">' + SOL_ESTADO_TXT_[r.Estado] + '</span></div>' +
+          '<div class="mov-unit">' + escapeHtmlAttr(r.Huerta) + ' · ' + escapeHtmlAttr(Number(r.Litros).toLocaleString('es-MX')) + ' L</div>' +
+          '<div class="mov-meta">' + (r.FechaRequerida ? 'Para el ' + escapeHtmlAttr(r.FechaRequerida.split('-').reverse().join('/')) + ' · ' : '') + 'Pedida ' + escapeHtmlAttr(formatFecha(r.CreadoEn)) +
+          (ok && r.EntregaFolio ? '<br>Entrega ' + escapeHtmlAttr(r.EntregaFolio) : '') + (r.Estado === 'rechazada' && r.RechazoMotivo ? '<br>Motivo: ' + escapeHtmlAttr(r.RechazoMotivo) : '') + '</div></div>';
+      }).join('');
+    })
+    .withFailureHandler(function(){ cont.innerHTML = '<div class="empty-state" style="font-size:13px;opacity:.8;">No se pudieron cargar tus solicitudes (¿sin señal?).</div>'; })
+    .getMisSolicitudesDiesel(nombre);
+}
+function solLlenarHuertas_(){
+  var sel = document.getElementById('sol-huerta');
+  var lista = (huertasUsuarioActual && huertasUsuarioActual.length) ? huertasUsuarioActual
+    : Array.prototype.slice.call(document.getElementById('f-huerta').options).map(function(o){ return o.value; }).filter(Boolean);
+  var actual = sel.value;
+  sel.innerHTML = '<option value="" disabled' + (actual ? '' : ' selected') + '>Selecciona una huerta</option>' + lista.map(function(h){ return '<option value="' + escapeHtmlAttr(h) + '">' + escapeHtmlAttr(h) + '</option>'; }).join('');
+  if(actual && lista.indexOf(actual) !== -1) sel.value = actual; else if(lista.length === 1) sel.value = lista[0];
+}
+tabSolicitud.addEventListener('click', function(){
+  activarPestana(tabSolicitud, viewSolicitud);
+  solLlenarHuertas_();
+  if(!SOL_PAD) SOL_PAD = solPadFirma_(document.getElementById('sol-firma'));
+  SOL_PAD.limpiar();
+  solCargarLista_();
+});
+document.getElementById('sol-firma-limpiar').addEventListener('click', function(){ if(SOL_PAD) SOL_PAD.limpiar(); });
+document.getElementById('btn-submit-solicitud').addEventListener('click', function(){
+  var btn = this, st = document.getElementById('status-solicitud');
+  function msg(t, ok){ st.textContent = t; st.className = 'status show ' + (ok ? 'ok' : 'err'); }
+  var datos = {
+    nombre: localStorage.getItem('reporte_usuario') || document.getElementById('f-nombre').value.trim(),
+    huerta: document.getElementById('sol-huerta').value,
+    litros: document.getElementById('sol-litros').value,
+    fechaRequerida: document.getElementById('sol-fecha').value
+  };
+  if(!datos.huerta || !datos.litros){ msg('Elige la huerta y escribe los litros.', false); return; }
+  if(!SOL_PAD || SOL_PAD.vacio()){ msg('Firma la solicitud en el recuadro blanco.', false); return; }
+  if(navigator.onLine === false){ msg('Sin señal: la solicitud se manda cuando tengas internet.', false); return; }
+  datos.firma = SOL_PAD.dataUrl();
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false; btn.textContent = 'Enviar solicitud';
+      if(!r || !r.success){ msg((r && r.error) || 'No se pudo enviar.', false); return; }
+      msg('✓ Solicitud ' + r.folio + ' enviada. Queda por autorizar en la oficina.', true);
+      document.getElementById('sol-litros').value = ''; document.getElementById('sol-fecha').value = '';
+      SOL_PAD.limpiar();
+      solCargarLista_();
+    })
+    .withFailureHandler(function(){ btn.disabled = false; btn.textContent = 'Enviar solicitud'; msg('No se pudo enviar. Revisa tu señal e intenta de nuevo.', false); })
+    .crearSolicitudDieselApp(datos);
 });
 tabDiesel.addEventListener('click', function(){
   activarPestana(tabDiesel, viewDiesel);

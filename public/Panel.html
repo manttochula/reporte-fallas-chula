@@ -2116,7 +2116,38 @@
     </div>
 
     <div id="pview-diesel" style="display:none;">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button type="button" class="export-btn" id="ent-btn-abrir-arriba" style="background:var(--accent,#d97706);color:#fff;">⛽ Registrar entrega a huerta</button></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button type="button" class="export-btn" id="sold-btn-nueva">📝 Solicitar diesel</button>
+        <button type="button" class="export-btn" id="ent-btn-abrir-arriba" style="background:var(--accent,#d97706);color:#fff;">⛽ Registrar entrega a huerta</button></div>
+      <!-- Nov-2026 (Carlos): solicitudes de diesel firmadas por el encargado → pre-registro de la entrega por autorizar -->
+      <div class="dz-resumen" id="sold-container">
+        <div class="dz-resumen-header">Solicitudes de diesel</div>
+        <div class="mnt-subtext" style="margin:2px 0 10px;">El encargado pide el diesel (desde la app o aquí) y la firma. Firmada queda <b>por autorizar</b>: al autorizarla se registra la entrega a la huerta y sale el formato para la gasolinera.</div>
+        <div class="table-wrap"><table style="min-width:0;"><thead><tr><th>Folio</th><th>Huerta</th><th>Litros</th><th>Para el</th><th>Solicitó</th><th>Estado</th><th>Firma</th><th>Acciones</th></tr></thead>
+          <tbody id="sold-table-body"><tr><td colspan="8"><div class="empty">Cargando...</div></td></tr></tbody></table></div>
+      </div>
+      <div class="maq-modal-overlay" id="sold-overlay">
+        <div class="maq-modal" style="max-width:520px;">
+          <span class="maq-modal-close" id="sold-cerrar">&times;</span>
+          <h3 style="margin-top:0;" id="sold-titulo">Solicitar diesel</h3>
+          <div id="sold-captura">
+            <div class="maq-field"><label>Huerta *</label><select id="sold-huerta"><option value="">Selecciona huerta</option></select></div>
+            <div class="maq-field-row">
+              <div class="maq-field"><label>Litros *</label><input type="number" id="sold-litros" min="0" step="0.01"></div>
+              <div class="maq-field"><label>Para el día</label><input type="date" id="sold-fecha"></div>
+            </div>
+            <div class="maq-field"><label>Encargado que solicita *</label><input type="text" id="sold-encargado" maxlength="150"></div>
+          </div>
+          <div id="sold-resumen" class="mnt-subtext" style="display:none;margin-bottom:8px;"></div>
+          <div class="maq-field"><label id="sold-firma-label">Firma del encargado</label>
+            <canvas id="sold-firma" style="width:100%;height:160px;background:#fff;border:1px dashed #999;border-radius:6px;touch-action:none;"></canvas>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;"><small style="color:var(--text-dim);" id="sold-firma-ayuda">Firma con el mouse o el dedo. Si no está el encargado, guárdala sin firma y la firma después.</small>
+              <button type="button" class="export-btn" id="sold-firma-limpiar" style="padding:4px 10px;font-size:11px;">Borrar firma</button></div>
+          </div>
+          <button type="button" class="maq-save-btn" id="sold-guardar" style="width:100%;">Guardar solicitud</button>
+          <div class="maq-modal-status" id="sold-status"></div>
+        </div>
+      </div>
       <div class="dz-resumen" id="dzh-container">
         <div class="dz-resumen-header">Diesel por huerta</div>
         <div class="mnt-subtext" style="margin:2px 0 12px;">Cada huerta tiene aquí su propio saldo, su propia captura (de carga y de entrega) y sus propias tablas, con su propio filtro de fechas — independiente de todo lo demás. Haz clic en una huerta para abrirla. Las secciones de abajo siguen mostrando la vista general de todas las huertas juntas.</div>
@@ -4916,7 +4947,7 @@ var PANEL_SOLO_EN_LINEA = {
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
-  actualizarCodigoPiezaManual: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
+  actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -5249,6 +5280,7 @@ const PESTANAS_CELULAR = [
   { id: 'movimientos', label: 'Movimientos' },
   { id: 'misreportes', label: 'Mis Reportes' },
   { id: 'avance', label: 'Avance Huerta' },
+  { id: 'solicitud', label: 'Solicitar Diesel' },
 ];
 (function poblarUsrPestanasCelularGrid_(){
   const grid = document.getElementById('usr-pestanas-celular-grid');
@@ -5438,7 +5470,7 @@ function ocultarControlesSoloLectura(){
     document.querySelectorAll('.refnec-item-cantidad-input').forEach(function(el){ el.disabled = true; });
   }
   if(!puedeCapturarPestana('diesel')){
-    ocultar(['#ent-submit', '#ent-btn-abrir', '#ent-btn-abrir-arriba', '#dz-btn-add', '#dz-btn-bitacora', '.dz-btn-editar', '.dz-btn-eliminar', '.dz-btn-restaurar', '#dz-btn-save', '.ent-btn-editar', '.ent-btn-eliminar', '.ent-btn-restaurar', '#ent-btn-save', '.rend-btn-guardar', '#rend-th-acciones',
+    ocultar(['#ent-submit', '#ent-btn-abrir', '#ent-btn-abrir-arriba', '#sold-btn-nueva', '#dz-btn-add', '#dz-btn-bitacora', '.dz-btn-editar', '.dz-btn-eliminar', '.dz-btn-restaurar', '#dz-btn-save', '.ent-btn-editar', '.ent-btn-eliminar', '.ent-btn-restaurar', '#ent-btn-save', '.rend-btn-guardar', '#rend-th-acciones',
       '.dzh-btn-registrar-entrega', '.dzh-btn-add-carga', '.dzh-btn-bitacora', '.dzh-btn-editar-carga', '.dzh-btn-eliminar-carga', '.dzh-btn-restaurar-carga', '.dzh-btn-editar-entrega', '.dzh-btn-eliminar-entrega', '.dzh-btn-restaurar-entrega']);
   }
   if(!puedeCapturarPestana('diesel') && !puedeCapturarPestana('combustible_automotriz')){
@@ -7687,6 +7719,7 @@ ptabOrdenes.addEventListener('click', function(){
 ptabDiesel.addEventListener('click', function(){
   activarPanelTab(ptabDiesel, pviewDiesel);
   if(!DIESEL_CARGADO){ cargarDiesel(); }
+  cargarSolicitudesDiesel_();
   if(!ENTREGAS_CARGADAS){ cargarEntregas(); }
   if(!DIESEL_RESUMEN_CARGADO){ cargarDieselRestante(); }
   if(!RENDIMIENTO_CARGADO){ cargarRendimientoMaquinaria(); }
@@ -15632,6 +15665,131 @@ function entAutocalcularTotal(){
 document.getElementById('ent-f-litros').addEventListener('input', entAutocalcularTotal);
 document.getElementById('ent-f-precio-litro').addEventListener('input', entAutocalcularTotal);
 document.getElementById('ent-f-total').addEventListener('input', function(){ entTotalTocado = true; });
+
+// ---- Nov-2026: firma dibujada (mouse o dedo) en un <canvas> ----
+function padFirma_(canvas){
+  const ctx = canvas.getContext('2d');
+  let dibujo = false, trazos = 0;
+  const ajustar = function(){
+    const r = canvas.getBoundingClientRect(), k = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(r.width * k)); canvas.height = Math.max(1, Math.round(r.height * k));
+    ctx.setTransform(k, 0, 0, k, 0, 0); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, r.width, r.height);
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; trazos = 0;
+  };
+  const punto = function(ev){ const r = canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+  canvas.addEventListener('pointerdown', function(ev){ ev.preventDefault(); dibujo = true; const p = punto(ev); ctx.beginPath(); ctx.moveTo(p.x, p.y); canvas.setPointerCapture && canvas.setPointerCapture(ev.pointerId); });
+  canvas.addEventListener('pointermove', function(ev){ if(!dibujo) return; const p = punto(ev); ctx.lineTo(p.x, p.y); ctx.stroke(); trazos++; });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(t){ canvas.addEventListener(t, function(){ dibujo = false; }); });
+  return { limpiar: ajustar, vacio: function(){ return trazos < 3; }, dataUrl: function(){ return canvas.toDataURL('image/png'); } };
+}
+
+// ---- Nov-2026: solicitudes de diesel (firma del encargado → por autorizar → entrega) ----
+let SOLD_LISTA = [], SOLD_PAD = null, SOLD_MODO = null;
+const SOLD_ESTADO_TXT_ = { por_firmar: 'Por firmar', por_autorizar: 'Por autorizar', autorizada: 'Autorizada', rechazada: 'Rechazada' };
+function cargarSolicitudesDiesel_(){
+  google.script.run
+    .withSuccessHandler(function(rows){ SOLD_LISTA = rows || []; pintarSolicitudesDiesel_(); })
+    .withFailureHandler(function(){ document.getElementById('sold-table-body').innerHTML = '<tr><td colspan="8"><div class="empty">No se pudieron cargar las solicitudes.</div></td></tr>'; })
+    .getSolicitudesDiesel(ACCESS_CODE, PANEL_USUARIO);
+}
+function pintarSolicitudesDiesel_(){
+  const tb = document.getElementById('sold-table-body');
+  if(!SOLD_LISTA.length){ tb.innerHTML = '<tr><td colspan="8"><div class="empty">No hay solicitudes de diesel.</div></td></tr>'; return; }
+  const puede = puedeCapturarPestana('diesel');
+  tb.innerHTML = SOLD_LISTA.map(function(r){
+    const cls = r.Estado === 'autorizada' ? 'done' : (r.Estado === 'rechazada' ? 'danger' : (r.Estado === 'por_autorizar' ? 'info' : 'progress'));
+    let acc = '';
+    if(puede && r.Estado === 'por_firmar') acc += '<button type="button" class="export-btn sold-acc" data-acc="firmar" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;">Firmar</button> ';
+    if(puede && r.Estado === 'por_autorizar') acc += '<button type="button" class="export-btn sold-acc" data-acc="autorizar" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;background:var(--accent,#d97706);color:#fff;">Autorizar</button> ';
+    if(puede && (r.Estado === 'por_firmar' || r.Estado === 'por_autorizar')) acc += '<button type="button" class="export-btn sold-acc" data-acc="rechazar" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;">Rechazar</button>';
+    if(r.Estado === 'autorizada' && r.EntregaId) acc += '<button type="button" class="export-btn sold-acc" data-acc="formato" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;">Formato ' + escapeHtml(r.EntregaFolio) + '</button>';
+    const detalle = r.Estado === 'rechazada' ? '<span class="mnt-subtext">' + escapeHtml(r.RechazoMotivo) + '</span>'
+      : (r.Estado === 'autorizada' ? '<span class="mnt-subtext">' + escapeHtml(r.AutorizadaPor) + '</span>' : '');
+    return '<tr><td class="folio">' + escapeHtml(r.Folio) + '<span class="mnt-subtext">' + (r.Origen === 'app' ? '📱 App' : 'Panel') + ' · ' + escapeHtml(r.CreadoEn ? new Date(r.CreadoEn).toLocaleDateString('es-MX') : '') + '</span></td>' +
+      '<td>' + escapeHtml(r.Huerta) + '</td><td>' + escapeHtml(Number(r.Litros).toLocaleString('es-MX')) + '</td>' +
+      '<td>' + escapeHtml(r.FechaRequerida ? fechaOcCorta_(r.FechaRequerida) : '—') + '</td><td>' + escapeHtml(r.Solicito) + '</td>' +
+      '<td><span class="status-pill ' + cls + '">' + SOLD_ESTADO_TXT_[r.Estado] + '</span>' + detalle + '</td>' +
+      '<td>' + (r.FirmaUrl ? '<a href="' + escapeHtml(r.FirmaUrl) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(r.FirmaUrl) + '" alt="Firma" style="height:34px;background:#fff;border-radius:4px;"></a>' : '—') + '</td>' +
+      '<td>' + acc + '</td></tr>';
+  }).join('');
+  tb.querySelectorAll('.sold-acc').forEach(function(b){
+    b.addEventListener('click', function(){
+      const r = SOLD_LISTA.find(function(x){ return String(x.Id) === b.dataset.id; });
+      if(!r) return;
+      if(b.dataset.acc === 'firmar') abrirSolicitudDiesel_('firmar', r);
+      else if(b.dataset.acc === 'formato') abrirModalEntregaHuerta_(null, r.EntregaId);
+      else if(b.dataset.acc === 'rechazar'){
+        const m = prompt('¿Por qué se rechaza la solicitud ' + r.Folio + '?');
+        if(m === null) return;
+        b.disabled = true;
+        google.script.run.withSuccessHandler(function(x){ if(!x || !x.success){ b.disabled = false; alert((x && x.error) || 'No se pudo.'); return; } cargarSolicitudesDiesel_(); })
+          .withFailureHandler(function(e){ b.disabled = false; alert((e && e.message) || 'No se pudo.'); })
+          .rechazarSolicitudDiesel(ACCESS_CODE, PANEL_USUARIO, r.Id, m);
+      } else if(b.dataset.acc === 'autorizar'){
+        const l = prompt('Autorizar la solicitud ' + r.Folio + ' (' + r.Huerta + ').\nSe registra la entrega a la huerta y sale el formato para la gasolinera.\n\nLitros a entregar:', String(r.Litros));
+        if(l === null) return;
+        b.disabled = true;
+        google.script.run.withSuccessHandler(function(x){
+            if(!x || !x.success){ b.disabled = false; alert((x && x.error) || 'No se pudo.'); return; }
+            cargarSolicitudesDiesel_();
+            if(typeof cargarEntregas === 'function') cargarEntregas();
+            DIESEL_RESUMEN_CARGADO = false; if(typeof cargarDieselRestante === 'function') cargarDieselRestante();
+            abrirModalEntregaHuerta_(null, x.entregaId);
+          })
+          .withFailureHandler(function(e){ b.disabled = false; alert((e && e.message) || 'No se pudo.'); })
+          .autorizarSolicitudDiesel(ACCESS_CODE, PANEL_USUARIO, r.Id, { litros: l });
+      }
+    });
+  });
+}
+function abrirSolicitudDiesel_(modo, r){
+  SOLD_MODO = { modo: modo, r: r || null };
+  const ov = document.getElementById('sold-overlay');
+  if(ov.parentNode !== document.body) document.body.appendChild(ov);
+  document.getElementById('sold-titulo').textContent = modo === 'firmar' ? 'Firmar solicitud ' + r.Folio : 'Solicitar diesel';
+  document.getElementById('sold-captura').style.display = modo === 'firmar' ? 'none' : '';
+  const res = document.getElementById('sold-resumen');
+  res.style.display = modo === 'firmar' ? '' : 'none';
+  if(modo === 'firmar') res.textContent = r.Huerta + ' · ' + Number(r.Litros).toLocaleString('es-MX') + ' L' + (r.FechaRequerida ? ' · para el ' + fechaOcCorta_(r.FechaRequerida) : '') + ' · solicitó ' + r.Solicito;
+  document.getElementById('sold-firma-ayuda').textContent = modo === 'firmar' ? 'Firma del encargado (' + r.Solicito + ').' : 'Firma con el mouse o el dedo. Si no está el encargado, guárdala sin firma y la firma después.';
+  document.getElementById('sold-guardar').textContent = modo === 'firmar' ? 'Guardar firma' : 'Guardar solicitud';
+  if(modo !== 'firmar'){
+    poblarSelectSimple_('sold-huerta', HUERTAS, true);
+    document.getElementById('sold-litros').value = '';
+    document.getElementById('sold-fecha').value = '';
+    document.getElementById('sold-encargado').value = '';
+  }
+  document.getElementById('sold-status').className = 'maq-modal-status';
+  ov.classList.add('open');
+  if(!SOLD_PAD) SOLD_PAD = padFirma_(document.getElementById('sold-firma'));
+  SOLD_PAD.limpiar();
+}
+document.getElementById('sold-btn-nueva').addEventListener('click', function(){ abrirSolicitudDiesel_('nueva'); });
+document.getElementById('sold-cerrar').addEventListener('click', function(){ document.getElementById('sold-overlay').classList.remove('open'); });
+document.getElementById('sold-firma-limpiar').addEventListener('click', function(){ if(SOLD_PAD) SOLD_PAD.limpiar(); });
+document.getElementById('sold-guardar').addEventListener('click', function(){
+  const btn = this, st = document.getElementById('sold-status');
+  const falla = function(m){ btn.disabled = false; st.textContent = m || 'No se pudo.'; st.className = 'maq-modal-status show err'; };
+  const listo = function(x){
+    btn.disabled = false;
+    if(!x || !x.success) return falla(x && x.error);
+    document.getElementById('sold-overlay').classList.remove('open');
+    cargarSolicitudesDiesel_();
+  };
+  const firma = SOLD_PAD && !SOLD_PAD.vacio() ? SOLD_PAD.dataUrl() : '';
+  if(SOLD_MODO.modo === 'firmar'){
+    if(!firma) return falla('Falta la firma.');
+    btn.disabled = true;
+    google.script.run.withSuccessHandler(listo).withFailureHandler(function(e){ falla(e && e.message); })
+      .firmarSolicitudDiesel(ACCESS_CODE, PANEL_USUARIO, SOLD_MODO.r.Id, firma, SOLD_MODO.r.Solicito);
+    return;
+  }
+  const datos = { huerta: document.getElementById('sold-huerta').value, litros: document.getElementById('sold-litros').value, fechaRequerida: document.getElementById('sold-fecha').value, encargado: document.getElementById('sold-encargado').value.trim(), firma: firma };
+  if(!datos.huerta || !datos.litros || !datos.encargado) return falla('Captura huerta, litros y el encargado que solicita.');
+  btn.disabled = true;
+  google.script.run.withSuccessHandler(listo).withFailureHandler(function(e){ falla(e && e.message); })
+    .crearSolicitudDiesel(ACCESS_CODE, PANEL_USUARIO, datos);
+});
 
 // Correos de la gasolinera (Catálogo → Proveedor): lista; el 1º es "Para", los demás CC.
 function pintarCorreosProveedorComb_(lista){

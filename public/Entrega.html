@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrega de diesel · Confirmar</title>
+<!--
+  En el celular el PDF no se incrusta (Android no lo muestra dentro de la página):
+  se abre con el botón. Página pública (sin clave) para la gasolinera (nov-2026): ve el formato de la
+  entrega de diesel a la huerta (PDF), adjunta el ticket y confirma que entregó.
+  Ver server/handlers.js: getEntregaPublica / confirmarEntregaPublica y
+  server/server.js (/entrega, /entrega/pdf).
+-->
+<style>
+  :root { --azul:#1F3864; --texto:#1c1e1f; --suave:#6b6b6b; --linea:#d9d9d9; --fondo:#f4f6f8; --ok:#2e7d32; --err:#c62828; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: var(--fondo); color: var(--texto); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .card { background:#fff; border:1px solid var(--linea); border-radius:10px; padding:16px; margin-bottom:14px; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: var(--azul); }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .sub { color: var(--suave); font-size: 13px; }
+  .datos { display:grid; grid-template-columns: 140px 1fr; gap: 6px 10px; font-size: 15px; margin-top: 10px; }
+  .datos b { color: var(--suave); font-weight: 600; }
+  .litros { font-size: 22px; font-weight: 700; }
+  label { display:block; font-size: 13px; font-weight:600; margin: 12px 0 4px; }
+  input[type=text], input[type=file] { width:100%; padding:10px; border:1px solid var(--linea); border-radius:6px; font-size: 15px; background:#fff; }
+  .btn { display:inline-block; background: var(--azul); color:#fff; border:none; border-radius:6px; padding:12px 18px; font-size: 15px; font-weight:600; cursor:pointer; text-decoration:none; }
+  .btn.sec { background:#fff; color: var(--azul); border:1px solid var(--azul); }
+  .btn:disabled { opacity:.6; cursor: default; }
+  .msg { margin-top: 12px; padding: 10px; border-radius: 6px; font-size: 14px; display:none; }
+  .msg.show { display:block; }
+  .msg.ok { background:#e8f5e9; color: var(--ok); }
+  .msg.err { background:#ffebee; color: var(--err); }
+  .pdf { width:100%; height: 520px; border:1px solid var(--linea); border-radius:6px; margin-top: 12px; }
+  @media (max-width: 640px) { .pdf { display:none; } .datos { grid-template-columns: 110px 1fr; } }
+  .previa { max-width: 100%; max-height: 260px; margin-top: 8px; border-radius: 6px; display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="cargando" class="card">Cargando entrega...</div>
+  <div id="contenido" style="display:none;">
+    <div class="card">
+      <h1 id="titulo">Entrega de diesel</h1>
+      <div class="sub" id="subtitulo"></div>
+      <div class="datos" id="datos"></div>
+      <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn sec" id="btn-ver-pdf" target="_blank" rel="noopener">📄 Abrir formato (PDF)</a>
+        <a class="btn sec" id="btn-descargar-pdf">⬇ Descargar PDF</a>
+      </div>
+      <iframe class="pdf" id="pdf" title="Formato de la entrega"></iframe>
+    </div>
+    <div class="card" id="card-confirmar">
+      <h2>Confirmar entrega</h2>
+      <div class="sub">Adjunte la foto o el PDF del ticket y confirme que se entregó el diesel.</div>
+      <label for="f-nombre">Su nombre *</label>
+      <input type="text" id="f-nombre" maxlength="150" autocomplete="name">
+      <label for="f-ticket">Ticket (foto o PDF) *</label>
+      <input type="file" id="f-ticket" accept="image/*,.pdf,application/pdf">
+      <img class="previa" id="previa" alt="Ticket">
+      <label for="f-comentario">Comentario (opcional)</label>
+      <input type="text" id="f-comentario" maxlength="255">
+      <div style="margin-top:14px;"><button class="btn" id="btn-confirmar">✔ Confirmar entregado</button></div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function api(fn, args){
+    return fetch('/api/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ args: args }) })
+      .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw new Error((j && j.error) || 'Error'); return j; }); });
+  }
+  function esc(t){ return String(t === null || t === undefined ? '' : t).replace(/[&<>"']/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
+  function msg(texto, clase){ var el = document.getElementById('msg'); el.innerHTML = texto; el.className = 'msg show ' + clase; }
+  function leer(file){
+    return new Promise(function(res, rej){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.onerror = function(){ rej(new Error('No se pudo leer el archivo.')); }; fr.readAsDataURL(file); });
+  }
+  // Fotos del celular: se achican a 1600 px (JPEG) para que suban rápido.
+  function achicar(dataUrl){
+    return new Promise(function(res){
+      var img = new Image();
+      img.onload = function(){
+        var max = 1600, w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
+        var c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        res(c.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = function(){ res(dataUrl); };
+      img.src = dataUrl;
+    });
+  }
+  function yaConfirmada(r){
+    document.getElementById('card-confirmar').innerHTML = '<h2>Confirmar entrega</h2><div class="msg show ok">✔ Entrega confirmada el ' + esc(new Date(r.confirmadaEn).toLocaleString('es-MX')) + ' por ' + esc(r.confirmadaPor) + '.' +
+      (r.ticketUrl ? ' <a href="' + esc(r.ticketUrl) + '" target="_blank" rel="noopener">Ver ticket</a>' : '') + ' ¡Gracias!</div>';
+  }
+  function pintar(r){
+    document.getElementById('cargando').style.display = 'none';
+    document.getElementById('contenido').style.display = '';
+    document.getElementById('titulo').textContent = 'Entrega de diesel ' + r.folio;
+    document.getElementById('subtitulo').textContent = [r.empresa, r.gasolinera].filter(Boolean).join(' · ');
+    document.getElementById('datos').innerHTML =
+      '<b>Huerta</b><span>' + esc(r.huerta) + '</span>' +
+      '<b>Litros</b><span class="litros">' + esc(Number(r.litros).toLocaleString('es-MX')) + ' L</span>' +
+      '<b>Fecha</b><span>' + esc(r.fecha ? new Date(r.fecha).toLocaleString('es-MX') : '') + '</span>' +
+      '<b>Registró</b><span>' + esc(r.nombre) + '</span>' +
+      (r.comentario ? '<b>Comentario</b><span>' + esc(r.comentario) + '</span>' : '');
+    var urlPdf = '/entrega/pdf?token=' + encodeURIComponent(token);
+    document.getElementById('btn-ver-pdf').href = urlPdf;
+    document.getElementById('btn-descargar-pdf').href = urlPdf + '&descargar=1';
+    document.getElementById('pdf').src = urlPdf;
+    if(r.confirmadaEn) yaConfirmada(r);
+  }
+  document.getElementById('f-ticket').addEventListener('change', function(){
+    var f = this.files[0], im = document.getElementById('previa');
+    if(f && /^image\//.test(f.type)){ leer(f).then(function(d){ im.src = d; im.style.display = 'block'; }); } else { im.style.display = 'none'; }
+  });
+  document.getElementById('btn-confirmar').addEventListener('click', function(){
+    var btn = this;
+    var nombre = document.getElementById('f-nombre').value.trim();
+    var f = document.getElementById('f-ticket').files[0];
+    if(!nombre){ msg('Escriba su nombre.', 'err'); return; }
+    if(!f){ msg('Adjunte la foto o el PDF del ticket.', 'err'); return; }
+    var esPdf = /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name);
+    if(!esPdf && !/^image\//.test(f.type)){ msg('El ticket debe ser una foto o un PDF.', 'err'); return; }
+    if(f.size > 15 * 1024 * 1024){ msg('El archivo es demasiado grande (máximo 15 MB).', 'err'); return; }
+    btn.disabled = true; btn.textContent = 'Enviando...';
+    document.getElementById('msg').className = 'msg';
+    leer(f).then(function(d){ return esPdf ? d.replace(/^data:[^;]*;/, 'data:application/pdf;') : achicar(d); })
+      .then(function(d){ return api('confirmarEntregaPublica', [token, { nombre: nombre, ticket: d, comentario: document.getElementById('f-comentario').value.trim() }]); })
+      .then(function(r){
+        btn.disabled = false; btn.textContent = '✔ Confirmar entregado';
+        if(!r || !r.success){ msg(esc((r && r.error) || 'No se pudo confirmar.'), 'err'); return; }
+        yaConfirmada(r);
+      })
+      .catch(function(err){ btn.disabled = false; btn.textContent = '✔ Confirmar entregado'; msg(esc(err.message || 'No se pudo confirmar. Intente de nuevo.'), 'err'); });
+  });
+  if(!token){ document.getElementById('cargando').textContent = 'Falta el enlace completo de la entrega.'; return; }
+  api('getEntregaPublica', [token]).then(function(r){
+    if(!r || !r.success){ document.getElementById('cargando').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+    pintar(r);
+  }).catch(function(){ document.getElementById('cargando').textContent = 'No se pudo cargar la entrega. Intente más tarde.'; });
+})();
+</script>
+</body>
+</html>

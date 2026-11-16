@@ -3132,6 +3132,11 @@
           <label>Empresa</label>
           <select id="catsimple-f-empresa"><option value="">Sin empresa</option></select>
         </div>
+        <div class="maq-field" id="catsimple-f-correos-wrap" style="display:none;">
+          <label>Correos (para mandarles el formato de cada entrega de diesel)</label>
+          <input type="text" id="catsimple-f-correos" maxlength="500" placeholder="ventas@gasolinera.mx, facturacion@gasolinera.mx">
+          <small style="color:var(--text-dim);">Separa varios con coma. Les llega el enlace para ver el formato, adjuntar el ticket y confirmar la entrega.</small>
+        </div>
         <div class="maq-field" id="catsimple-f-proveedor-wrap" style="display:none;">
           <label>Proveedor</label>
           <select id="catsimple-f-proveedor"><option value="">Sin proveedor</option></select>
@@ -15421,7 +15426,7 @@ function renderEntregas(){
         <button type="button" class="export-btn ent-btn-eliminar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Eliminar</button>`;
     return `
     <tr${r.Eliminado ? ' style="opacity:.55;"' : ''}>
-      <td class="folio">${escapeHtml(r.Folio)}${audit}${eliminadoInfo}</td>
+      <td class="folio">${escapeHtml(r.Folio)}${audit}${eliminadoInfo}${r.ConfirmadaEn ? '<span class="mnt-subtext" style="color:var(--ok,#2e7d32);">✓ Confirmada por gasolinera' + (r.TicketUrl ? ' · <a href="' + escapeHtml(r.TicketUrl) + '" target="_blank" rel="noopener">ticket</a>' : '') + '</span>' : '<span class="mnt-subtext">Sin confirmar</span>'}</td>
       <td>${escapeHtml(r.Huerta || '')}</td>
       <td>${escapeHtml(r.Litros != null ? r.Litros : '')}</td>
       <td>${r.PrecioLitro !== null && r.PrecioLitro !== undefined && r.PrecioLitro !== '' ? escapeHtml(r.PrecioLitro) : '—'}</td>
@@ -15649,6 +15654,7 @@ document.getElementById('ent-btn-abrir').addEventListener('click', function(){ a
 document.getElementById('ent-btn-abrir-arriba').addEventListener('click', function(){ abrirModalEntregaHuerta_(null); });
 document.getElementById('ent-reg-cerrar').addEventListener('click', function(){ document.getElementById('ent-reg-overlay').classList.remove('open'); });
 function enlaceFormatoEntrega_(f){ return baseUrlPublica_() + '/entrega/pdf?token=' + f.token; }
+function enlaceConfirmarEntrega_(f){ return baseUrlPublica_() + '/entrega?token=' + f.token; }
 function textoCorreoEntrega_(f){
   return 'Buen día,\n\n' +
     'Les compartimos el formato de la entrega de diesel ' + f.folio + ':\n' +
@@ -15656,7 +15662,7 @@ function textoCorreoEntrega_(f){
     '- Litros: ' + Number(f.litros).toLocaleString('es-MX') + ' L\n' +
     '- Fecha: ' + (f.fecha ? new Date(f.fecha).toLocaleString('es-MX') : '') + '\n' +
     '- Registró: ' + f.nombre + '\n\n' +
-    'Formato (PDF):\n' + enlaceFormatoEntrega_(f) + '\n\n' +
+    'En este enlace pueden ver el formato (PDF), adjuntar el ticket y confirmar la entrega:\n' + enlaceConfirmarEntrega_(f) + '\n\n' +
     'Saludos,\n' + (f.empresa || 'Chula Brand');
 }
 function mostrarFormatoEntrega_(id){
@@ -15670,8 +15676,10 @@ function mostrarFormatoEntrega_(id){
       caja.innerHTML = '<div class="maq-field" style="margin-top:6px;"><label>Formato para la gasolinera — ' + escapeHtml(f.folio) + '</label>' +
         '<div class="mnt-subtext">' + escapeHtml(f.huerta) + ' · ' + escapeHtml(Number(f.litros).toLocaleString('es-MX')) + ' L · ' + escapeHtml(f.fecha ? new Date(f.fecha).toLocaleString('es-MX') : '') + '</div>' +
         '<div class="mnt-subtext" style="margin-top:4px;">Para: ' + (f.correos.length ? escapeHtml(f.correos.join(', ')) : '<b>sin correo</b>') + (f.gasolinera ? ' (' + escapeHtml(f.gasolinera) + ')' : '') + '</div>' +
-        (f.aviso ? '<div class="ocx-auto-aviso" style="margin-top:4px;">' + escapeHtml(f.aviso) + '</div>' : '') + '</div>' +
+        (f.aviso ? '<div class="ocx-auto-aviso" style="margin-top:4px;">' + escapeHtml(f.aviso) + '</div>' : '') +
+        '<div class="mnt-subtext" style="margin-top:4px;">' + (f.confirmadaEn ? '<span style="color:var(--ok,#2e7d32);">✓ Confirmada por ' + escapeHtml(f.confirmadaPor) + ' el ' + escapeHtml(new Date(f.confirmadaEn).toLocaleString('es-MX')) + '</span>' + (f.ticketUrl ? ' · <a href="' + escapeHtml(f.ticketUrl) + '" target="_blank" rel="noopener">Ver ticket</a>' : '') : 'La gasolinera todavía no confirma (en el correo les llega el enlace para adjuntar el ticket y confirmar).') + '</div></div>' +
         '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"><a class="row-view" id="ent-formato-pdf" href="' + escapeHtml(enlaceFormatoEntrega_(f)) + '" target="_blank" rel="noopener">📄 Ver formato (PDF)</a>' +
+        '<a class="row-view" id="ent-formato-pagina" href="' + escapeHtml(enlaceConfirmarEntrega_(f)) + '" target="_blank" rel="noopener" title="La página que le llega a la gasolinera">🔗 Página de la gasolinera</a>' +
         botonesCorreoHtml_('row-view ent-btn-correo', '') + '</div>' +
         '<div class="maq-modal-status" id="ent-formato-status"></div>' +
         '<button type="button" class="export-btn" id="ent-btn-otra" style="margin-top:10px;">Registrar otra entrega</button>';
@@ -21569,7 +21577,7 @@ const CATALOGOS_SIMPLES = [
   { key: 'marcas', singular: 'la marca', getFn: 'getMarcas', guardarFn: 'guardarMarca', eliminarFn: 'eliminarMarca', compartida: true },
   { key: 'modelos', singular: 'el modelo', getFn: 'getModelos', guardarFn: 'guardarModelo', eliminarFn: 'eliminarModelo', compartida: true, tieneMarca: true },
   { key: 'empresas', singular: 'la empresa', getFn: 'getEmpresasCatalogo', guardarFn: 'guardarEmpresa', eliminarFn: 'eliminarEmpresa', tieneFiscal: true },
-  { key: 'proveedorescombustible', singular: 'el proveedor', getFn: 'getProveedoresCombustibleCatalogo', guardarFn: 'guardarProveedorCombustible', eliminarFn: 'eliminarProveedorCombustible' },
+  { key: 'proveedorescombustible', singular: 'el proveedor', getFn: 'getProveedoresCombustibleCatalogo', guardarFn: 'guardarProveedorCombustible', eliminarFn: 'eliminarProveedorCombustible', tieneCorreos: true },
 ];
 let CATALOGO_SIMPLE_DATOS = {}; // key -> [{Id, Nombre, MarcaId?}]
 let CATALOGO_SIMPLE_ACTUAL = null;
@@ -21646,6 +21654,9 @@ function renderCatalogoSimple(key){
       const partes = [r.Empresa ? r.Empresa.split(',')[0] : 'sin empresa', r.Numero, r.Segmento ? 'seg. ' + r.Segmento : '', r.Huerta, r.CodigoComercial ? 'gastos: ' + r.CodigoComercial : '', r.TiposUnidad ? 'Tipos: ' + r.TiposUnidad : 'sin tipo de unidad'].filter(Boolean);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
+    if(cfg.tieneCorreos){
+      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(r.Correos || 'sin correo') + ')</span>';
+    }
     if(cfg.tieneFiscal){
       const partes = [r.Siglas, r.Rfc].filter(Boolean);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.length ? partes.join(' · ') : 'faltan datos fiscales') + ')</span>';
@@ -21684,6 +21695,8 @@ function abrirModalCatalogoSimple(key, registro){
   }
   const empresaWrap = document.getElementById('catsimple-f-empresa-wrap');
   const proveedorWrap = document.getElementById('catsimple-f-proveedor-wrap');
+  document.getElementById('catsimple-f-correos-wrap').style.display = cfg.tieneCorreos ? '' : 'none';
+  if(cfg.tieneCorreos) document.getElementById('catsimple-f-correos').value = (registro && registro.Correos) || '';
   if(cfg.tieneEmpresaProveedor){
     empresaWrap.style.display = '';
     proveedorWrap.style.display = '';
@@ -21846,6 +21859,7 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
       return { empresaId: Number(tr.dataset.empresaId), cuentaId: Number(tr.querySelector('.tuc-cuenta').value) || 0 };
     }).filter(function(x){ return x.cuentaId; });
   }
+  if(cfg.tieneCorreos) data.correos = document.getElementById('catsimple-f-correos').value.trim();
   if(cfg.tieneCuentaExtra){
     data.numero = document.getElementById('catsimple-f-cuenta-numero').value.trim();
     data.segmento = document.getElementById('catsimple-f-cuenta-segmento').value.trim();

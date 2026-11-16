@@ -87,6 +87,8 @@ app.get('/oc/pdf', async (req, res) => {
   }
 });
 
+// Nov-2026: página pública de la entrega (la gasolinera ve el PDF, adjunta el ticket y confirma).
+app.get('/entrega', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Entrega.html')));
 // Nov-2026: formato de la entrega de diesel a huerta (enlace que se manda a la gasolinera).
 app.get('/entrega/pdf', async (req, res) => {
   try {

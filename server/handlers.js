@@ -3862,12 +3862,13 @@ async function submitDieselEntrega(code, nombreUsuario, data) {
 async function datosFormatoEntrega_(where, valor) {
   const [[e]] = await pool.query(
     `SELECT d.id, d.folio, d.huerta, d.litros, d.nombre, d.fecha, d.comentario, d.token, h.proveedor_id,
-            p.nombre AS gasolinera, p.correo AS correo, e.nombre AS empresa
+            d.confirmada_en, d.confirmada_por, d.ticket_url, d.confirmacion_comentario,
+            p.nombre AS gasolinera, p.correos AS correos, e.nombre AS empresa
        FROM diesel_entregas d
        LEFT JOIN huertas h ON UPPER(TRIM(h.nombre)) = UPPER(TRIM(d.huerta))
-       LEFT JOIN proveedores p ON p.id = h.proveedor_id
+       LEFT JOIN proveedores_combustible p ON p.id = h.proveedor_id
        LEFT JOIN empresas e ON e.id = h.empresa_id
-      WHERE d.${where} = ? AND d.eliminado_en IS NULL`, [valor]);
+      WHERE d.${where} = ? AND d.eliminado = 0`, [valor]);
   return e || null;
 }
 async function getFormatoEntregaDiesel(code, nombreUsuario, id) {
@@ -3878,13 +3879,43 @@ async function getFormatoEntregaDiesel(code, nombreUsuario, id) {
     e.token = require('crypto').randomBytes(16).toString('hex');
     await pool.query('UPDATE diesel_entregas SET token = ? WHERE id = ?', [e.token, e.id]);
   }
-  const [cs] = e.proveedor_id ? await pool.query('SELECT correo FROM proveedor_contactos WHERE proveedor_id = ? AND correo IS NOT NULL AND correo <> \'\'', [e.proveedor_id]) : [[]];
-  const correos = [e.correo].concat(cs.map((c) => c.correo)).map((c) => (c || '').trim()).filter(Boolean).filter((c, i, a) => a.indexOf(c) === i);
+  const correos = limpiarCorreos_(e.correos);
   return {
     success: true, id: e.id, folio: e.folio, huerta: e.huerta, litros: Number(e.litros), nombre: e.nombre || '', fecha: isoOrNull(e.fecha), comentario: e.comentario || '',
     gasolinera: e.gasolinera || '', empresa: (e.empresa || '').split(',')[0], correos, token: e.token,
-    aviso: !e.proveedor_id ? 'La huerta ' + e.huerta + ' no tiene gasolinera (proveedor) asignada en Catálogo → Huertas.' : (!correos.length ? 'La gasolinera ' + e.gasolinera + ' no tiene correo capturado en Proveedores.' : ''),
+    confirmadaEn: isoOrNull(e.confirmada_en), confirmadaPor: e.confirmada_por || '', ticketUrl: e.ticket_url || '',
+    aviso: !e.proveedor_id ? 'La huerta ' + e.huerta + ' no tiene gasolinera (proveedor) asignada en Catálogo → Huertas.' : (!correos.length ? 'La gasolinera ' + e.gasolinera + ' no tiene correos: agrégalos en Catálogo → Proveedores (de combustible).' : ''),
   };
+}
+// Pública (sin clave, con el token del enlace): la gasolinera ve la entrega y su formato,
+// adjunta el ticket y confirma que entregó (public/Entrega.html).
+async function getEntregaPublica(token) {
+  const tk = (token || '').toString();
+  const e = tk.length >= 16 ? await datosFormatoEntrega_('token', tk) : null;
+  if (!e) return { success: false, error: 'Este enlace no es válido o la entrega ya no existe.' };
+  return {
+    success: true, folio: e.folio, huerta: e.huerta, litros: Number(e.litros), nombre: e.nombre || '', fecha: isoOrNull(e.fecha), comentario: e.comentario || '',
+    gasolinera: e.gasolinera || '', empresa: (e.empresa || '').split(',')[0],
+    confirmadaEn: isoOrNull(e.confirmada_en), confirmadaPor: e.confirmada_por || '', ticketUrl: e.ticket_url || '',
+  };
+}
+async function confirmarEntregaPublica(token, data) {
+  data = data || {};
+  const tk = (token || '').toString();
+  const e = tk.length >= 16 ? await datosFormatoEntrega_('token', tk) : null;
+  if (!e) return { success: false, error: 'Este enlace no es válido o la entrega ya no existe.' };
+  if (e.confirmada_en) return { success: false, error: 'Esta entrega ya se confirmó el ' + fechaMx_(new Date(e.confirmada_en)) + ' por ' + (e.confirmada_por || '—') + '.' };
+  const nombre = (data.nombre || '').toString().trim().slice(0, 150);
+  if (!nombre) return { success: false, error: 'Escriba su nombre.' };
+  const ticket = (data.ticket || '').toString();
+  if (!/^data:(image\/[\w+.-]+|application\/pdf);base64,/.test(ticket)) return { success: false, error: 'Adjunte la foto o el PDF del ticket.' };
+  if (ticket.length > 22 * 1024 * 1024) return { success: false, error: 'El archivo es demasiado grande (máximo 15 MB).' };
+  const url = await guardarArchivo_(ticket);
+  const coment = (data.comentario || '').toString().trim().slice(0, 255) || null;
+  const [u] = await pool.query('UPDATE diesel_entregas SET confirmada_en = NOW(), confirmada_por = ?, ticket_url = ?, confirmacion_comentario = ? WHERE id = ? AND confirmada_en IS NULL', [nombre, url, coment, e.id]);
+  if (!u.affectedRows) return { success: false, error: 'Esta entrega ya se confirmó.' };
+  await registrarAuditoria_('diesel_entregas', e.folio, 'entrega confirmada', nombre, (e.gasolinera || '') + (coment ? ' · ' + coment : ''));
+  return { success: true, confirmadaEn: new Date().toISOString(), confirmadaPor: nombre, ticketUrl: url };
 }
 // Pública (con el token del enlace): el PDF que se le manda a la gasolinera.
 async function pdfEntregaDiesel_(token) {
@@ -3911,7 +3942,8 @@ async function getDieselEntregas(code, nombreUsuario, incluirEliminados) {
     SELECT id AS Id, folio AS Folio, huerta AS Huerta, litros AS Litros, nombre AS Nombre,
            fecha AS Fecha, comentario AS Comentario, precio_litro AS PrecioLitro, total AS Total,
            modificado_por AS ModificadoPor, modificado_en AS ModificadoEn,
-           eliminado AS Eliminado, eliminado_por AS EliminadoPor, eliminado_en AS EliminadoEn
+           eliminado AS Eliminado, eliminado_por AS EliminadoPor, eliminado_en AS EliminadoEn,
+           confirmada_en AS ConfirmadaEn, confirmada_por AS ConfirmadaPor, ticket_url AS TicketUrl
     FROM diesel_entregas
     ${whereEnt}
     ORDER BY id DESC
@@ -9310,8 +9342,26 @@ async function eliminarEmpresa(code, nombreUsuario, id) {
   return r;
 }
 
-async function getProveedoresCombustibleCatalogo(code, nombreUsuario) { return catalogoProveedoresCombustible_.get(code, nombreUsuario); }
-async function guardarProveedorCombustible(code, nombreUsuario, id, data) { return catalogoProveedoresCombustible_.guardar(code, nombreUsuario, id, data); }
+// Nov-2026: la gasolinera trae sus correos (para el formato de cada entrega de diesel).
+function limpiarCorreos_(txt) {
+  return (txt || '').toString().split(/[,;\s]+/).map((c) => c.trim().toLowerCase()).filter((c) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c)).filter((c, i, a) => a.indexOf(c) === i);
+}
+async function getProveedoresCombustibleCatalogo(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
+  const [rows] = await pool.query('SELECT id, nombre, correos FROM proveedores_combustible ORDER BY nombre');
+  return rows.map((r) => ({ Id: r.id, Nombre: r.nombre, Correos: r.correos || '' }));
+}
+async function guardarProveedorCombustible(code, nombreUsuario, id, data) {
+  data = data || {};
+  const r = await catalogoProveedoresCombustible_.guardar(code, nombreUsuario, id, data);
+  if (r.success && 'correos' in data) {
+    const txt = (data.correos || '').toString().trim();
+    const lista = limpiarCorreos_(txt);
+    if (txt && !lista.length) return { success: false, error: 'Revisa los correos (ej. ventas@gasolinera.mx, separados con coma).', id: r.id };
+    await pool.query('UPDATE proveedores_combustible SET correos = ? WHERE id = ?', [lista.join(', ') || null, r.id]);
+  }
+  return r;
+}
 async function eliminarProveedorCombustible(code, nombreUsuario, id) { return catalogoProveedoresCombustible_.eliminar(code, nombreUsuario, id); }
 
 // El catálogo de marcas/modelos lo administra la pestaña Refacciones, y
@@ -12899,6 +12949,8 @@ module.exports = {
   agenteGastosResultado,
   actualizarCodigoPiezaManual,
   getFormatoEntregaDiesel,
+  getEntregaPublica,
+  confirmarEntregaPublica,
   pdfEntregaDiesel_,
   guardarFolioComercialCotizacion,
   cambiarRefaccionCotizacion,

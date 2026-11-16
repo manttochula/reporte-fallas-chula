@@ -11414,7 +11414,7 @@ async function getSolicitudesCotizacion(code, nombreUsuario) {
   // Lo pedido (sin precio — el precio ahora vive por respuesta, ver abajo).
   const [items] = await pool.query(`
     SELECT sci.id AS ItemId, sci.solicitud_id AS SolicitudId, sci.cantidad AS Cantidad,
-           ref.id AS RefaccionId, ref.codigo AS Codigo, ref.no_parte AS NoParte, ref.descripcion AS Descripcion
+           ref.id AS RefaccionId, ref.codigo AS Codigo, ref.no_parte AS NoParte, ref.descripcion AS Descripcion, ref.folio_comercial AS FolioComercial
     FROM solicitud_cotizacion_items sci
     INNER JOIN refacciones ref ON ref.id = sci.refaccion_id
     ORDER BY ref.descripcion
@@ -11443,6 +11443,7 @@ async function getSolicitudesCotizacion(code, nombreUsuario) {
       RefaccionId: it.RefaccionId,
       Codigo: it.Codigo || '',
       NoParte: it.NoParte || '',
+      FolioComercial: it.FolioComercial || '',
       Descripcion: it.Descripcion,
       Cantidad: Number(it.Cantidad),
     });
@@ -11814,6 +11815,63 @@ async function aplicarPreciosCotizacion(code, nombreUsuario, respuestaId) {
 // también hayan cotizado esa misma pieza. Al autorizar, se copia al
 // catálogo de refacciones el precio YA CON DESCUENTO (sin IVA, que es un
 // impuesto y no parte del costo de referencia), como precio de referencia.
+// ---- Nov-2026 (Carlos): corregir la pieza desde la cotización ----
+// OC de Comercial (cargadas o en cola) donde ya va esa pieza de esa orden: para avisar.
+async function ocsComercialDePiezaOrden_(orden, refaccionId) {
+  const [rows] = await pool.query(
+    `SELECT DISTINCT x.serie, x.folio, x.agente_estado FROM oc_exportaciones x
+       JOIN solicitud_cotizacion_respuesta_items ri ON ri.id = x.respuesta_item_id
+       JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+       JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+      WHERE s.orden = ? AND sci.refaccion_id = ? AND x.tipo = 'oc' AND x.folio IS NOT NULL`, [orden, refaccionId]);
+  return rows.map((r) => r.serie + ' ' + r.folio + (r.agente_estado === 'pendiente' ? ' (en cola)' : ''));
+}
+function avisoComercialPieza_(ocs) {
+  return ocs.length ? 'Ojo: esa pieza ya va en la OC ' + ocs.join(', ') + ' de Comercial; ahí corrígela a mano.' : '';
+}
+// Folio (código de producto) de Comercial de la refacción.
+async function guardarFolioComercialCotizacion(code, nombreUsuario, refaccionId, folio, orden) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(refaccionId) || 0;
+  const f = (folio || '').toString().trim().toUpperCase().slice(0, 30) || null;
+  const [[ref]] = await pool.query('SELECT id, codigo, folio_comercial FROM refacciones WHERE id = ?', [id]);
+  if (!ref) return { success: false, error: 'No se encontró esa refacción. Actualiza la página.' };
+  await pool.query('UPDATE refacciones SET folio_comercial = ? WHERE id = ?', [f, id]);
+  await registrarAuditoria_('refacciones', ref.codigo || id, 'folio comercial', nombreUsuario, (ref.folio_comercial || '—') + ' → ' + (f || '—'));
+  const aviso = orden ? avisoComercialPieza_(await ocsComercialDePiezaOrden_(orden, id)) : '';
+  return { success: true, folio: f || '', aviso };
+}
+// Cambiar la pieza pedida en las solicitudes de una orden por otra refacción del catálogo.
+async function cambiarRefaccionCotizacion(code, nombreUsuario, orden, refaccionIdActual, refaccionIdNueva) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const ord = (orden || '').toString().trim();
+  const vieja = Number(refaccionIdActual) || 0, nueva = Number(refaccionIdNueva) || 0;
+  if (!ord) return { success: false, error: 'Esta solicitud no tiene orden; no se puede cambiar la pieza.' };
+  if (!nueva || nueva === vieja) return { success: false, error: 'Elige otra refacción.' };
+  const [[rn]] = await pool.query('SELECT id, codigo, descripcion, no_parte, folio_comercial FROM refacciones WHERE id = ?', [nueva]);
+  if (!rn) return { success: false, error: 'No se encontró la refacción nueva. Actualiza la página.' };
+  const [[rv]] = await pool.query('SELECT id, codigo, descripcion FROM refacciones WHERE id = ?', [vieja]);
+  const [choque] = await pool.query(
+    `SELECT s.folio FROM solicitud_cotizacion_items a JOIN solicitudes_cotizacion s ON s.id = a.solicitud_id
+      WHERE s.orden = ? AND a.refaccion_id = ? AND a.solicitud_id IN (SELECT b.solicitud_id FROM solicitud_cotizacion_items b WHERE b.refaccion_id = ?)`, [ord, nueva, vieja]);
+  if (choque.length) return { success: false, error: (rn.descripcion || 'Esa refacción') + ' ya está en la solicitud ' + choque.map((c) => c.folio).join(', ') + '.' };
+  const ocs = await ocsComercialDePiezaOrden_(ord, vieja);
+  const [u] = await pool.query(
+    `UPDATE solicitud_cotizacion_items sci JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+        SET sci.refaccion_id = ? WHERE s.orden = ? AND sci.refaccion_id = ?`, [nueva, ord, vieja]);
+  if (!u.affectedRows) return { success: false, error: 'Esa pieza ya no está en las solicitudes de la orden. Actualiza la página.' };
+  await pool.query('UPDATE reportes_refacciones_necesarias SET refaccion_id = ? WHERE orden = ? AND refaccion_id = ?', [nueva, ord, vieja]);
+  // Si ya había una autorizada, su precio (con descuento) pasa también a la refacción nueva.
+  const [[aut]] = await pool.query(
+    `SELECT ri.precio_cotizado AS p, r.descuento_pct AS d FROM solicitud_cotizacion_respuesta_items ri
+       JOIN solicitud_cotizacion_respuestas r ON r.id = ri.respuesta_id
+       JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+      WHERE s.orden = ? AND sci.refaccion_id = ? AND ri.autorizado = 1 LIMIT 1`, [ord, nueva]);
+  if (aut && aut.p !== null) await pool.query('UPDATE refacciones SET precio = ? WHERE id = ?', [calcularPreciosCotizados(Number(aut.p), aut.d, null).PrecioConDescuento, nueva]);
+  await registrarAuditoria_('solicitudes_cotizacion', ord, 'cambiar pieza', nombreUsuario, ((rv && rv.codigo) || vieja) + ' → ' + (rn.codigo || nueva));
+  return { success: true, piezas: u.affectedRows, refaccion: { id: rn.id, codigo: rn.codigo || '', descripcion: rn.descripcion || '', folioComercial: rn.folio_comercial || '' }, aviso: avisoComercialPieza_(ocs) };
+}
+
 async function autorizarPrecioItem(code, nombreUsuario, respuestaItemId) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
   try {
@@ -12800,6 +12858,8 @@ module.exports = {
   gastosPorConvertir_,
   agenteGastosResultado,
   actualizarCodigoPiezaManual,
+  guardarFolioComercialCotizacion,
+  cambiarRefaccionCotizacion,
   pedirGastoComercial,
   facturasPorArchivar_,
   agenteFacturasResultado,

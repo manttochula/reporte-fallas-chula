@@ -4898,7 +4898,7 @@ var PANEL_SOLO_EN_LINEA = {
   crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
-  actualizarCodigoPiezaManual: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
+  actualizarCodigoPiezaManual: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -24004,6 +24004,59 @@ function importeAPrecioCot_(importe, precioAct, precioDescAct, cant, ivaPct){
 }
 function fmtPrecioCot_(v){ const n = Number(v); return Math.round(n * 100) === Math.round(n * 10000) / 100 ? n.toFixed(2) : String(Math.round(n * 10000) / 10000); }
 
+function abrirCorregirPiezaCot_(sol, it){
+  let ov = document.getElementById('cotpz-overlay');
+  if(ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'cotpz-overlay';
+  ov.className = 'maq-modal-overlay open';
+  ov.style.zIndex = '10050';
+  const opciones = (ALL_REFACCIONES || []).filter(function(r){ return r.Id !== it.RefaccionId; }).map(function(r){
+    return '<option value="' + escapeHtml([r.Codigo, r.FolioComercial ? 'Comercial ' + r.FolioComercial : '', r.NoParte, r.Descripcion].filter(Boolean).join(' · ')) + '"></option>';
+  }).join('');
+  ov.innerHTML = '<div class="maq-modal" style="max-width:560px;"><span class="maq-modal-close" id="cotpz-cerrar">&times;</span><h3 style="margin-top:0;">Corregir la pieza</h3>' +
+    '<div>' +
+    '<div class="mnt-subtext" style="margin-bottom:10px;"><b>' + escapeHtml(it.Descripcion) + '</b> · ' + escapeHtml([it.Codigo, it.NoParte ? 'No. de parte ' + it.NoParte : ''].filter(Boolean).join(' · ')) + ' · orden ' + escapeHtml(sol.Orden) + '</div>' +
+    '<div class="maq-field"><label>Folio (código de producto) en Comercial</label><div style="display:flex;gap:8px;"><input type="text" id="cotpz-folio" maxlength="30" value="' + escapeHtml(it.FolioComercial || '') + '" placeholder="Ej. AC010203" style="flex:1;"><button type="button" class="export-btn" id="cotpz-guardar-folio">Guardar folio</button></div>' +
+    '<small style="color:var(--text-dim);">Se guarda en la refacción ' + escapeHtml(it.Codigo || '') + '. Con folio, la pieza va como refacción (OC VRZ); sin folio, como gasto.</small></div>' +
+    '<div class="maq-field" style="margin-top:14px;"><label>…o cambiarla por otra refacción del catálogo</label><div style="display:flex;gap:8px;"><input type="text" id="cotpz-buscar" list="cotpz-lista" placeholder="Busca por código, folio, No. de parte o nombre" style="flex:1;"><button type="button" class="export-btn" id="cotpz-cambiar">Cambiar</button></div><datalist id="cotpz-lista">' + opciones + '</datalist>' +
+    '<small style="color:var(--text-dim);">Cambia la pieza en las solicitudes de todos los proveedores de esta orden (los precios que ya mandaron se quedan) y en la lista de refacciones de la orden.</small></div>' +
+    '<div class="maq-modal-status" id="cotpz-status"></div></div></div>';
+  document.body.appendChild(ov);
+  const st = document.getElementById('cotpz-status');
+  const cerrar = function(){ ov.remove(); };
+  const listo = function(r, txt){
+    cerrar();
+    if(r.aviso) alert(txt + '\n\n' + r.aviso);
+    cargarSolicitudesCotizacion(function(){
+      const nueva = ALL_SOLICITUDES_COTIZACION.find(function(x){ return x.Id === sol.Id; });
+      if(nueva) abrirModalVerCotizacion(nueva);
+    });
+    if(typeof cargarRefacciones === 'function') cargarRefacciones();
+  };
+  const falla = function(m){ st.textContent = m || 'No se pudo.'; st.className = 'maq-modal-status show err'; };
+  document.getElementById('cotpz-cerrar').addEventListener('click', cerrar);
+  ov.addEventListener('click', function(e){ if(e.target === ov) cerrar(); });
+  document.getElementById('cotpz-guardar-folio').addEventListener('click', function(){
+    const btn = this; btn.disabled = true;
+    google.script.run
+      .withSuccessHandler(function(r){ btn.disabled = false; if(!r || !r.success) return falla(r && r.error); listo(r, 'Folio guardado.'); })
+      .withFailureHandler(function(e){ btn.disabled = false; falla(e && e.message); })
+      .guardarFolioComercialCotizacion(ACCESS_CODE, PANEL_USUARIO, it.RefaccionId, document.getElementById('cotpz-folio').value, sol.Orden);
+  });
+  document.getElementById('cotpz-cambiar').addEventListener('click', function(){
+    const txt = document.getElementById('cotpz-buscar').value.trim();
+    const elegida = (ALL_REFACCIONES || []).find(function(r){ return r.Id !== it.RefaccionId && [r.Codigo, r.FolioComercial ? 'Comercial ' + r.FolioComercial : '', r.NoParte, r.Descripcion].filter(Boolean).join(' · ') === txt; });
+    if(!elegida) return falla('Elige la refacción de la lista (escribe y escoge una opción).');
+    if(!confirm('¿Cambiar "' + it.Descripcion + '" por "' + elegida.Descripcion + '" (' + (elegida.Codigo || '') + ') en la cotización de la orden ' + sol.Orden + '?')) return;
+    const btn = this; btn.disabled = true;
+    google.script.run
+      .withSuccessHandler(function(r){ btn.disabled = false; if(!r || !r.success) return falla(r && r.error); listo(r, 'Pieza cambiada.'); })
+      .withFailureHandler(function(e){ btn.disabled = false; falla(e && e.message); })
+      .cambiarRefaccionCotizacion(ACCESS_CODE, PANEL_USUARIO, sol.Orden, it.RefaccionId, elegida.Id);
+  });
+}
+
 function abrirModalVerCotizacion(sol){
   const link = armarEnlaceCotizacion(sol.Token);
   const fechaHora = function(iso){ return iso ? new Date(iso).toLocaleString('es-MX') : ''; };
@@ -24064,7 +24117,7 @@ function abrirModalVerCotizacion(sol){
     }).join('');
 
     const filas = sol.Items.map(function(it){
-      const identificadores = [it.Codigo, it.NoParte ? ('No. de parte: ' + it.NoParte) : ''].filter(Boolean).join(' · ');
+      const identificadores = [it.Codigo, it.NoParte ? ('No. de parte: ' + it.NoParte) : '', it.FolioComercial ? ('Comercial: ' + it.FolioComercial) : (sol.Orden ? 'sin folio de Comercial' : '')].filter(Boolean).join(' · ');
       const mejores = mejoresDeLaPieza_(it.RefaccionId);
       const celdas = respuestas.map(function(r){
         const ri = respuestaItemPorClave[r.RespuestaId + '_' + it.RefaccionId];
@@ -24087,7 +24140,8 @@ function abrirModalVerCotizacion(sol){
           '<td style="text-align:center;"><button type="button" class="cot-aut-btn' + (ri.Autorizado ? ' on' : '') + '" data-respuesta-item-id="' + ri.RespuestaItemId + '" title="' + (ri.Autorizado ? 'Autorizada — este es el precio que se aplicó al catálogo. Da clic para quitar la marca.' : 'Marcar esta cotización como la ganadora de esta pieza y aplicar su precio (con descuento) al catálogo') + '"></button></td>'
         );
       }).join('');
-      return '<tr><td>' + escapeHtml(it.Descripcion) + (identificadores ? '<span class="mnt-subtext">' + escapeHtml(identificadores) + '</span>' : '') + '</td><td>' + it.Cantidad + '</td>' + celdas + '</tr>';
+      const btnPieza = sol.Orden ? ' <button type="button" class="cot-corregir-btn cot-pieza-btn" data-ref="' + it.RefaccionId + '" title="Corregir la pieza: folio de Comercial o cambiarla por otra refacción">✏️</button>' : '';
+      return '<tr><td>' + escapeHtml(it.Descripcion) + btnPieza + (identificadores ? '<span class="mnt-subtext">' + escapeHtml(identificadores) + '</span>' : '') + '</td><td>' + it.Cantidad + '</td>' + celdas + '</tr>';
     }).join('');
 
     const notasRespuestas = '<ul class="cot-notas-lista">' + respuestas.map(function(r){
@@ -24181,6 +24235,13 @@ function abrirModalVerCotizacion(sol){
     });
   });
 
+  // Nov-2026: corregir la pieza (folio de Comercial o cambiarla por otra refacción).
+  document.getElementById('cot-ver-contenido').querySelectorAll('.cot-pieza-btn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const it = sol.Items.find(function(x){ return String(x.RefaccionId) === b.dataset.ref; });
+      if(it) abrirCorregirPiezaCot_(sol, it);
+    });
+  });
   document.getElementById('cot-ver-contenido').querySelectorAll('.cot-aut-btn').forEach(function(autBtn){
     autBtn.addEventListener('click', function(){
       autBtn.disabled = true;

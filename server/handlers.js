@@ -3989,7 +3989,7 @@ async function datosFormatoEntrega_(where, valor) {
   const [[e]] = await pool.query(
     `SELECT d.id, d.folio, d.huerta, d.litros, d.nombre, d.fecha, d.comentario, d.token, h.proveedor_id,
             d.confirmada_en, d.confirmada_por, d.ticket_url, d.confirmacion_comentario,
-            sd.folio AS solicitud_folio, sd.firma_url AS solicitud_firma, sd.firmada_por AS solicitud_firmo,
+            sd.folio AS solicitud_folio, sd.firma_url AS solicitud_firma, sd.firmada_por AS solicitud_firmo, h.autorizados_cargar,
             p.nombre AS gasolinera, p.correos AS correos, e.nombre AS empresa
        FROM diesel_entregas d
        LEFT JOIN huertas h ON UPPER(TRIM(h.nombre)) = UPPER(TRIM(d.huerta))
@@ -4012,6 +4012,7 @@ async function getFormatoEntregaDiesel(code, nombreUsuario, id) {
     success: true, id: e.id, folio: e.folio, huerta: e.huerta, litros: Number(e.litros), nombre: e.nombre || '', fecha: isoOrNull(e.fecha), comentario: e.comentario || '',
     gasolinera: e.gasolinera || '', empresa: (e.empresa || '').split(',')[0], correos, token: e.token,
     confirmadaEn: isoOrNull(e.confirmada_en), confirmadaPor: e.confirmada_por || '', ticketUrl: e.ticket_url || '',
+    autorizados: parseHuertasJson_(e.autorizados_cargar),
     aviso: !e.proveedor_id ? 'La huerta ' + e.huerta + ' no tiene gasolinera (proveedor) asignada en Catálogo → Huertas.' : (!correos.length ? 'La gasolinera ' + e.gasolinera + ' no tiene correos: agrégalos en Catálogo → Proveedores (de combustible).' : ''),
   };
 }
@@ -4025,6 +4026,7 @@ async function getEntregaPublica(token) {
     success: true, folio: e.folio, huerta: e.huerta, litros: Number(e.litros), nombre: e.nombre || '', fecha: isoOrNull(e.fecha), comentario: e.comentario || '',
     gasolinera: e.gasolinera || '', empresa: (e.empresa || '').split(',')[0],
     confirmadaEn: isoOrNull(e.confirmada_en), confirmadaPor: e.confirmada_por || '', ticketUrl: e.ticket_url || '',
+    autorizados: parseHuertasJson_(e.autorizados_cargar),
   };
 }
 async function confirmarEntregaPublica(token, data) {
@@ -4054,7 +4056,7 @@ async function pdfEntregaDiesel_(token) {
   const { generarPdfEntrega } = require('./formatoEntregaDiesel');
   let firmaSolicitud = null;
   if (e.solicitud_firma) { try { firmaSolicitud = await leerArchivoComoBuffer_(e.solicitud_firma); } catch (er) { firmaSolicitud = null; } }
-  return { buffer: await generarPdfEntrega({ ...e, empresa: (e.empresa || '').split(',')[0], solicitudFolio: e.solicitud_folio || '', solicitudFirmo: e.solicitud_firmo || '', firmaSolicitud }), nombre: 'Entrega_' + e.folio + '.pdf' };
+  return { buffer: await generarPdfEntrega({ ...e, empresa: (e.empresa || '').split(',')[0], solicitudFolio: e.solicitud_folio || '', solicitudFirmo: e.solicitud_firmo || '', firmaSolicitud, autorizados: parseHuertasJson_(e.autorizados_cargar) }), nombre: 'Entrega_' + e.folio + '.pdf' };
 }
 
 async function getDieselEntregas(code, nombreUsuario, incluirEliminados) {
@@ -7025,7 +7027,7 @@ async function getHuertasCatalogo(code, nombreUsuario) {
   const [rows] = await pool.query(`
     SELECT h.id AS Id, h.nombre AS Nombre, h.empresa_id AS EmpresaId, e.nombre AS EmpresaNombre,
            h.proveedor_id AS ProveedorId, p.nombre AS ProveedorNombre, h.mapa_url AS MapaUrl,
-           h.huerta_contable AS HuertaContable, h.segmento AS Segmento
+           h.huerta_contable AS HuertaContable, h.segmento AS Segmento, h.autorizados_cargar AS Autorizados
     FROM huertas h
     LEFT JOIN empresas e ON e.id = h.empresa_id
     LEFT JOIN proveedores_combustible p ON p.id = h.proveedor_id
@@ -7041,7 +7043,13 @@ async function getHuertasCatalogo(code, nombreUsuario) {
     MapaUrl: r.MapaUrl,
     HuertaContable: r.HuertaContable || '',
     Segmento: r.Segmento || '',
+    Autorizados: parseHuertasJson_(r.Autorizados),
   }));
+}
+// Nov-2026: personas autorizadas para cargar/recibir el diesel de la huerta (salen en el formato de entrega).
+function limpiarAutorizados_(lista) {
+  return (Array.isArray(lista) ? lista : []).map((n) => (n || '').toString().trim().replace(/\s+/g, ' ').slice(0, 150)).filter(Boolean)
+    .filter((n, i, a) => a.findIndex((x) => x.toUpperCase() === n.toUpperCase()) === i).slice(0, 30);
 }
 
 async function guardarHuerta(code, nombreUsuario, id, data) {
@@ -7060,14 +7068,16 @@ async function guardarHuerta(code, nombreUsuario, id, data) {
     const conContable = 'huertaContable' in data || 'segmento' in data;
     const hc = (data.huertaContable || '').toString().trim().toUpperCase().slice(0, 150) || null;
     const seg = (data.segmento || '').toString().trim().slice(0, 20) || null;
+    const autStr = Array.isArray(data.autorizados) ? (limpiarAutorizados_(data.autorizados).length ? JSON.stringify(limpiarAutorizados_(data.autorizados)) : null) : undefined;
     if (id) {
       await pool.query('UPDATE huertas SET nombre=?, empresa_id=?, proveedor_id=? WHERE id=?', [nombre, empresaId, proveedorId, id]);
       if (conContable) await pool.query('UPDATE huertas SET huerta_contable=?, segmento=? WHERE id=?', [hc, seg, id]);
+      if (autStr !== undefined) await pool.query('UPDATE huertas SET autorizados_cargar=? WHERE id=?', [autStr, id]);
       return { success: true, id: Number(id) };
     }
     const [result] = await pool.query(
-      'INSERT INTO huertas (nombre, empresa_id, proveedor_id, huerta_contable, segmento) VALUES (?, ?, ?, ?, ?)',
-      [nombre, empresaId, proveedorId, hc, seg]
+      'INSERT INTO huertas (nombre, empresa_id, proveedor_id, huerta_contable, segmento, autorizados_cargar) VALUES (?, ?, ?, ?, ?, ?)',
+      [nombre, empresaId, proveedorId, hc, seg, autStr || null]
     );
     return { success: true, id: result.insertId };
   } catch (err) {

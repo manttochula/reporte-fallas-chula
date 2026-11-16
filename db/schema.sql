@@ -3909,3 +3909,8 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'solicitudes_diesel' AND column_name = 'solicito_nombre');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE solicitudes_diesel ADD COLUMN solicito_nombre VARCHAR(255) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026 (Carlos): personas autorizadas para cargar el diesel de la huerta (formato de entrega y correo).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'huertas' AND column_name = 'autorizados_cargar');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE huertas ADD COLUMN autorizados_cargar TEXT DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

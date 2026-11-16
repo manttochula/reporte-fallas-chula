@@ -3173,6 +3173,12 @@
           <label>Proveedor</label>
           <select id="catsimple-f-proveedor"><option value="">Sin proveedor</option></select>
         </div>
+        <div class="maq-field" id="catsimple-f-autorizados-wrap" style="display:none;">
+          <label>Personas autorizadas para cargar el diesel</label>
+          <div id="catsimple-f-autorizados-lista"></div>
+          <button type="button" class="export-btn" id="catsimple-f-autorizados-agregar" style="padding:6px 10px;font-size:11px;margin-top:4px;">+ Agregar persona</button>
+          <small style="display:block;color:var(--text-dim);margin-top:4px;">Salen en el formato (PDF) de cada entrega de diesel a esta huerta y en el correo a la gasolinera.</small>
+        </div>
         <div class="maq-field-row" id="catsimple-f-contable-wrap" style="display:none;">
           <div class="maq-field"><label>Huerta (nota contable)</label><input type="text" id="catsimple-f-huerta-contable" maxlength="150" placeholder="Ej. NL AF VTA"></div>
           <div class="maq-field"><label>Segmento</label><input type="text" id="catsimple-f-huerta-segmento" maxlength="20" placeholder="Ej. 103"></div>
@@ -15795,6 +15801,30 @@ document.getElementById('sold-guardar').addEventListener('click', function(){
     .crearSolicitudDiesel(ACCESS_CODE, PANEL_USUARIO, datos);
 });
 
+// Personas autorizadas para cargar el diesel de la huerta (Catálogo → Huertas).
+function pintarAutorizadosHuerta_(lista){
+  const cont = document.getElementById('catsimple-f-autorizados-lista');
+  if(!lista.length) lista = [''];
+  cont.innerHTML = lista.map(function(n){
+    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><input type="text" class="cfa-nombre" maxlength="150" value="' + escapeHtml(n) + '" placeholder="Nombre completo de la persona" style="flex:1;">' +
+      '<button type="button" class="export-btn cfa-quitar" title="Quitar" style="padding:4px 8px;">✕</button></div>';
+  }).join('');
+  cont.querySelectorAll('.cfa-quitar').forEach(function(b, i){
+    b.addEventListener('click', function(){
+      const act = Array.from(cont.querySelectorAll('.cfa-nombre')).map(function(x){ return x.value.trim(); });
+      act.splice(i, 1);
+      pintarAutorizadosHuerta_(act);
+    });
+  });
+}
+document.getElementById('catsimple-f-autorizados-agregar').addEventListener('click', function(){
+  const act = Array.from(document.querySelectorAll('#catsimple-f-autorizados-lista .cfa-nombre')).map(function(x){ return x.value.trim(); });
+  act.push('');
+  pintarAutorizadosHuerta_(act);
+  const ins = document.querySelectorAll('#catsimple-f-autorizados-lista .cfa-nombre');
+  ins[ins.length - 1].focus();
+});
+
 // Correos de la gasolinera (Catálogo → Proveedor): lista; el 1º es "Para", los demás CC.
 function pintarCorreosProveedorComb_(lista){
   const cont = document.getElementById('catsimple-f-correos-lista');
@@ -15850,7 +15880,8 @@ function textoCorreoEntrega_(f){
     '- Huerta: ' + f.huerta + '\n' +
     '- Litros: ' + Number(f.litros).toLocaleString('es-MX') + ' L\n' +
     '- Fecha: ' + (f.fecha ? new Date(f.fecha).toLocaleString('es-MX') : '') + '\n' +
-    '- Registró: ' + f.nombre + '\n\n' +
+    '- Registró: ' + f.nombre + '\n' +
+    ((f.autorizados || []).length ? '- Personas autorizadas para cargar: ' + f.autorizados.join(', ') + '\n' : '') + '\n' +
     'En este enlace pueden ver el formato (PDF), adjuntar el ticket y confirmar la entrega:\n' + enlaceConfirmarEntrega_(f) + '\n\n' +
     'Saludos,\n' + (f.empresa || 'Chula Brand');
 }
@@ -15864,6 +15895,7 @@ function mostrarFormatoEntrega_(id){
       document.getElementById('ent-reg-captura').style.display = 'none';
       caja.innerHTML = '<div class="maq-field" style="margin-top:6px;"><label>Formato para la gasolinera — ' + escapeHtml(f.folio) + '</label>' +
         '<div class="mnt-subtext">' + escapeHtml(f.huerta) + ' · ' + escapeHtml(Number(f.litros).toLocaleString('es-MX')) + ' L · ' + escapeHtml(f.fecha ? new Date(f.fecha).toLocaleString('es-MX') : '') + '</div>' +
+        '<div class="mnt-subtext">Autorizados para cargar: ' + ((f.autorizados || []).length ? escapeHtml(f.autorizados.join(', ')) : '<i>ninguno (agrégalos en Catálogo → Huertas)</i>') + '</div>' +
         '<div class="mnt-subtext" style="margin-top:4px;">Para: ' + (f.correos.length ? escapeHtml(f.correos[0]) : '<b>sin correo</b>') + (f.gasolinera ? ' (' + escapeHtml(f.gasolinera) + ')' : '') + (f.correos.length > 1 ? '<br>CC: ' + escapeHtml(f.correos.slice(1).join(', ')) : '') + '</div>' +
         (f.aviso ? '<div class="ocx-auto-aviso" style="margin-top:4px;">' + escapeHtml(f.aviso) + '</div>' : '') +
         '<div class="mnt-subtext" style="margin-top:4px;">' + (f.confirmadaEn ? '<span style="color:var(--ok,#2e7d32);">✓ Confirmada por ' + escapeHtml(f.confirmadaPor) + ' el ' + escapeHtml(new Date(f.confirmadaEn).toLocaleString('es-MX')) + '</span>' + (f.ticketUrl ? ' · <a href="' + escapeHtml(f.ticketUrl) + '" target="_blank" rel="noopener">Ver ticket</a>' : '') : 'La gasolinera todavía no confirma (en el correo les llega el enlace para adjuntar el ticket y confirmar).') + '</div></div>' +
@@ -21903,12 +21935,15 @@ function abrirModalCatalogoSimple(key, registro){
     selEmpresa.value = registro && registro.EmpresaId ? registro.EmpresaId : '';
     selProveedor.value = registro && registro.ProveedorId ? registro.ProveedorId : '';
     document.getElementById('catsimple-f-contable-wrap').style.display = '';
+    document.getElementById('catsimple-f-autorizados-wrap').style.display = '';
+    pintarAutorizadosHuerta_((registro && registro.Autorizados) || []);
     document.getElementById('catsimple-f-huerta-contable').value = (registro && registro.HuertaContable) || '';
     document.getElementById('catsimple-f-huerta-segmento').value = (registro && registro.Segmento) || '';
   } else {
     empresaWrap.style.display = 'none';
     proveedorWrap.style.display = 'none';
     document.getElementById('catsimple-f-contable-wrap').style.display = 'none';
+    document.getElementById('catsimple-f-autorizados-wrap').style.display = 'none';
   }
   const operadorWrap = document.getElementById('catsimple-f-operador-wrap');
   if(cfg.tieneOperadorExtra){
@@ -22034,6 +22069,7 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
     data.proveedorId = document.getElementById('catsimple-f-proveedor').value;
     data.huertaContable = document.getElementById('catsimple-f-huerta-contable').value.trim();
     data.segmento = document.getElementById('catsimple-f-huerta-segmento').value.trim();
+    data.autorizados = Array.from(document.querySelectorAll('#catsimple-f-autorizados-lista .cfa-nombre')).map(function(i){ return i.value.trim(); }).filter(Boolean);
   }
   if(cfg.tieneOperadorExtra){
     data.direccion = document.getElementById('catsimple-f-direccion').value.trim();

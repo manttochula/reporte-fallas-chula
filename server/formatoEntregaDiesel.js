@@ -45,6 +45,13 @@ function generarPdfEntrega(e) {
     fila('Registró:', t(e.nombre));
     if (e.solicitudFolio) fila('Solicitud:', t(e.solicitudFolio) + (e.solicitudFirmo ? ' · ' + t(e.solicitudFirmo) : ''));
     if (e.comentario) fila('Comentario:', t(e.comentario));
+    // Nov-2026: personas autorizadas por la huerta para cargar/recibir el diesel.
+    if (Array.isArray(e.autorizados) && e.autorizados.length) {
+      doc.font('Helvetica').fontSize(10).fillColor(GRIS).text('Autorizados para cargar:', X, y, { width: 150 });
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#000').text(e.autorizados.join('\n'), X + 160, y - 1, { width: ANCHO - 160 });
+      y = Math.max(y + 28, doc.y + 12);
+      doc.moveTo(X, y - 8).lineTo(X + ANCHO, y - 8).strokeColor('#DDDDDD').lineWidth(0.6).stroke();
+    }
 
     // Firma del encargado que solicitó (nov-2026)
     if (e.firmaSolicitud) {

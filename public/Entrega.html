@@ -106,7 +106,8 @@
       '<b>Litros</b><span class="litros">' + esc(Number(r.litros).toLocaleString('es-MX')) + ' L</span>' +
       '<b>Fecha</b><span>' + esc(r.fecha ? new Date(r.fecha).toLocaleString('es-MX') : '') + '</span>' +
       '<b>Registró</b><span>' + esc(r.nombre) + '</span>' +
-      (r.comentario ? '<b>Comentario</b><span>' + esc(r.comentario) + '</span>' : '');
+      (r.comentario ? '<b>Comentario</b><span>' + esc(r.comentario) + '</span>' : '') +
+      ((r.autorizados || []).length ? '<b>Autorizados para cargar</b><span>' + r.autorizados.map(esc).join('<br>') + '</span>' : '');
     var urlPdf = '/entrega/pdf?token=' + encodeURIComponent(token);
     document.getElementById('btn-ver-pdf').href = urlPdf;
     document.getElementById('btn-descargar-pdf').href = urlPdf + '&descargar=1';

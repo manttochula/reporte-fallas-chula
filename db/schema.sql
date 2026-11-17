@@ -3914,3 +3914,12 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'huertas' AND column_name = 'autorizados_cargar');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE huertas ADD COLUMN autorizados_cargar TEXT DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026 (Carlos): Combustible Agrícola cambió (entregas, cargas y tablero por huerta).
+-- Una sola vez: a todos se les vuelven a mostrar la lista de entregas y la de cargas
+-- (y se limpian los cuadros que ya no existen). Se pueden volver a ocultar en Usuarios.
+SET @mig_dzc = (SELECT COUNT(*) FROM configuracion WHERE clave = 'diesel_cuadros_tablero_2026_11');
+UPDATE usuarios SET diesel_cuadros_ocultos = REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(diesel_cuadros_ocultos, '"dz-entregas-container",', ''), ',"dz-entregas-container"', ''), '["dz-entregas-container"]', '[]'), '"dz-tabla-container",', ''), ',"dz-tabla-container"', ''), '["dz-tabla-container"]', '[]'), '"dzh-container",', ''), ',"dzh-container"', ''), '["dzh-container"]', '[]'), '"dzd-container",', ''), ',"dzd-container"', ''), '["dzd-container"]', '[]'), '"dz-restante-container",', ''), ',"dz-restante-container"', ''), '["dz-restante-container"]', '[]')
+ WHERE @mig_dzc = 0 AND diesel_cuadros_ocultos IS NOT NULL;
+UPDATE usuarios SET diesel_cuadros_ocultos = NULL WHERE @mig_dzc = 0 AND diesel_cuadros_ocultos = '[]';
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('diesel_cuadros_tablero_2026_11', 'hecho');

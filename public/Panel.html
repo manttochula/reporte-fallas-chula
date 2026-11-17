@@ -5632,6 +5632,14 @@ function iniciarPanel(nombre){
   }
   try {
     PANEL_DIESEL_CUADROS_OCULTOS = JSON.parse(localStorage.getItem('panel_diesel_cuadros_ocultos') || '[]') || [];
+    // Nov-2026: Combustible cambió (entregas, cargas y tablero): una vez se vuelven a mostrar
+    // entregas y cargas a todos (igual que en el servidor, ver schema.sql), sin volver a iniciar sesión.
+    if(!localStorage.getItem('panel_dz_cuadros_v2')){
+      const quitar = ['dz-entregas-container', 'dz-tabla-container', 'dzh-container', 'dzd-container', 'dz-restante-container'];
+      PANEL_DIESEL_CUADROS_OCULTOS = PANEL_DIESEL_CUADROS_OCULTOS.filter(function(id){ return quitar.indexOf(id) === -1; });
+      localStorage.setItem('panel_diesel_cuadros_ocultos', JSON.stringify(PANEL_DIESEL_CUADROS_OCULTOS));
+      localStorage.setItem('panel_dz_cuadros_v2', '1');
+    }
   } catch (e) {
     PANEL_DIESEL_CUADROS_OCULTOS = [];
   }

@@ -2138,7 +2138,7 @@
         <button type="button" class="export-btn" id="sold-btn-nueva">📝 Solicitar diesel</button>
         <button type="button" class="export-btn" id="ent-btn-abrir-arriba" style="background:var(--accent,#d97706);color:#fff;">⛽ Registrar entrega a huerta</button></div>
       <!-- Nov-2026 (Carlos): solicitudes de diesel firmadas por el encargado → pre-registro de la entrega por autorizar -->
-      <div class="dz-resumen" id="sold-container">
+      <div class="dz-resumen" id="sold-container" style="display:none;">
         <div class="dz-resumen-header">Solicitudes de diesel</div>
         <div class="mnt-subtext" style="margin:2px 0 10px;">El encargado pide el diesel (desde la app o aquí) y la firma. Firmada queda <b>por autorizar</b>: al autorizarla se registra la entrega a la huerta y sale el formato para la gasolinera.</div>
         <div class="table-wrap"><table style="min-width:0;"><thead><tr><th>Folio</th><th>Huerta</th><th>Litros</th><th>Para el</th><th>Solicitó</th><th>Estado</th><th>Firma</th><th>Acciones</th></tr></thead>
@@ -2208,7 +2208,7 @@
       </div>
 
       <div class="dz-entregas" id="dz-entregas-container">
-        <div class="dz-entregas-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">Diesel entregado a huertas
+        <div class="dz-entregas-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">Solicitudes y entregas de diesel a huertas
           <button type="button" class="export-btn" id="ent-btn-abrir" style="background:var(--accent,#d97706);color:#fff;">⛽ Registrar entrega a huerta</button></div>
         <!-- Nov-2026 (Carlos): la entrega se registra en su propia ventana y genera el formato para la gasolinera -->
         <div class="maq-modal-overlay" id="ent-reg-overlay">
@@ -15484,10 +15484,32 @@ function getEntregasFiltradas(){
   });
 }
 
+// Nov-2026 (Carlos): las solicitudes de diesel van en la MISMA lista que las entregas: arriba las
+// que faltan (por firmar / por autorizar; las rechazadas con "Mostrar eliminados") y cada entrega
+// muestra de qué solicitud viene.
+function filasSolicitudesEnEntregas_(){
+  const verRech = document.getElementById('ent-mostrar-eliminados').checked;
+  const puede = puedeCapturarPestana('diesel');
+  return (SOLD_LISTA || []).filter(function(r){ return r.Estado === 'por_firmar' || r.Estado === 'por_autorizar' || (verRech && r.Estado === 'rechazada'); }).map(function(r){
+    const cls = r.Estado === 'rechazada' ? 'danger' : (r.Estado === 'por_autorizar' ? 'info' : 'progress');
+    let acc = '';
+    if(puede && r.Estado === 'por_firmar') acc += '<button type="button" class="export-btn sold-acc" data-acc="firmar" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;">Firmar</button> ';
+    if(puede && r.Estado === 'por_autorizar') acc += '<button type="button" class="export-btn sold-acc" data-acc="autorizar" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;background:var(--accent,#d97706);color:#fff;">Autorizar</button> ';
+    if(puede && r.Estado !== 'rechazada') acc += '<button type="button" class="export-btn sold-acc" data-acc="rechazar" data-id="' + r.Id + '" style="padding:6px 10px;font-size:11px;">Rechazar</button>';
+    return '<tr class="ent-fila-solicitud"' + (r.Estado === 'rechazada' ? ' style="opacity:.55;"' : '') + '><td class="folio">' + escapeHtml(r.Folio) + '<span class="mnt-subtext"><span class="status-pill ' + cls + '">' + SOLD_ESTADO_TXT_[r.Estado] + '</span> ' + (r.Origen === 'app' ? '📱 App' : 'Panel') + '</span>' + (r.RechazoMotivo ? '<span class="mnt-subtext">' + escapeHtml(r.RechazoMotivo) + '</span>' : '') + '</td>' +
+      '<td>' + escapeHtml(r.Huerta) + '</td><td>' + escapeHtml(r.Litros) + '</td><td>—</td><td>—</td>' +
+      '<td>' + escapeHtml(r.Solicito) + '<span class="mnt-subtext">solicitó</span></td>' +
+      '<td>' + (r.FechaRequerida ? 'Para el ' + escapeHtml(fechaOcCorta_(r.FechaRequerida)) : '—') + '<span class="mnt-subtext">pedida ' + escapeHtml(r.CreadoEn ? new Date(r.CreadoEn).toLocaleDateString('es-MX') : '') + '</span></td>' +
+      '<td>' + (r.FirmaUrl ? '<img src="' + escapeHtml(r.FirmaUrl) + '" alt="Firma" style="height:30px;background:#fff;border-radius:4px;">' : '<span class="mnt-subtext">Sin firma</span>') + '</td>' +
+      '<td>' + acc + '</td></tr>';
+  }).join('');
+}
 function renderEntregas(){
   const tbody = document.getElementById('ent-table-body');
+  const filasSol = typeof SOLD_LISTA !== 'undefined' ? filasSolicitudesEnEntregas_() : '';
   if(ALL_ENTREGAS.length === 0){
-    tbody.innerHTML = '<tr><td colspan="9"><div class="empty">Todavía no hay entregas registradas.</div></td></tr>';
+    tbody.innerHTML = filasSol + '<tr><td colspan="9"><div class="empty">Todavía no hay entregas registradas.</div></td></tr>';
+    if(filasSol) solBindAcciones_(tbody);
     dzhRefrescarTrasRenderEntregas_();
     return;
   }
@@ -15496,13 +15518,14 @@ function renderEntregas(){
   // ya da "las últimas N entregas" en ese rango.
   const filtradas = getEntregasFiltradas();
   if(filtradas.length === 0){
-    tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No hay entregas que coincidan con el rango de fechas.</div></td></tr>';
+    tbody.innerHTML = filasSol + '<tr><td colspan="9"><div class="empty">No hay entregas que coincidan con el rango de fechas.</div></td></tr>';
+    if(filasSol) solBindAcciones_(tbody);
     dzhRefrescarTrasRenderEntregas_();
     return;
   }
   const limiteVal = document.getElementById('ent-limite').value;
   const mostradas = limiteVal === 'todos' ? filtradas : filtradas.slice(0, parseInt(limiteVal, 10));
-  tbody.innerHTML = mostradas.map(function(r){
+  tbody.innerHTML = filasSol + mostradas.map(function(r){
     const audit = r.ModificadoPor ? `<span class="mnt-subtext">Editado por ${escapeHtml(r.ModificadoPor)} · ${formatFechaAudit(r.ModificadoEn)}</span>` : '';
     const eliminadoInfo = r.Eliminado ? `<span class="mnt-subtext">Eliminada por ${escapeHtml(r.EliminadoPor || '?')} · ${formatFechaAudit(r.EliminadoEn)}</span>` : '';
     const accion = r.Eliminado
@@ -15512,7 +15535,7 @@ function renderEntregas(){
         <button type="button" class="export-btn ent-btn-eliminar" data-id="${r.Id}" style="padding:6px 10px;font-size:11px;">Eliminar</button>`;
     return `
     <tr${r.Eliminado ? ' style="opacity:.55;"' : ''}>
-      <td class="folio">${escapeHtml(r.Folio)}${audit}${eliminadoInfo}${r.ConfirmadaEn ? '<span class="mnt-subtext" style="color:var(--ok,#2e7d32);">✓ Confirmada por gasolinera' + (r.TicketUrl ? ' · <a href="' + escapeHtml(r.TicketUrl) + '" target="_blank" rel="noopener">ticket</a>' : '') + '</span>' : '<span class="mnt-subtext">Sin confirmar</span>'}</td>
+      <td class="folio">${escapeHtml(r.Folio)}${r.SolicitudFolio ? '<span class="mnt-subtext">📝 Solicitud ' + escapeHtml(r.SolicitudFolio) + ' · ' + escapeHtml(r.SolicitudPor || '') + (r.SolicitudFirma ? ' <img src="' + escapeHtml(r.SolicitudFirma) + '" alt="Firma" style="height:22px;vertical-align:middle;background:#fff;border-radius:3px;">' : '') + '</span>' : ''}${audit}${eliminadoInfo}${r.ConfirmadaEn ? '<span class="mnt-subtext" style="color:var(--ok,#2e7d32);">✓ Confirmada por gasolinera' + (r.TicketUrl ? ' · <a href="' + escapeHtml(r.TicketUrl) + '" target="_blank" rel="noopener">ticket</a>' : '') + '</span>' : '<span class="mnt-subtext">Sin confirmar</span>'}</td>
       <td>${escapeHtml(r.Huerta || '')}</td>
       <td>${escapeHtml(r.Litros != null ? r.Litros : '')}</td>
       <td>${r.PrecioLitro !== null && r.PrecioLitro !== undefined && r.PrecioLitro !== '' ? escapeHtml(r.PrecioLitro) : '—'}</td>
@@ -15528,6 +15551,7 @@ function renderEntregas(){
   tbody.querySelectorAll('.ent-btn-formato').forEach(function(btn){
     btn.addEventListener('click', function(){ abrirModalEntregaHuerta_(null, Number(btn.dataset.id)); });
   });
+  if(filasSol) solBindAcciones_(tbody);
   tbody.querySelectorAll('.ent-btn-editar').forEach(function(btn){
     btn.addEventListener('click', function(){
       const entrega = ALL_ENTREGAS.find(function(r){ return String(r.Id) === btn.dataset.id; });
@@ -15875,7 +15899,7 @@ let SOLD_LISTA = [], SOLD_PAD = null, SOLD_MODO = null;
 const SOLD_ESTADO_TXT_ = { por_firmar: 'Por firmar', por_autorizar: 'Por autorizar', autorizada: 'Autorizada', rechazada: 'Rechazada' };
 function cargarSolicitudesDiesel_(){
   google.script.run
-    .withSuccessHandler(function(rows){ SOLD_LISTA = rows || []; pintarSolicitudesDiesel_(); })
+    .withSuccessHandler(function(rows){ SOLD_LISTA = rows || []; pintarSolicitudesDiesel_(); if(ENTREGAS_CARGADAS) renderEntregas(); })
     .withFailureHandler(function(){ document.getElementById('sold-table-body').innerHTML = '<tr><td colspan="8"><div class="empty">No se pudieron cargar las solicitudes.</div></td></tr>'; })
     .getSolicitudesDiesel(ACCESS_CODE, PANEL_USUARIO);
 }
@@ -15899,6 +15923,9 @@ function pintarSolicitudesDiesel_(){
       '<td>' + (r.FirmaUrl ? '<a href="' + escapeHtml(r.FirmaUrl) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(r.FirmaUrl) + '" alt="Firma" style="height:34px;background:#fff;border-radius:4px;"></a>' : '—') + '</td>' +
       '<td>' + acc + '</td></tr>';
   }).join('');
+  solBindAcciones_(tb);
+}
+function solBindAcciones_(tb){
   tb.querySelectorAll('.sold-acc').forEach(function(b){
     b.addEventListener('click', function(){
       const r = SOLD_LISTA.find(function(x){ return String(x.Id) === b.dataset.id; });

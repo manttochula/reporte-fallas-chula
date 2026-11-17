@@ -4075,7 +4075,10 @@ async function getDieselEntregas(code, nombreUsuario, incluirEliminados) {
            fecha AS Fecha, comentario AS Comentario, precio_litro AS PrecioLitro, total AS Total,
            modificado_por AS ModificadoPor, modificado_en AS ModificadoEn,
            eliminado AS Eliminado, eliminado_por AS EliminadoPor, eliminado_en AS EliminadoEn,
-           confirmada_en AS ConfirmadaEn, confirmada_por AS ConfirmadaPor, ticket_url AS TicketUrl
+           confirmada_en AS ConfirmadaEn, confirmada_por AS ConfirmadaPor, ticket_url AS TicketUrl,
+           (SELECT sd.folio FROM solicitudes_diesel sd WHERE sd.id = diesel_entregas.solicitud_id) AS SolicitudFolio,
+           (SELECT COALESCE(sd.solicito_nombre, sd.solicito) FROM solicitudes_diesel sd WHERE sd.id = diesel_entregas.solicitud_id) AS SolicitudPor,
+           (SELECT sd.firma_url FROM solicitudes_diesel sd WHERE sd.id = diesel_entregas.solicitud_id) AS SolicitudFirma
     FROM diesel_entregas
     ${whereEnt}
     ORDER BY id DESC

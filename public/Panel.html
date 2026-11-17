@@ -4689,6 +4689,9 @@
         <p class="ind-ayuda">Horas trabajadas = suma de los ratos de todos los mecánicos entre "Iniciar reparación" y "Queda pendiente" / "Trabajo finalizado" (las esperas no cuentan). Duración = desde que se empezó hasta que se terminó, contando esperas. Solo entran las órdenes trabajadas con esos botones en Taller.</p>
         <div class="ind-status" id="trep-status"></div>
         <div class="trep-resumen" id="trep-resumen"></div>
+        <!-- Nov-2026 (Carlos): el tiempo de cada orden siempre a la vista (antes estaba escondido en "Ver cada orden"); "Corregir" cambia las horas. -->
+        <div class="ind-sub prep-subtitulo" style="margin-top:6px;">Tiempo por orden <span class="ind-sub">(para cambiar las horas de una orden, dale "Corregir")</span></div>
+        <div class="maq-table-wrap ind-tabla-wrap" style="margin-bottom:12px;"><table class="maq-table ind-tabla" id="trep-tabla-ordenes"><thead><tr><th>Orden</th><th>Unidad</th><th>Tipo</th><th>Salida</th><th>Mecánicos</th><th class="ind-num">Horas trabajadas</th><th class="ind-num">Duración</th><th></th></tr></thead><tbody></tbody></table></div>
         <div class="trep-grid">
           <div><div class="ind-sub prep-subtitulo">Por mes</div><div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-mes"><thead><tr><th>Mes</th><th class="ind-num">Órdenes</th><th class="ind-num">Promedio h trabajadas</th><th class="ind-num">Promedio duración</th></tr></thead><tbody></tbody></table></div></div>
           <div><div class="ind-sub prep-subtitulo">Por tipo de orden</div><div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-seccion"><thead><tr><th>Tipo</th><th class="ind-num">Órdenes</th><th class="ind-num">Promedio h trabajadas</th><th class="ind-num">Promedio duración</th></tr></thead><tbody></tbody></table></div></div>
@@ -4699,9 +4702,6 @@
           <div class="ind-sub prep-subtitulo">Reparaciones con el reloj corriendo ahora <span class="ind-sub">(si alguien olvidó dar "Queda pendiente", corrígelo aquí)</span></div>
           <div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-encurso"><thead><tr><th>Orden</th><th>Unidad</th><th>Mecánico</th><th>Desde</th><th class="ind-num">Lleva</th><th></th></tr></thead><tbody></tbody></table></div>
         </div>
-        <details style="margin-top:10px;"><summary class="ind-sub" style="cursor:pointer;">Ver cada orden (y corregir sus tiempos)</summary>
-          <div class="maq-table-wrap ind-tabla-wrap"><table class="maq-table ind-tabla" id="trep-tabla-ordenes"><thead><tr><th>Orden</th><th>Unidad</th><th>Tipo</th><th>Salida</th><th>Mecánicos</th><th class="ind-num">Horas trabajadas</th><th class="ind-num">Duración</th><th></th></tr></thead><tbody></tbody></table></div>
-        </details>
       </div>
       <div class="maq-modal-overlay" id="trep-overlay">
         <div class="maq-modal" style="max-width:880px;">
@@ -24792,7 +24792,7 @@ function trepRender_(){
   document.querySelector('#trep-tabla-ordenes tbody').innerHTML = ords.slice().sort(function(a, b){ return (b.porConfirmar ? 1 : 0) - (a.porConfirmar ? 1 : 0) || String(b.fechaSalida).localeCompare(String(a.fechaSalida)); }).map(function(o){
     return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad) + '</td><td>' + escapeHtml(TREP_SECCION_TXT[o.seccion] || o.seccion) + '</td><td>' + (o.porConfirmar ? '<span class="status-pill info">Por confirmar</span>' : indFecha_(o.fechaSalida)) + '</td>'
       + '<td>' + o.mecanicos.map(function(m){ return escapeHtml(m.nombre) + ' (' + trepHoras_(m.horas) + ')'; }).join(', ') + '</td>'
-      + '<td class="ind-num">' + trepHoras_(o.horas) + '</td><td class="ind-num">' + trepDuracion_(o.duracionHoras) + '</td>'
+      + '<td class="ind-num"' + (o.horas >= 10 ? ' style="color:var(--danger);font-weight:700;" title="Muchas horas: ¿se le olvidó a alguien dar Queda pendiente? Revísala con Corregir"' : '') + '>' + trepHoras_(o.horas) + '</td><td class="ind-num">' + trepDuracion_(o.duracionHoras) + '</td>'
       + '<td>' + (puedeCapturarPestana('indicadores') ? '<button type="button" class="export-btn trep-corregir" data-orden="' + escapeHtml(o.orden) + '" style="padding:3px 8px;font-size:11px;">Corregir</button>' : '') + '</td></tr>';
   }).join('') || '<tr><td colspan="8" class="maq-empty">—</td></tr>';
   const enCurso = TREP_DATOS.enCurso || [];

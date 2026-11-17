@@ -15569,6 +15569,7 @@ document.getElementById('ent-limite').addEventListener('change', function(){
 const entModalOverlay = document.getElementById('ent-modal-overlay');
 
 function abrirModalEntrega(entrega){
+  if(entModalOverlay.parentNode !== document.body) document.body.appendChild(entModalOverlay);   // nov-2026: que se vea aunque su sección esté oculta
   const auditWrap = document.getElementById('ent-f-audit-wrap');
   document.getElementById('ent-f-id').value = entrega.Id;
   document.getElementById('ent-f-huerta').value = entrega.Huerta || '';
@@ -15903,7 +15904,8 @@ function mostrarFormatoEntrega_(id){
         '<a class="row-view" id="ent-formato-pagina" href="' + escapeHtml(enlaceConfirmarEntrega_(f)) + '" target="_blank" rel="noopener" title="La página que le llega a la gasolinera">🔗 Página de la gasolinera</a>' +
         botonesCorreoHtml_('row-view ent-btn-correo', '') + '</div>' +
         '<div class="maq-modal-status" id="ent-formato-status"></div>' +
-        '<button type="button" class="export-btn" id="ent-btn-otra" style="margin-top:10px;">Registrar otra entrega</button>';
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">' + (puedeCapturarPestana('diesel') ? '<button type="button" class="export-btn" id="ent-btn-editar-formato">✏️ Editar entrega (fecha, litros…)</button>' : '') +
+        '<button type="button" class="export-btn" id="ent-btn-otra">Registrar otra entrega</button></div>';
       caja.querySelectorAll('.ent-btn-correo').forEach(function(b){
         b.addEventListener('click', function(){
           const msg = enviarCorreoVia_(b.dataset.via || 'app', f.correos.slice(0, 1), 'Entrega de diesel ' + f.folio + ' — ' + f.huerta + ' (' + Number(f.litros).toLocaleString('es-MX') + ' L)', textoCorreoEntrega_(f), f.correos.slice(1));
@@ -15911,6 +15913,20 @@ function mostrarFormatoEntrega_(id){
         });
       });
       document.getElementById('ent-btn-otra').addEventListener('click', function(){ abrirModalEntregaHuerta_(null); });
+      // Nov-2026: editar la entrega (p. ej. la fecha) desde aquí, aunque no se vea la lista de entregas.
+      const btnEd = document.getElementById('ent-btn-editar-formato');
+      if(btnEd) btnEd.addEventListener('click', function(){
+        const abrir = function(lista){
+          const e = (lista || []).find(function(x){ return x.Id === f.id; });
+          if(!e){ alert('No encontré la entrega ' + f.folio + '. Actualiza la página.'); return; }
+          document.getElementById('ent-reg-overlay').classList.remove('open');
+          abrirModalEntrega(e);
+        };
+        if(ALL_ENTREGAS.some(function(x){ return x.Id === f.id; })) return abrir(ALL_ENTREGAS);
+        google.script.run.withSuccessHandler(function(rows){ ALL_ENTREGAS = rows || []; abrir(ALL_ENTREGAS); })
+          .withFailureHandler(function(){ alert('No se pudo cargar la entrega.'); })
+          .getDieselEntregas(ACCESS_CODE, PANEL_USUARIO, false);
+      });
     })
     .withFailureHandler(function(e){ caja.innerHTML = '<div class="mnt-subtext" style="color:var(--danger);">' + escapeHtml((e && e.message) || 'No se pudo preparar el formato.') + '</div>'; })
     .getFormatoEntregaDiesel(ACCESS_CODE, PANEL_USUARIO, id);

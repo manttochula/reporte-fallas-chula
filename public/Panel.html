@@ -15738,12 +15738,25 @@ function cargarSemanasTablero_(){
   DZT_SEM_CARGADAS = true;
   google.script.run
     .withSuccessHandler(function(r){
-      DZT_SEMANAS = (r && r.semanas) || [];
+      DZT_SEMANAS = ((r && r.semanas) || []).map(function(x){ return Object.assign({}, x, { id: String(x.id) }); });
       const hoy = (r && r.hoy) || dztDia_(new Date());
+      // Nov-2026: si las semanas del sistema no llegan a hoy, se completan con semanas de 7 días
+      // (seguidas de la última) para que las entregas/cargas recientes sí salgan en el tablero.
+      const masDias = function(ymd, n){ const d = new Date(ymd + 'T12:00:00'); d.setDate(d.getDate() + n); return dztDia_(d); };
+      if(!DZT_SEMANAS.length){
+        const d = new Date(hoy + 'T12:00:00'); const lunes = masDias(hoy, -((d.getDay() + 6) % 7));
+        DZT_SEMANAS.push({ id: 'auto-' + lunes, codigo: 'Semana', inicio: lunes, fin: masDias(lunes, 6), auto: true });
+      }
+      let guard = 0;
+      while(DZT_SEMANAS[DZT_SEMANAS.length - 1].fin < hoy && guard++ < 60){
+        const ult = DZT_SEMANAS[DZT_SEMANAS.length - 1];
+        const ini = masDias(ult.fin, 1);
+        DZT_SEMANAS.push({ id: 'auto-' + ini, codigo: 'Semana', inicio: ini, fin: masDias(ini, 6), auto: true });
+      }
       const actual = DZT_SEMANAS.find(function(x){ return x.inicio <= hoy && x.fin >= hoy; }) || DZT_SEMANAS[DZT_SEMANAS.length - 1];
       DZT_SEM_ID = actual ? actual.id : null;
       const sel = document.getElementById('dzt-semana');
-      sel.innerHTML = DZT_SEMANAS.length ? DZT_SEMANAS.slice().reverse().map(function(x){ return '<option value="' + x.id + '">' + escapeHtml(x.codigo) + ' · ' + dztFechaCorta_(x.inicio) + ' al ' + dztFechaCorta_(x.fin) + '</option>'; }).join('') : '<option value="">No hay semanas dadas de alta (Indicadores → Semanas)</option>';
+      sel.innerHTML = DZT_SEMANAS.slice().reverse().map(function(x){ return '<option value="' + escapeHtml(x.id) + '">' + escapeHtml(x.codigo) + ' · ' + dztFechaCorta_(x.inicio) + ' al ' + dztFechaCorta_(x.fin) + (x.auto ? ' (no está en Indicadores → Semanas)' : '') + '</option>'; }).join('');
       if(DZT_SEM_ID) sel.value = String(DZT_SEM_ID);
       tablerosRender_();
     })
@@ -15820,7 +15833,7 @@ function imprimirTablero_(el){
     '</style></head><body>' + el.outerHTML + '<script>window.onload=function(){window.print();}<\/script></body></html>');
   w.document.close();
 }
-document.getElementById('dzt-semana').addEventListener('change', function(){ DZT_SEM_ID = Number(this.value) || null; tablerosRender_(); });
+document.getElementById('dzt-semana').addEventListener('change', function(){ DZT_SEM_ID = this.value || null; tablerosRender_(); });
 document.getElementById('dzt-huerta').addEventListener('change', tablerosRender_);
 document.getElementById('dzt-todas').addEventListener('change', tablerosRender_);
 ['dzt-sem-ant', 'dzt-sem-sig'].forEach(function(id, k){

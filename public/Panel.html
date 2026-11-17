@@ -127,6 +127,24 @@
   .panel-tab.active{ background: var(--amber); color:#1C1E1F; border-color: var(--amber); font-weight:600; }
 
   .usr-form{ display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+  /* Nov-2026: tablero de diesel por huerta (como la hoja "Control de diesel") */
+  .dzt-tablero{ border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:14px; background: var(--panel); }
+  .dzt-cab{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+  .dzt-titulo{ font-size:16px; letter-spacing:.03em; }
+  .dzt-tabla{ width:100%; border-collapse:collapse; font-size:13px; min-width:0; }
+  .dzt-tabla th, .dzt-tabla td{ border:1px solid var(--line); padding:5px 8px; }
+  .dzt-num{ text-align:right; white-space:nowrap; }
+  .dzt-totales{ display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+  .dzt-caja{ border:1px solid var(--line); border-radius:6px; padding:8px 10px; min-width:150px; }
+  .dzt-ancha{ flex:1; min-width:280px; }
+  .dzt-et{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; color: var(--text-dim); margin-bottom:4px; }
+  .dzt-val{ font-size:20px; font-weight:700; }
+  .dzt-neg{ color: var(--danger); }
+  .dzt-dias{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:2px 14px; font-size:12px; }
+  .dzt-dia{ display:flex; justify-content:space-between; gap:8px; }
+  .dzt-sub{ margin-top:6px; font-size:12px; }
+  .dzt-ents{ margin-top:6px; font-size:11px; color: var(--text-dim); }
+  .dzt-ent{ display:inline-block; margin:2px 10px 2px 0; }
   .usr-form input[type=text]{
     flex:1; min-width:220px; background: var(--panel); border:1px solid var(--line);
     color: var(--text); padding:10px 12px; border-radius:4px; font-size:14px; outline:none;
@@ -2240,6 +2258,7 @@
       </div>
 
       <div id="dz-tabla-container">
+      <div class="dz-entregas-header" style="margin:18px 0 8px;">Cargas de diesel</div>
       <div class="toolbar">
         <input type="text" id="dz-search" placeholder="Buscar por folio, unidad, huerta o quien cargó...">
         <select id="dz-huerta"><option value="">Todas las huertas</option></select>
@@ -2289,6 +2308,19 @@
           <tbody id="dz-table-body"></tbody>
         </table>
       </div>
+      </div>
+
+      <!-- Nov-2026 (Carlos): tablero de cada huerta como la hoja "Control de diesel", con corte por semana (semanas del sistema) -->
+      <div class="dz-resumen" id="dz-tableros-container">
+        <div class="dz-resumen-header">Tablero de diesel por huerta</div>
+        <div class="toolbar" style="margin:6px 0 10px;align-items:center;">
+          <button type="button" class="export-btn" id="dzt-sem-ant" title="Semana anterior">◀</button>
+          <select id="dzt-semana" style="min-width:230px;"><option value="">Cargando semanas...</option></select>
+          <button type="button" class="export-btn" id="dzt-sem-sig" title="Semana siguiente">▶</button>
+          <select id="dzt-huerta"><option value="">Todas las huertas</option></select>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="dzt-todas" style="width:auto;"> Mostrar huertas sin movimiento</label>
+        </div>
+        <div id="dzt-lista"><div class="empty">Cargando...</div></div>
       </div>
 
       <div class="dz-resumen" id="dz-notif-container">
@@ -5243,12 +5275,12 @@ const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz',
 // localStorage para re-entrar sin pedir contraseña. Vacío = ve todos los
 // cuadros (default, para no sorprender a nadie que no se haya configurado
 // explícitamente).
+// Nov-2026 (Carlos): "Diesel por huerta", "por departamento" y "restante por huerta"
+// se quitaron; los reemplaza el tablero por huerta (ver tablerosRender_).
 const DZ_CUADROS = [
-  { id: 'dzh-container', label: 'Diesel por huerta' },
-  { id: 'dzd-container', label: 'Diesel por departamento' },
-  { id: 'dz-restante-container', label: 'Diesel restante por huerta' },
   { id: 'dz-entregas-container', label: 'Diesel entregado a huertas' },
   { id: 'dz-tabla-container', label: 'Cargas de diesel (tabla general)' },
+  { id: 'dz-tableros-container', label: 'Tablero de diesel por huerta' },
   { id: 'dz-notif-container', label: 'Notificaciones' },
   { id: 'dz-rendimiento-container', label: 'Rendimiento y horas máximas por equipo' },
 ];
@@ -7727,6 +7759,7 @@ ptabDiesel.addEventListener('click', function(){
   activarPanelTab(ptabDiesel, pviewDiesel);
   if(!DIESEL_CARGADO){ cargarDiesel(); }
   cargarSolicitudesDiesel_();
+  cargarSemanasTablero_();
   if(!ENTREGAS_CARGADAS){ cargarEntregas(); }
   if(!DIESEL_RESUMEN_CARGADO){ cargarDieselRestante(); }
   if(!RENDIMIENTO_CARGADO){ cargarRendimientoMaquinaria(); }
@@ -11243,6 +11276,7 @@ function renderDiesel(){
         .restaurarCargaDiesel(ACCESS_CODE, PANEL_USUARIO, carga.Id);
     });
   });
+  if(typeof tablerosRender_ === 'function') tablerosRender_();
   ocultarControlesSoloLectura();
   dzhRefrescarTrasRenderDiesel_();
   dzdRefrescarTrasRenderDiesel_();
@@ -15547,6 +15581,7 @@ function renderEntregas(){
         .restaurarDieselEntrega(ACCESS_CODE, PANEL_USUARIO, entrega.Id);
     });
   });
+  if(typeof tablerosRender_ === 'function') tablerosRender_();
   ocultarControlesSoloLectura();
   dzhRefrescarTrasRenderEntregas_();
 }
@@ -15676,6 +15711,126 @@ function entAutocalcularTotal(){
 document.getElementById('ent-f-litros').addEventListener('input', entAutocalcularTotal);
 document.getElementById('ent-f-precio-litro').addEventListener('input', entAutocalcularTotal);
 document.getElementById('ent-f-total').addEventListener('input', function(){ entTotalTocado = true; });
+
+// ---- Nov-2026 (Carlos): orden de Combustible Agrícola y tablero por huerta ----
+(function reordenarCombustible_(){
+  ['dzh-container', 'dzd-container', 'dz-restante-container'].forEach(function(id){ const el = document.getElementById(id); if(el) el.style.display = 'none'; el && el.setAttribute('data-quitado', '1'); });
+  const sold = document.getElementById('sold-container');
+  if(!sold) return;
+  let ref = sold;
+  ['dz-entregas-container', 'dz-tabla-container', 'dz-tableros-container'].forEach(function(id){
+    const el = document.getElementById(id);
+    if(el){ ref.parentNode.insertBefore(el, ref.nextSibling); ref = el; }
+  });
+})();
+let DZT_SEMANAS = [], DZT_SEM_ID = null, DZT_SEM_CARGADAS = false;
+function dztDia_(f){ const d = new Date(f); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function dztFechaCorta_(ymd){ const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd || ''); return m ? m[3] + '/' + m[2] : ymd; }
+function dztLitros_(n){ return Number(n || 0).toLocaleString('es-MX', { maximumFractionDigits: 2 }); }
+function dztDiasSemana_(ini, fin){
+  const dias = [], d = new Date(ini + 'T12:00:00'), f = new Date(fin + 'T12:00:00');
+  while(d <= f && dias.length < 14){ dias.push(dztDia_(d)); d.setDate(d.getDate() + 1); }
+  return dias;
+}
+const DZT_NOMBRE_DIA_ = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+function cargarSemanasTablero_(){
+  if(DZT_SEM_CARGADAS) return;
+  DZT_SEM_CARGADAS = true;
+  google.script.run
+    .withSuccessHandler(function(r){
+      DZT_SEMANAS = (r && r.semanas) || [];
+      const hoy = (r && r.hoy) || dztDia_(new Date());
+      const actual = DZT_SEMANAS.find(function(x){ return x.inicio <= hoy && x.fin >= hoy; }) || DZT_SEMANAS[DZT_SEMANAS.length - 1];
+      DZT_SEM_ID = actual ? actual.id : null;
+      const sel = document.getElementById('dzt-semana');
+      sel.innerHTML = DZT_SEMANAS.length ? DZT_SEMANAS.slice().reverse().map(function(x){ return '<option value="' + x.id + '">' + escapeHtml(x.codigo) + ' · ' + dztFechaCorta_(x.inicio) + ' al ' + dztFechaCorta_(x.fin) + '</option>'; }).join('') : '<option value="">No hay semanas dadas de alta (Indicadores → Semanas)</option>';
+      if(DZT_SEM_ID) sel.value = String(DZT_SEM_ID);
+      tablerosRender_();
+    })
+    .withFailureHandler(function(){ DZT_SEM_CARGADAS = false; document.getElementById('dzt-lista').innerHTML = '<div class="empty">No se pudieron cargar las semanas.</div>'; })
+    .getSemanas(ACCESS_CODE, PANEL_USUARIO);
+}
+function tablerosRender_(){
+  const cont = document.getElementById('dzt-lista');
+  if(!cont) return;
+  const sem = DZT_SEMANAS.find(function(x){ return x.id === DZT_SEM_ID; });
+  if(!sem){ if(DZT_SEM_CARGADAS && DZT_SEMANAS.length === 0) cont.innerHTML = '<div class="empty">No hay semanas dadas de alta (Indicadores → Semanas).</div>'; return; }
+  const selH = document.getElementById('dzt-huerta');
+  const huertas = (typeof dzhHuertasPermitidas_ === 'function' ? dzhHuertasPermitidas_() : HUERTAS).slice();
+  if(selH.options.length !== huertas.length + 1){ const v = selH.value; selH.innerHTML = '<option value="">Todas las huertas</option>' + huertas.map(function(h){ return '<option value="' + escapeHtml(h) + '">' + escapeHtml(h) + '</option>'; }).join(''); selH.value = v; }
+  const soloH = selH.value, todas = document.getElementById('dzt-todas').checked;
+  const cargas = (ALL_DIESEL || []).filter(function(r){ return !r.Eliminado && r.Fecha; });
+  const entregas = (ALL_ENTREGAS || []).filter(function(r){ return !r.Eliminado && r.Fecha; });
+  const dias = dztDiasSemana_(sem.inicio, sem.fin);
+  const puede = puedeCapturarPestana('diesel');
+  const html = huertas.filter(function(h){ return !soloH || h === soloH; }).map(function(h, idx){
+    const H = h.toUpperCase();
+    const deH = function(r){ return (r.Huerta || '').toUpperCase() === H; };
+    const cH = cargas.filter(deH), eH = entregas.filter(deH);
+    let saldoAnt = 0;
+    eH.forEach(function(r){ if(dztDia_(r.Fecha) < sem.inicio) saldoAnt += Number(r.Litros) || 0; });
+    cH.forEach(function(r){ if(dztDia_(r.Fecha) < sem.inicio) saldoAnt -= Number(r.Litros) || 0; });
+    const enSem = function(r){ const d = dztDia_(r.Fecha); return d >= sem.inicio && d <= sem.fin; };
+    const cS = cH.filter(enSem).sort(function(a, b){ return new Date(a.Fecha) - new Date(b.Fecha); });
+    const eS = eH.filter(enSem).sort(function(a, b){ return new Date(a.Fecha) - new Date(b.Fecha); });
+    if(!todas && !soloH && !cS.length && !eS.length && Math.abs(saldoAnt) < 0.005) return '';
+    const totC = cS.reduce(function(a, r){ return a + (Number(r.Litros) || 0); }, 0);
+    const totE = eS.reduce(function(a, r){ return a + (Number(r.Litros) || 0); }, 0);
+    const porDia = {}; eS.forEach(function(r){ const d = dztDia_(r.Fecha); porDia[d] = (porDia[d] || 0) + (Number(r.Litros) || 0); });
+    const filas = cS.map(function(r, i){
+      return '<tr><td class="dzt-num">' + (i + 1) + '</td><td>' + escapeHtml(r.Implemento || '—') + '</td><td>' + escapeHtml(dztFechaCorta_(dztDia_(r.Fecha))) + '</td><td>' + escapeHtml(r.Unidad || r.CodigoUnidad || '') + '</td>' +
+        '<td class="dzt-num">' + (r.Lectura !== null && r.Lectura !== undefined && r.Lectura !== '' ? escapeHtml(String(Number(r.Lectura))) : '—') + '</td><td>' + escapeHtml(r.Operador || r.Nombre || '') + '</td><td class="dzt-num"><b>' + dztLitros_(r.Litros) + '</b></td>' +
+        '<td class="dzt-no-print">' + (puede ? '<button type="button" class="export-btn dzt-ed-carga" data-id="' + r.Id + '" style="padding:3px 8px;font-size:11px;">Editar</button>' : '') + '</td></tr>';
+    }).join('') || '<tr><td colspan="8" class="maq-empty">Sin cargas en esta semana.</td></tr>';
+    const salidas = dias.map(function(d){
+      const dd = new Date(d + 'T12:00:00');
+      return '<div class="dzt-dia"><span>' + DZT_NOMBRE_DIA_[dd.getDay()] + ' ' + dztFechaCorta_(d) + '</span><b>' + (porDia[d] ? dztLitros_(porDia[d]) + ' L' : '—') + '</b></div>';
+    }).join('');
+    const listaEnt = eS.map(function(r){
+      return '<span class="dzt-ent">' + escapeHtml(r.Folio) + ' · ' + dztFechaCorta_(dztDia_(r.Fecha)) + ' · ' + dztLitros_(r.Litros) + ' L' + (puede ? ' <button type="button" class="export-btn dzt-ed-ent dzt-no-print" data-id="' + r.Id + '" style="padding:2px 6px;font-size:10px;">Editar</button> <button type="button" class="export-btn dzt-fmt-ent dzt-no-print" data-id="' + r.Id + '" style="padding:2px 6px;font-size:10px;">Formato</button>' : '') + '</span>';
+    }).join('');
+    const saldoFin = saldoAnt + totE - totC;
+    return '<div class="dzt-tablero" data-huerta="' + escapeHtml(h) + '">' +
+      '<div class="dzt-cab"><div><b class="dzt-titulo">' + escapeHtml(h) + '</b> <span class="mnt-subtext" style="display:inline;">· Control de diesel · ' + escapeHtml(sem.codigo) + ' (' + dztFechaCorta_(sem.inicio) + ' al ' + dztFechaCorta_(sem.fin) + ')</span></div>' +
+      '<div class="dzt-no-print" style="display:flex;gap:6px;flex-wrap:wrap;">' + (puede ? '<button type="button" class="export-btn dzt-add-carga" data-h="' + escapeHtml(h) + '">+ Carga</button><button type="button" class="export-btn dzt-add-ent" data-h="' + escapeHtml(h) + '">+ Salida de bodega</button>' : '') +
+      '<button type="button" class="export-btn dzt-imprimir">Imprimir</button></div></div>' +
+      '<div class="table-wrap"><table class="dzt-tabla"><thead><tr><th>#</th><th>Implemento agrícola</th><th>Fecha</th><th>Tractor</th><th>Horómetro final</th><th>Operador</th><th>Total litros</th><th class="dzt-no-print"></th></tr></thead><tbody>' + filas + '</tbody></table></div>' +
+      '<div class="dzt-totales">' +
+        '<div class="dzt-caja"><div class="dzt-et">Diesel saldo anterior</div><div class="dzt-val">' + dztLitros_(saldoAnt) + ' L</div></div>' +
+        '<div class="dzt-caja dzt-ancha"><div class="dzt-et">Salidas de bodega (entregas a la huerta)</div><div class="dzt-dias">' + salidas + '</div><div class="dzt-sub">Total entregado: <b>' + dztLitros_(totE) + ' L</b></div>' + (listaEnt ? '<div class="dzt-ents">' + listaEnt + '</div>' : '') + '</div>' +
+        '<div class="dzt-caja"><div class="dzt-et">Total cargado</div><div class="dzt-val">' + dztLitros_(totC) + ' L</div></div>' +
+        '<div class="dzt-caja"><div class="dzt-et">Saldo final</div><div class="dzt-val' + (saldoFin < 0 ? ' dzt-neg' : '') + '">' + dztLitros_(saldoFin) + ' L</div></div>' +
+      '</div></div>';
+  }).join('');
+  cont.innerHTML = html || '<div class="empty">Ninguna huerta tuvo movimientos en esta semana. Palomea "Mostrar huertas sin movimiento" para verlas todas.</div>';
+  cont.querySelectorAll('.dzt-add-carga').forEach(function(b){ b.addEventListener('click', function(){ abrirModalDiesel(null, b.dataset.h); }); });
+  cont.querySelectorAll('.dzt-add-ent').forEach(function(b){ b.addEventListener('click', function(){ abrirModalEntregaHuerta_(b.dataset.h); }); });
+  cont.querySelectorAll('.dzt-ed-carga').forEach(function(b){ b.addEventListener('click', function(){ const r = ALL_DIESEL.find(function(x){ return String(x.Id) === b.dataset.id; }); if(r) abrirModalDiesel(r); }); });
+  cont.querySelectorAll('.dzt-ed-ent').forEach(function(b){ b.addEventListener('click', function(){ const r = ALL_ENTREGAS.find(function(x){ return String(x.Id) === b.dataset.id; }); if(r) abrirModalEntrega(r); }); });
+  cont.querySelectorAll('.dzt-fmt-ent').forEach(function(b){ b.addEventListener('click', function(){ abrirModalEntregaHuerta_(null, Number(b.dataset.id)); }); });
+  cont.querySelectorAll('.dzt-imprimir').forEach(function(b){ b.addEventListener('click', function(){ imprimirTablero_(b.closest('.dzt-tablero')); }); });
+}
+function imprimirTablero_(el){
+  const w = window.open('', '_blank');
+  if(!w){ alert('El navegador bloqueó la ventana para imprimir.'); return; }
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Control de diesel</title><style>' +
+    'body{font-family:Arial,sans-serif;color:#000;margin:18px;} .dzt-no-print{display:none!important;} .dzt-cab{margin-bottom:8px;font-size:15px;} .mnt-subtext{color:#444;}' +
+    'table{width:100%;border-collapse:collapse;font-size:12px;} th,td{border:1px solid #333;padding:4px 6px;text-align:left;} th{background:#e8e8e8;} .dzt-num{text-align:right;}' +
+    '.dzt-totales{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;font-size:12px;} .dzt-caja{border:1px solid #333;padding:6px 8px;min-width:140px;} .dzt-ancha{flex:1;} .dzt-val{font-size:16px;font-weight:700;} .dzt-dias{display:grid;grid-template-columns:repeat(4,1fr);gap:2px 10px;} .dzt-dia{display:flex;justify-content:space-between;} .dzt-ent{display:block;}' +
+    '</style></head><body>' + el.outerHTML + '<script>window.onload=function(){window.print();}<\/script></body></html>');
+  w.document.close();
+}
+document.getElementById('dzt-semana').addEventListener('change', function(){ DZT_SEM_ID = Number(this.value) || null; tablerosRender_(); });
+document.getElementById('dzt-huerta').addEventListener('change', tablerosRender_);
+document.getElementById('dzt-todas').addEventListener('change', tablerosRender_);
+['dzt-sem-ant', 'dzt-sem-sig'].forEach(function(id, k){
+  document.getElementById(id).addEventListener('click', function(){
+    const i = DZT_SEMANAS.findIndex(function(x){ return x.id === DZT_SEM_ID; });
+    const j = i + (k === 0 ? -1 : 1);
+    if(i < 0 || j < 0 || j >= DZT_SEMANAS.length) return;
+    DZT_SEM_ID = DZT_SEMANAS[j].id; document.getElementById('dzt-semana').value = String(DZT_SEM_ID); tablerosRender_();
+  });
+});
 
 // ---- Nov-2026: firma dibujada (mouse o dedo) en un <canvas> ----
 function padFirma_(canvas){

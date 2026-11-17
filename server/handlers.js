@@ -1203,7 +1203,7 @@ const SECCIONES_INDICADOR = [
   { clave: 'llantas', nombre: 'Llantas y Ponches' },
   { clave: 'terceros', nombre: 'Reparaciones con terceros' },
 ];
-const PERMISOS_VER_SEMANAS = ['indicadores', 'ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'];
+const PERMISOS_VER_SEMANAS = ['indicadores', 'ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel'];   // diesel: tablero por huerta (nov-2026)
 
 function semanaDeFila_(f) {
   return { id: f.id, codigo: f.codigo, inicio: fechaYmd_(f.fecha_inicio), fin: fechaYmd_(f.fecha_fin) };

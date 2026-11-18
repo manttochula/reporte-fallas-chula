@@ -3526,9 +3526,11 @@
       <div class="mnt-subtext" style="margin-bottom:8px;">Sube el catálogo de partes de cada modelo (por ejemplo el PDF de Kubota L3800). Se lee solo: secciones, dibujos y la tabla de piezas. Después, en cada orden de un equipo de ese modelo, el botón "📖 Catálogo del equipo" (en Refaccionamiento, aquí y en Taller) lo muestra para escoger las piezas, con propuesta de la IA según la falla. El modelo del equipo se toma de Maquinaria. Si subes otro PDF para el mismo modelo, reemplaza al anterior.</div>
       <div class="toolbar" id="manpar-subir">
         <select id="manpar-modelo"><option value="">Modelo del catálogo...</option></select>
-        <input type="file" id="manpar-archivo" accept="application/pdf,.pdf">
+        <input type="file" id="manpar-archivo" accept="application/pdf,.pdf" multiple title="Puedes elegir varios PDF: se juntan en un solo catálogo">
         <button class="export-btn" id="manpar-btn-subir">Subir catálogo de partes (PDF)</button>
+        <input type="file" id="manpar-archivo-agregar" accept="application/pdf,.pdf" multiple style="display:none;">
       </div>
+      <div class="mnt-subtext" style="margin:-4px 0 6px;">Puedes elegir varios PDF a la vez (se juntan en un solo catálogo). Para agregar archivos a un catálogo ya subido usa "Agregar PDF": si traen una sección con el mismo código, la nueva reemplaza a la anterior.</div>
       <div id="manpar-series-wrap" style="display:none; margin:6px 0 10px; padding:8px 10px; border:1px solid #e2e8f0; border-radius:8px;">
         <div style="font-weight:600; margin-bottom:4px;">Este modelo lleva catálogo por número de serie: ¿a qué series aplica este PDF?</div>
         <div id="manpar-series-equipos" class="mnt-subtext" style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-bottom:6px;"></div>
@@ -4996,7 +4998,7 @@ var PANEL_SOLO_EN_LINEA = {
   importarServiciosAutomotrices: true, guardarImagenMapaHuerta: true, validarUsuario: true,
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
-  crearManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
+  crearManualPartes: true, agregarArchivosManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
@@ -5572,7 +5574,7 @@ function ocultarControlesSoloLectura(){
       '#ref-add', '.ref-btn-editar', '#ref-btn-save', '#ref-btn-delete',
       '#refcat-add', '.refcat-btn-editar', '#refcat-btn-save', '#refcat-btn-delete',
       '#marca-add', '.marca-btn-editar', '#marca-btn-save', '#marca-btn-delete', '#modelo-agregar', '.modelo-quitar',
-      '#manpar-subir', '.manpar-btn-eliminar', '#ocx-abrir',
+      '#manpar-subir', '.manpar-btn-eliminar', '.manpar-btn-agregar', '#ocx-abrir',
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
@@ -21986,6 +21988,7 @@ function renderManualesPartes(){
       <td>${escapeHtml(m.SubidoPor || '')}${m.CreadoEn ? '<br><span class="mnt-subtext">' + escapeHtml(formatFechaAudit(m.CreadoEn)) + '</span>' : ''}</td>
       <td style="white-space:nowrap;">
         <button type="button" class="export-btn" onclick="verManualPartes(${m.Id})">Ver</button>
+        <button type="button" class="export-btn manpar-btn-agregar" onclick="agregarPdfManualPartes(${m.Id})">Agregar PDF</button>
         <button type="button" class="export-btn manpar-btn-eliminar" onclick="eliminarManualPartesPanel(${m.Id})">Eliminar</button>
       </td>
     </tr>`;
@@ -21997,6 +22000,45 @@ function verManualPartes(id){
   if(!window.CatalogoPartes){ alert('No se pudo cargar el visor del catálogo. Revisa tu conexión y recarga la página.'); return; }
   window.CatalogoPartes.abrir({ code: ACCESS_CODE, usuario: PANEL_USUARIO, manualId: id, puedeEditarCodigo: puedeCapturarPestana('refacciones'), onCodigoActualizado: function(){ if(typeof cargarRefacciones === 'function') cargarRefacciones(); } });
 }
+
+// Nov-2026: agregar uno o varios PDF a un catálogo ya subido (diagramas
+// divididos o actualizaciones). Misma sección (mismo código) -> queda la nueva.
+let MANUAL_PARTES_AGREGAR_ID = null;
+function agregarPdfManualPartes(id){
+  if(MANUAL_PARTES_SUBIENDO) return;
+  MANUAL_PARTES_AGREGAR_ID = id;
+  const inp = document.getElementById('manpar-archivo-agregar');
+  inp.value = '';
+  inp.click();
+}
+document.getElementById('manpar-archivo-agregar').addEventListener('change', async function(){
+  const archivos = Array.from(this.files || []);
+  const id = MANUAL_PARTES_AGREGAR_ID;
+  if(!archivos.length || !id || MANUAL_PARTES_SUBIENDO) return;
+  const statusEl = document.getElementById('manpar-status');
+  const aviso = function(texto, tipo){ statusEl.textContent = texto; statusEl.className = 'maq-modal-status show' + (tipo ? ' ' + tipo : ''); };
+  const m = ALL_MANUALES_PARTES.find(function(x){ return x.Id === id; });
+  const nombre = m ? ((m.Marca || '') + ' ' + (m.Modelo || '')).trim() + ((m.Series || []).length ? ' (serie ' + m.Series.join(', ') + ')' : '') : 'el catálogo';
+  if(!confirm('¿Agregar ' + archivos.length + ' PDF a ' + nombre + '?\nSi traen una sección con el mismo código que ya existe, se reemplaza por la nueva.')) { this.value = ''; return; }
+  if(!window.CatalogoPartes){ aviso('No se pudo cargar el lector de PDF. Revisa tu conexión y recarga la página.', 'err'); return; }
+  MANUAL_PARTES_SUBIENDO = true;
+  const btns = Array.from(document.querySelectorAll('#manpar-btn-subir, .manpar-btn-agregar'));
+  btns.forEach(function(b){ b.disabled = true; });
+  try {
+    const r = await window.CatalogoPartes.subirPdf({
+      files: archivos, manualId: id, code: ACCESS_CODE, usuario: PANEL_USUARIO,
+      onProgreso: function(t){ aviso('Agregando a ' + nombre + ': ' + t + ' (no cierres esta página)'); }
+    });
+    aviso('Listo: se agregaron ' + r.nuevas + ' secciones a ' + nombre + (r.reemplazadas ? ' (' + r.reemplazadas + ' reemplazaron a las anteriores)' : '') + '. Ahora tiene ' + r.secciones + ' secciones y ' + r.piezas + ' piezas.', 'ok');
+    cargarManualesPartes();
+  } catch(e){
+    aviso((e && e.message) || 'No se pudieron agregar los archivos.', 'err');
+  } finally {
+    MANUAL_PARTES_SUBIENDO = false;
+    btns.forEach(function(b){ b.disabled = false; });
+    this.value = '';
+  }
+});
 
 function eliminarManualPartesPanel(id){
   const m = ALL_MANUALES_PARTES.find(function(x){ return x.Id === id; });
@@ -22013,7 +22055,8 @@ function eliminarManualPartesPanel(id){
 document.getElementById('manpar-btn-subir').addEventListener('click', async function(){
   const statusEl = document.getElementById('manpar-status');
   const modeloId = Number(document.getElementById('manpar-modelo').value);
-  const archivo = document.getElementById('manpar-archivo').files[0];
+  const archivos = Array.from(document.getElementById('manpar-archivo').files || []);
+  const archivo = archivos[0];
   const aviso = function(texto, tipo){ statusEl.textContent = texto; statusEl.className = 'maq-modal-status show' + (tipo ? ' ' + tipo : ''); };
   if(MANUAL_PARTES_SUBIENDO) return;
   if(!modeloId){ aviso('Elige el modelo al que pertenece el catálogo (si no está, dalo de alta arriba en Marcas y modelos).', 'err'); return; }
@@ -22029,10 +22072,10 @@ document.getElementById('manpar-btn-subir').addEventListener('click', async func
   btn.disabled = true;
   try {
     const r = await window.CatalogoPartes.subirPdf({
-      file: archivo, modeloId: modeloId, series: series, code: ACCESS_CODE, usuario: PANEL_USUARIO,
+      files: archivos, modeloId: modeloId, series: series, code: ACCESS_CODE, usuario: PANEL_USUARIO,
       onProgreso: function(t){ aviso(t + ' (no cierres esta página)'); }
     });
-    aviso('Listo: se guardaron ' + r.secciones + ' secciones y ' + r.piezas + ' piezas.', 'ok');
+    aviso('Listo: se guardaron ' + r.secciones + ' secciones y ' + r.piezas + ' piezas' + (archivos.length > 1 ? ' de ' + archivos.length + ' archivos' : '') + (r.reemplazadas ? ' (' + r.reemplazadas + ' secciones repetidas se reemplazaron por la del archivo más nuevo)' : '') + '.', 'ok');
     document.getElementById('manpar-archivo').value = '';
     document.getElementById('manpar-series-otras').value = '';
     Array.from(document.querySelectorAll('#manpar-series-equipos input')).forEach(function(i){ i.checked = false; });

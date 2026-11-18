@@ -3935,3 +3935,18 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes' AND column_name = 'series');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes ADD COLUMN series TEXT DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026 (Carlos): un catálogo de partes puede venir en varios PDF (diagramas
+-- divididos o que se van actualizando). "parte" = de qué archivo/tanda salió la
+-- sección (una sección con el mismo código en un archivo más nuevo reemplaza a
+-- la vieja); "pendiente" = sección que se está agregando a un catálogo que ya
+-- está en uso (no se ve hasta terminar).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes_secciones' AND column_name = 'parte');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes_secciones ADD COLUMN parte INT NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes_secciones' AND column_name = 'pendiente');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes_secciones ADD COLUMN pendiente TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_len = (SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes' AND column_name = 'nombre_archivo');
+SET @sql_alter = IF(@col_len < 2000, 'ALTER TABLE manuales_partes MODIFY COLUMN nombre_archivo VARCHAR(2000) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

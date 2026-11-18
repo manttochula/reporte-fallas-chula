@@ -7,7 +7,7 @@
 //     que la manda a la lista de refacciones necesarias de la orden:
 //       item = { piezaManualId, refaccionId, texto, cantidad, origen: 'catalogo' }
 //
-//   CatalogoPartes.subirPdf({ file, modeloId, code, usuario, onProgreso })
+//   CatalogoPartes.subirPdf({ files (o file), modeloId | manualId, series, code, usuario, onProgreso })
 //     (Panel) Lee el PDF en el navegador con pdf.js + ManualPartesParser,
 //     recorta el dibujo de cada sección y lo sube sección por sección.
 //
@@ -628,36 +628,59 @@
     });
   }
 
+  // Nov-2026: uno o varios PDF (o.files) -> un solo catálogo. Con o.manualId se
+  // agregan al catálogo que ya existe; una sección con el mismo código en un
+  // archivo más nuevo reemplaza a la vieja (lo hace el servidor al terminar).
   function subirPdf(o) {
     var progreso = o.onProgreso || function () {};
     var parser = window.ManualPartesParser;
     if (!parser) return Promise.reject(new Error('Falta el lector de catálogos (manualPartesParser.js). Recarga la página.'));
-    var doc = null;
-    var secciones = null;
+    var files = (o.files && o.files.length ? Array.prototype.slice.call(o.files) : (o.file ? [o.file] : []));
+    if (!files.length) return Promise.reject(new Error('Elige el archivo PDF del catálogo.'));
+    var leidos = [];
     var manualId = null;
-    return leerPdf(o.file, progreso).then(function (r) {
-      doc = r.doc;
-      secciones = parser.leerCatalogo(r.paginas);
-      if (!secciones.length) {
-        throw new Error('No se encontró ninguna tabla de piezas en el PDF. Por ahora se leen catálogos con el formato de Kubota ' +
-          '(No. | Código de pieza | Descripción | Cant ...). Si es de otra marca, mándaselo a Claude para agregar ese formato.');
-      }
-      progreso('Se encontraron ' + secciones.length + ' secciones. Guardando...');
-      return llamar_('crearManualPartes', o.code, o.usuario, { modeloId: o.modeloId, nombreArchivo: o.file.name, paginas: doc.numPages, series: o.series || [] });
+    var parteBase = 0;
+    var agregando = !!o.manualId;
+    var nombres = files.map(function (f) { return f.name; }).join(', ');
+    var paginas = 0;
+    var total = 0;
+    var leerUno = function (k) {
+      if (k >= files.length) return Promise.resolve();
+      var pref = files.length > 1 ? 'Archivo ' + (k + 1) + ' de ' + files.length + ' (' + files[k].name + '): ' : '';
+      return leerPdf(files[k], function (t) { progreso(pref + t); }).then(function (r) {
+        var secs = parser.leerCatalogo(r.paginas);
+        if (!secs.length) {
+          throw new Error((files.length > 1 ? 'En "' + files[k].name + '" no' : 'No') + ' se encontró ninguna tabla de piezas en el PDF. Por ahora se leen catálogos con el formato de Kubota ' +
+            '(No. | Código de pieza | Descripción | Cant ...). Si es de otra marca, mándaselo a Claude para agregar ese formato.');
+        }
+        leidos.push({ doc: r.doc, secciones: secs });
+        paginas += r.doc.numPages;
+        total += secs.length;
+        return leerUno(k + 1);
+      });
+    };
+    return leerUno(0).then(function () {
+      progreso('Se encontraron ' + total + ' secciones' + (files.length > 1 ? ' en ' + files.length + ' archivos' : '') + '. Guardando...');
+      return agregando
+        ? llamar_('agregarArchivosManualPartes', o.code, o.usuario, o.manualId)
+        : llamar_('crearManualPartes', o.code, o.usuario, { modeloId: o.modeloId, nombreArchivo: nombres, paginas: paginas, series: o.series || [] });
     }).then(function (r) {
       if (!r || !r.success) throw new Error((r && r.error) || 'No se pudo empezar a guardar el catálogo.');
       manualId = r.id;
-      var i = 0;
+      parteBase = Number(r.parteBase) || 0;
+      var f = 0, i = 0, n = 0;
       function guardarUna(intento) {
-        if (i >= secciones.length) return Promise.resolve();
-        var s = secciones[i];
-        progreso('Guardando sección ' + (i + 1) + ' de ' + secciones.length + ': ' + s.titulo);
-        return recortarDibujo_(doc, s).then(function (img) {
-          var datos = { orden: i, codigo: s.codigo, titulo: s.titulo, aplica: s.aplica, serie: s.serie, grupo: s.grupo, piezas: s.piezas };
+        if (f >= leidos.length) return Promise.resolve();
+        var L = leidos[f];
+        if (i >= L.secciones.length) { f++; i = 0; return guardarUna(0); }
+        var s = L.secciones[i];
+        progreso('Guardando sección ' + (n + 1) + ' de ' + total + ': ' + s.titulo);
+        return recortarDibujo_(L.doc, s).then(function (img) {
+          var datos = { orden: i, codigo: s.codigo, titulo: s.titulo, aplica: s.aplica, serie: s.serie, grupo: s.grupo, piezas: s.piezas, parte: parteBase + f, agregando: agregando };
           return llamar_('guardarSeccionManualPartes', o.code, o.usuario, manualId, datos, img);
         }).then(function (res) {
           if (!res || !res.success) throw new Error((res && res.error) || 'No se pudo guardar la sección ' + s.titulo);
-          i++;
+          i++; n++;
           return guardarUna(0);
         }, function (err) {
           if (intento < 2) return guardarUna(intento + 1); // reintenta (internet lento)
@@ -667,7 +690,7 @@
       return guardarUna(0);
     }).then(function () {
       progreso('Terminando...');
-      return llamar_('terminarManualPartes', o.code, o.usuario, manualId);
+      return llamar_('terminarManualPartes', o.code, o.usuario, manualId, agregando ? { nombreArchivo: nombres, paginas: paginas } : null);
     }).then(function (r) {
       if (!r || !r.success) throw new Error((r && r.error) || 'No se pudo terminar de guardar el catálogo.');
       return r;

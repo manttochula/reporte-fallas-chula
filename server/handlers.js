@@ -6602,10 +6602,33 @@ async function crearManualPartes(code, nombreUsuario, data) {
   for (const v of viejos) await borrarManualPartes_(v.id);
   const [r] = await pool.query(
     'INSERT INTO manuales_partes (modelo_id, nombre_archivo, paginas, subido_por, series) VALUES (?, ?, ?, ?, ?)',
-    [modeloId, (data.nombreArchivo || '').toString().slice(0, 255) || null, Number(data.paginas) || null, (nombreUsuario || '').toString().trim() || null,
+    [modeloId, (data.nombreArchivo || '').toString().slice(0, 2000) || null, Number(data.paginas) || null, (nombreUsuario || '').toString().trim() || null,
       series.length ? JSON.stringify(series) : null]
   );
   return { success: true, id: r.insertId };
+}
+
+// Nov-2026: agregar más PDF a un catálogo que ya está subido (diagramas que
+// vienen divididos o actualizaciones). Las secciones nuevas quedan "pendientes"
+// (no se ven) hasta terminarManualPartes(..., true).
+async function agregarArchivosManualPartes(code, nombreUsuario, manualId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(manualId);
+  const [m] = await pool.query('SELECT id, completo FROM manuales_partes WHERE id = ?', [id]);
+  if (!m.length || !m[0].completo) return { success: false, error: 'No se encontró ese catálogo de partes.' };
+  // Restos de una tanda anterior que no terminó.
+  await borrarSeccionesManual_('manual_id = ? AND pendiente = 1', [id]);
+  const [[mx]] = await pool.query('SELECT COALESCE(MAX(parte), -1) AS p FROM manuales_partes_secciones WHERE manual_id = ?', [id]);
+  return { success: true, id, parteBase: Number(mx.p) + 1 };
+}
+
+async function borrarSeccionesManual_(where, params) {
+  const [secs] = await pool.query('SELECT id FROM manuales_partes_secciones WHERE ' + where, params);
+  if (!secs.length) return 0;
+  const ids = secs.map((x) => x.id);
+  await pool.query('DELETE FROM manuales_partes_piezas WHERE seccion_id IN (?)', [ids]);
+  await pool.query('DELETE FROM manuales_partes_secciones WHERE id IN (?)', [ids]);
+  return ids.length;
 }
 
 async function guardarSeccionManualPartes(code, nombreUsuario, manualId, seccion, imagenDataUrl) {
@@ -6613,16 +6636,17 @@ async function guardarSeccionManualPartes(code, nombreUsuario, manualId, seccion
   const id = Number(manualId);
   const [m] = await pool.query('SELECT id, completo FROM manuales_partes WHERE id = ?', [id]);
   if (!m.length) return { success: false, error: 'No se encontró el catálogo que se está subiendo.' };
-  if (m[0].completo) return { success: false, error: 'Ese catálogo ya se terminó de subir.' };
   seccion = seccion || {};
+  if (m[0].completo && !seccion.agregando) return { success: false, error: 'Ese catálogo ya se terminó de subir.' };
   const titulo = (seccion.titulo || '').toString().trim();
   if (!titulo) return { success: false, error: 'Falta el nombre de la sección.' };
   let imagenUrl = null;
   if (imagenDataUrl) imagenUrl = await guardarArchivo_(imagenDataUrl);
   const corta = (v, n) => ((v === null || v === undefined ? '' : v).toString().trim().slice(0, n) || null);
   const [r] = await pool.query(
-    'INSERT INTO manuales_partes_secciones (manual_id, orden, codigo, titulo, aplica, serie, grupo, imagen_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, Number(seccion.orden) || 0, corta(seccion.codigo, 20), titulo.slice(0, 255), corta(seccion.aplica, 100), corta(seccion.serie, 100), corta(seccion.grupo, 255), imagenUrl]
+    'INSERT INTO manuales_partes_secciones (manual_id, orden, codigo, titulo, aplica, serie, grupo, imagen_url, parte, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, Number(seccion.orden) || 0, corta(seccion.codigo, 20), titulo.slice(0, 255), corta(seccion.aplica, 100), corta(seccion.serie, 100), corta(seccion.grupo, 255), imagenUrl,
+      Number(seccion.parte) || 0, m[0].completo ? 1 : 0]
   );
   // Nov-2026: los códigos que se actualizaron a mano (el proveedor los cambió) se respetan al volver a subir el PDF.
   const cambios = await codigosActualizados_();
@@ -6649,11 +6673,51 @@ async function guardarSeccionManualPartes(code, nombreUsuario, manualId, seccion
   return { success: true, seccionId: r.insertId, piezas: piezas.length };
 }
 
-async function terminarManualPartes(code, nombreUsuario, manualId) {
+async function terminarManualPartes(code, nombreUsuario, manualId, extra) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
   const id = Number(manualId);
-  const [m] = await pool.query('SELECT id, modelo_id FROM manuales_partes WHERE id = ?', [id]);
+  extra = extra || {};
+  const [m] = await pool.query('SELECT id, modelo_id, completo, nombre_archivo, paginas FROM manuales_partes WHERE id = ?', [id]);
   if (!m.length) return { success: false, error: 'No se encontró el catálogo que se está subiendo.' };
+  let nuevas = 0;
+  if (m[0].completo) {
+    const [[np]] = await pool.query('SELECT COUNT(*) AS n FROM manuales_partes_secciones WHERE manual_id = ? AND pendiente = 1', [id]);
+    nuevas = Number(np.n);
+    if (!nuevas) return { success: false, error: 'No se guardó ninguna sección de los archivos nuevos.' };
+  }
+  // Varios PDF: una sección con el mismo código que viene en un archivo más
+  // nuevo reemplaza a la vieja (y toma su lugar). Dentro del mismo archivo no se toca.
+  // Las que ya se ven conservan su orden; las nuevas van por archivo y orden.
+  const [todas] = await pool.query(
+    'SELECT id, codigo, parte FROM manuales_partes_secciones WHERE manual_id = ? ORDER BY pendiente, IF(pendiente = 0 AND ? = 1, orden, 0), parte, orden, id',
+    [id, m[0].completo ? 1 : 0]
+  );
+  const final = [];
+  const quitar = [];
+  const posCodigo = new Map();
+  todas.forEach((sec) => {
+    const k = (sec.codigo || '').toString().trim().toUpperCase();
+    const prev = k ? posCodigo.get(k) : null;
+    if (prev && prev.parte < sec.parte) {
+      // Reemplaza todas las de ese código de la parte anterior
+      final.forEach((x, i) => { if (x && (x.codigo || '').toString().trim().toUpperCase() === k && x.parte < sec.parte) { quitar.push(x.id); final[i] = null; } });
+      final[prev.pos] = sec;
+      posCodigo.set(k, { parte: sec.parte, pos: prev.pos });
+      return;
+    }
+    if (k && !prev) posCodigo.set(k, { parte: sec.parte, pos: final.length });
+    final.push(sec);
+  });
+  if (quitar.length) await borrarSeccionesManual_('id IN (?)', [quitar]);
+  const quedan = final.filter(Boolean);
+  for (let i = 0; i < quedan.length; i++) {
+    await pool.query('UPDATE manuales_partes_secciones SET orden = ?, pendiente = 0 WHERE id = ?', [i, quedan[i].id]);
+  }
+  if (m[0].completo) {
+    const nombres = [m[0].nombre_archivo, (extra.nombreArchivo || '').toString()].filter(Boolean).join(', ').slice(0, 2000);
+    await pool.query('UPDATE manuales_partes SET nombre_archivo = ?, paginas = ? WHERE id = ?',
+      [nombres || null, (Number(m[0].paginas) || 0) + (Number(extra.paginas) || 0) || null, id]);
+  }
   const [[c]] = await pool.query(
     'SELECT (SELECT COUNT(*) FROM manuales_partes_secciones WHERE manual_id = ?) AS s, (SELECT COUNT(*) FROM manuales_partes_piezas WHERE manual_id = ?) AS p',
     [id, id]
@@ -6661,8 +6725,9 @@ async function terminarManualPartes(code, nombreUsuario, manualId) {
   if (!Number(c.s)) return { success: false, error: 'No se guardó ninguna sección del catálogo.' };
   // Nov-2026: ya no se reemplaza el anterior del mismo modelo (se borra a mano si sobra).
   await pool.query('UPDATE manuales_partes SET completo = 1, secciones = ?, piezas = ? WHERE id = ?', [Number(c.s), Number(c.p), id]);
-  await registrarAuditoria_('manuales_partes', id, 'subir', nombreUsuario, 'Catálogo de partes: ' + c.s + ' secciones, ' + c.p + ' piezas');
-  return { success: true, secciones: Number(c.s), piezas: Number(c.p) };
+  await registrarAuditoria_('manuales_partes', id, m[0].completo ? 'agregar pdf' : 'subir', nombreUsuario,
+    'Catálogo de partes: ' + c.s + ' secciones, ' + c.p + ' piezas' + (quitar.length ? ' (' + quitar.length + ' secciones reemplazadas)' : ''));
+  return { success: true, secciones: Number(c.s), piezas: Number(c.p), reemplazadas: quitar.length, nuevas };
 }
 
 async function borrarManualPartes_(id) {
@@ -6712,7 +6777,7 @@ async function datosManualPartes_(manualId) {
     WHERE mp.id = ? AND mp.completo = 1`, [manualId]);
   if (!man.length) return null;
   const [secs] = await pool.query(
-    'SELECT id, codigo, titulo, aplica, serie, grupo, imagen_url FROM manuales_partes_secciones WHERE manual_id = ? ORDER BY orden, id',
+    'SELECT id, codigo, titulo, aplica, serie, grupo, imagen_url FROM manuales_partes_secciones WHERE manual_id = ? AND pendiente = 0 ORDER BY orden, id',
     [manualId]
   );
   const [pzs] = await pool.query(
@@ -13329,6 +13394,7 @@ module.exports = {
   exportarOCContpaqi,
   getManualesPartes,
   crearManualPartes,
+  agregarArchivosManualPartes,
   getSeriesModeloCatalogo,
   guardarSeccionManualPartes,
   terminarManualPartes,

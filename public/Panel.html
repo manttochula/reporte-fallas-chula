@@ -3191,6 +3191,14 @@
           <label>Marca *</label>
           <select id="catsimple-f-marca"><option value="">Elige una marca...</option></select>
         </div>
+        <div class="maq-field" id="catsimple-f-catalogopor-wrap" style="display:none;">
+          <label>Catálogo de partes</label>
+          <select id="catsimple-f-catalogopor">
+            <option value="modelo">Por modelo (un catálogo para todos sus equipos)</option>
+            <option value="serie">Por número de serie (cada catálogo dice a qué series aplica)</option>
+          </select>
+          <div class="mnt-subtext">Si es por serie, al abrir el catálogo desde una orden sale el de la serie del equipo; si no hay, el del modelo.</div>
+        </div>
         <div class="maq-field" id="catsimple-f-empresa-wrap" style="display:none;">
           <label>Empresa</label>
           <select id="catsimple-f-empresa"><option value="">Sin empresa</option></select>
@@ -3520,6 +3528,11 @@
         <select id="manpar-modelo"><option value="">Modelo del catálogo...</option></select>
         <input type="file" id="manpar-archivo" accept="application/pdf,.pdf">
         <button class="export-btn" id="manpar-btn-subir">Subir catálogo de partes (PDF)</button>
+      </div>
+      <div id="manpar-series-wrap" style="display:none; margin:6px 0 10px; padding:8px 10px; border:1px solid #e2e8f0; border-radius:8px;">
+        <div style="font-weight:600; margin-bottom:4px;">Este modelo lleva catálogo por número de serie: ¿a qué series aplica este PDF?</div>
+        <div id="manpar-series-equipos" class="mnt-subtext" style="display:flex; flex-wrap:wrap; gap:4px 14px; margin-bottom:6px;"></div>
+        <input type="text" id="manpar-series-otras" placeholder="Otras series (separadas por coma)" style="width:100%; max-width:480px;">
       </div>
       <div class="maq-modal-status" id="manpar-status"></div>
       <div class="summary" id="manpar-summary"></div>
@@ -21925,6 +21938,35 @@ function poblarSelectModeloManualPartes(){
   sel.value = actual;
 }
 
+function modeloManualPartes_(id){
+  return ALL_MODELOS.find(function(m){ return m.Id === id; }) || null;
+}
+function seriesElegidasManualPartes_(){
+  const marcadas = Array.from(document.querySelectorAll('#manpar-series-equipos input:checked')).map(function(i){ return i.value; });
+  const otras = (document.getElementById('manpar-series-otras').value || '').split(/[,;\n]+/).map(function(x){ return x.trim(); }).filter(Boolean);
+  return marcadas.concat(otras);
+}
+function pintarSeriesManualPartes_(){
+  const wrap = document.getElementById('manpar-series-wrap');
+  const cont = document.getElementById('manpar-series-equipos');
+  const modeloId = Number(document.getElementById('manpar-modelo').value);
+  const mod = modeloManualPartes_(modeloId);
+  if(!mod || mod.CatalogoPor !== 'serie'){ wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  wrap.style.display = '';
+  cont.innerHTML = 'Cargando equipos...';
+  google.script.run
+    .withSuccessHandler(function(eqs){
+      if(Number(document.getElementById('manpar-modelo').value) !== modeloId) return;
+      eqs = eqs || [];
+      cont.innerHTML = eqs.length ? eqs.map(function(e){
+        return '<label style="white-space:nowrap;"><input type="checkbox" value="' + escapeHtml(e.Serie) + '"> ' + escapeHtml((e.Unidad || e.CodigoUnidad || '') + ' — ' + e.Serie) + '</label>';
+      }).join('') : 'Ningún equipo de este modelo tiene número de serie en Maquinaria. Escribe las series abajo.';
+    })
+    .withFailureHandler(function(){ cont.innerHTML = 'No se pudieron cargar los equipos. Escribe las series abajo.'; })
+    .getSeriesModeloCatalogo(ACCESS_CODE, PANEL_USUARIO, modeloId);
+}
+document.getElementById('manpar-modelo').addEventListener('change', pintarSeriesManualPartes_);
+
 function renderManualesPartes(){
   const tbody = document.getElementById('manpar-table-body');
   document.getElementById('manpar-summary').textContent = ALL_MANUALES_PARTES.length + ' catálogo(s) de partes';
@@ -21936,8 +21978,8 @@ function renderManualesPartes(){
   tbody.innerHTML = ALL_MANUALES_PARTES.map(function(m){
     return `<tr>
       <td>${escapeHtml(m.Marca || '—')}</td>
-      <td>${escapeHtml(m.Modelo || '—')}</td>
-      <td>${m.Equipos || 0}${m.Equipos ? '' : ' <span class="mnt-subtext">(asígnalo en Maquinaria)</span>'}</td>
+      <td>${escapeHtml(m.Modelo || '—')}${(m.Series || []).length ? '<br><span class="mnt-subtext">Serie: ' + escapeHtml(m.Series.join(', ')) + '</span>' : (m.CatalogoPor === 'serie' ? '<br><span class="mnt-subtext">General del modelo (series sin catálogo propio)</span>' : '')}</td>
+      <td>${m.Equipos || 0}${m.Equipos ? '' : ' <span class="mnt-subtext">' + ((m.Series || []).length ? '(ningún equipo con esa serie)' : ALL_MANUALES_PARTES.some(function(x){ return x.ModeloId === m.ModeloId && !(x.Series || []).length && x.Id > m.Id; }) ? '(se usa el más nuevo del modelo)' : '(asígnalo en Maquinaria)') + '</span>'}</td>
       <td>${m.Secciones || 0}</td>
       <td>${m.Piezas || 0}</td>
       <td>${escapeHtml(m.Archivo || '')}</td>
@@ -21977,18 +22019,23 @@ document.getElementById('manpar-btn-subir').addEventListener('click', async func
   if(!modeloId){ aviso('Elige el modelo al que pertenece el catálogo (si no está, dalo de alta arriba en Marcas y modelos).', 'err'); return; }
   if(!archivo){ aviso('Elige el archivo PDF del catálogo.', 'err'); return; }
   if(!window.CatalogoPartes){ aviso('No se pudo cargar el lector de PDF. Revisa tu conexión y recarga la página.', 'err'); return; }
-  const existente = ALL_MANUALES_PARTES.find(function(x){ return x.ModeloId === modeloId; });
-  if(existente && !confirm('Ese modelo ya tiene catálogo de partes. ¿Reemplazarlo con este PDF?')) return;
+  const modSel = modeloManualPartes_(modeloId);
+  const series = modSel && modSel.CatalogoPor === 'serie' ? seriesElegidasManualPartes_() : [];
+  if(modSel && modSel.CatalogoPor === 'serie' && !series.length){ aviso('Este modelo lleva catálogo por número de serie: marca o escribe a qué series aplica el PDF.', 'err'); return; }
+  if(!series.length && ALL_MANUALES_PARTES.some(function(x){ return x.ModeloId === modeloId && !(x.Series || []).length; })
+     && !confirm('Ese modelo ya tiene catálogo de partes. El anterior NO se borra: se usará el nuevo y el anterior queda en la lista (puedes eliminarlo). ¿Continuar?')) return;
   const btn = this;
   MANUAL_PARTES_SUBIENDO = true;
   btn.disabled = true;
   try {
     const r = await window.CatalogoPartes.subirPdf({
-      file: archivo, modeloId: modeloId, code: ACCESS_CODE, usuario: PANEL_USUARIO,
+      file: archivo, modeloId: modeloId, series: series, code: ACCESS_CODE, usuario: PANEL_USUARIO,
       onProgreso: function(t){ aviso(t + ' (no cierres esta página)'); }
     });
     aviso('Listo: se guardaron ' + r.secciones + ' secciones y ' + r.piezas + ' piezas.', 'ok');
     document.getElementById('manpar-archivo').value = '';
+    document.getElementById('manpar-series-otras').value = '';
+    Array.from(document.querySelectorAll('#manpar-series-equipos input')).forEach(function(i){ i.checked = false; });
     cargarManualesPartes();
   } catch(e){
     aviso((e && e.message) || 'No se pudo subir el catálogo.', 'err');
@@ -22015,7 +22062,7 @@ const CATALOGOS_SIMPLES = [
   { key: 'operadores', singular: 'el operador', getFn: 'getOperadoresCatalogo', guardarFn: 'guardarOperador', eliminarFn: 'eliminarOperador', tieneOperadorExtra: true },
   { key: 'tipospreventivo', singular: 'el tipo de preventivo', getFn: 'getTiposPreventivo', guardarFn: 'guardarTipoPreventivo', eliminarFn: 'eliminarTipoPreventivo', compartida: true },
   { key: 'marcas', singular: 'la marca', getFn: 'getMarcas', guardarFn: 'guardarMarca', eliminarFn: 'eliminarMarca', compartida: true },
-  { key: 'modelos', singular: 'el modelo', getFn: 'getModelos', guardarFn: 'guardarModelo', eliminarFn: 'eliminarModelo', compartida: true, tieneMarca: true },
+  { key: 'modelos', singular: 'el modelo', getFn: 'getModelos', guardarFn: 'guardarModelo', eliminarFn: 'eliminarModelo', compartida: true, tieneMarca: true, tieneCatalogoPor: true },
   { key: 'empresas', singular: 'la empresa', getFn: 'getEmpresasCatalogo', guardarFn: 'guardarEmpresa', eliminarFn: 'eliminarEmpresa', tieneFiscal: true },
   { key: 'proveedorescombustible', singular: 'el proveedor', getFn: 'getProveedoresCombustibleCatalogo', guardarFn: 'guardarProveedorCombustible', eliminarFn: 'eliminarProveedorCombustible', tieneCorreos: true },
 ];
@@ -22070,7 +22117,7 @@ function renderCatalogoSimple(key){
     let extra = '';
     if(cfg.tieneMarca){
       const marca = (ALL_MARCAS || []).find(function(m){ return m.Id === r.MarcaId; });
-      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(marca ? marca.Nombre : 'sin marca') + ')</span>';
+      extra = ' <span class="cat-catalogo-extra">(' + escapeHtml((marca ? marca.Nombre : 'sin marca') + (cfg.tieneCatalogoPor && r.CatalogoPor === 'serie' ? ' · catálogo por serie' : '')) + ')</span>';
     }
     if(cfg.tieneEmpresaProveedor && (r.EmpresaNombre || r.ProveedorNombre)){
       const partes = [];
@@ -22134,6 +22181,8 @@ function abrirModalCatalogoSimple(key, registro){
   } else {
     marcaWrap.style.display = 'none';
   }
+  document.getElementById('catsimple-f-catalogopor-wrap').style.display = cfg.tieneCatalogoPor ? '' : 'none';
+  if(cfg.tieneCatalogoPor) document.getElementById('catsimple-f-catalogopor').value = registro && registro.CatalogoPor === 'serie' ? 'serie' : 'modelo';
   const empresaWrap = document.getElementById('catsimple-f-empresa-wrap');
   const proveedorWrap = document.getElementById('catsimple-f-proveedor-wrap');
   document.getElementById('catsimple-f-correos-wrap').style.display = cfg.tieneCorreos ? '' : 'none';
@@ -22283,6 +22332,7 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
       return;
     }
   }
+  if(cfg.tieneCatalogoPor) data.catalogoPor = document.getElementById('catsimple-f-catalogopor').value;
   if(cfg.tieneEmpresaProveedor){
     data.empresaId = document.getElementById('catsimple-f-empresa').value;
     data.proveedorId = document.getElementById('catsimple-f-proveedor').value;

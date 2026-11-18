@@ -6530,15 +6530,59 @@ async function getManualesPartes(code, nombreUsuario) {
   const [rows] = await pool.query(`
     SELECT mp.id AS Id, mp.modelo_id AS ModeloId, mo.nombre AS Modelo, ma.nombre AS Marca,
            mp.nombre_archivo AS Archivo, mp.paginas AS Paginas, mp.secciones AS Secciones, mp.piezas AS Piezas,
-           mp.subido_por AS SubidoPor, mp.creado_en AS CreadoEn,
-           (SELECT COUNT(*) FROM maquinaria mq WHERE mq.modelo_id = mp.modelo_id) AS Equipos
+           mp.subido_por AS SubidoPor, mp.creado_en AS CreadoEn, mp.series AS SeriesJson, mo.catalogo_por AS CatalogoPor
     FROM manuales_partes mp
     LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
     LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
     WHERE mp.completo = 1
-    ORDER BY ma.nombre, mo.nombre
+    ORDER BY ma.nombre, mo.nombre, mp.id
   `);
-  return rows.map((r) => ({ ...r, Equipos: Number(r.Equipos) || 0 }));
+  const [eqs] = await pool.query('SELECT modelo_id, serie FROM maquinaria WHERE modelo_id IS NOT NULL');
+  const lista = rows.map((r) => ({ ...r, Series: seriesManual_(r.SeriesJson) }));
+  return lista.map((r) => {
+    // Equipos que van a usar este catálogo: los de su serie; el del modelo, los que no tienen uno de su serie.
+    const delModelo = eqs.filter((e) => e.modelo_id === r.ModeloId);
+    const conSerie = new Set();
+    lista.filter((x) => x.ModeloId === r.ModeloId).forEach((x) => x.Series.forEach((s) => conSerie.add(normalizarSerie_(s))));
+    const generales = lista.filter((x) => x.ModeloId === r.ModeloId && !x.Series.length);
+    const ultimoGeneral = generales.length ? generales[generales.length - 1].Id : null;
+    const set = new Set(r.Series.map(normalizarSerie_));
+    const equipos = r.Series.length
+      ? delModelo.filter((e) => set.has(normalizarSerie_(e.serie))).length
+      : (r.Id === ultimoGeneral ? delModelo.filter((e) => !conSerie.has(normalizarSerie_(e.serie))).length : 0);
+    const { SeriesJson, ...resto } = r;
+    return { ...resto, CatalogoPor: r.CatalogoPor === 'serie' ? 'serie' : 'modelo', Equipos: equipos };
+  });
+}
+
+// Número de serie para comparar: mayúsculas, sin espacios ni guiones.
+function normalizarSerie_(s) {
+  return (s === null || s === undefined ? '' : s).toString().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+function seriesManual_(json) {
+  if (!json) return [];
+  try { const a = JSON.parse(json); return Array.isArray(a) ? a.map((x) => (x || '').toString().trim()).filter(Boolean) : []; } catch (e) { return []; }
+}
+function limpiarSeries_(lista) {
+  const arr = Array.isArray(lista) ? lista : (lista || '').toString().split(/[,;\n]+/);
+  const vistos = new Set();
+  const out = [];
+  arr.forEach((x) => {
+    const t = (x || '').toString().trim().toUpperCase().slice(0, 60);
+    const n = normalizarSerie_(t);
+    if (n && !vistos.has(n)) { vistos.add(n); out.push(t); }
+  });
+  return out.slice(0, 500);
+}
+
+// Nov-2026: equipos (con su serie) de un modelo, para elegir a qué series aplica un catálogo.
+async function getSeriesModeloCatalogo(code, nombreUsuario, modeloId) {
+  await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_MARCAS_, 'visualizar');
+  const [rows] = await pool.query(
+    "SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, serie AS Serie FROM maquinaria WHERE modelo_id = ? AND serie IS NOT NULL AND TRIM(serie) <> '' ORDER BY unidad",
+    [Number(modeloId) || 0]
+  );
+  return rows;
 }
 
 async function crearManualPartes(code, nombreUsuario, data) {
@@ -6546,14 +6590,20 @@ async function crearManualPartes(code, nombreUsuario, data) {
   data = data || {};
   const modeloId = Number(data.modeloId);
   if (!modeloId) return { success: false, error: 'Elige el modelo al que pertenece el catálogo.' };
-  const [mod] = await pool.query('SELECT id FROM modelos_refacciones WHERE id = ?', [modeloId]);
+  const [mod] = await pool.query('SELECT id, catalogo_por FROM modelos_refacciones WHERE id = ?', [modeloId]);
   if (!mod.length) return { success: false, error: 'Ese modelo ya no existe.' };
+  // Nov-2026: si el modelo lleva catálogo por número de serie, el PDF dice a qué series aplica.
+  const series = mod[0].catalogo_por === 'serie' ? limpiarSeries_(data.series) : [];
+  if (mod[0].catalogo_por === 'serie' && !series.length) {
+    return { success: false, error: 'Este modelo lleva catálogo por número de serie: elige o escribe a qué series aplica.' };
+  }
   // Restos de una subida anterior que no terminó (se cerró el Panel a medias).
-  const [viejos] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND completo = 0', [modeloId]);
+  const [viejos] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND completo = 0 AND creado_en < NOW() - INTERVAL 6 HOUR', [modeloId]);
   for (const v of viejos) await borrarManualPartes_(v.id);
   const [r] = await pool.query(
-    'INSERT INTO manuales_partes (modelo_id, nombre_archivo, paginas, subido_por) VALUES (?, ?, ?, ?)',
-    [modeloId, (data.nombreArchivo || '').toString().slice(0, 255) || null, Number(data.paginas) || null, (nombreUsuario || '').toString().trim() || null]
+    'INSERT INTO manuales_partes (modelo_id, nombre_archivo, paginas, subido_por, series) VALUES (?, ?, ?, ?, ?)',
+    [modeloId, (data.nombreArchivo || '').toString().slice(0, 255) || null, Number(data.paginas) || null, (nombreUsuario || '').toString().trim() || null,
+      series.length ? JSON.stringify(series) : null]
   );
   return { success: true, id: r.insertId };
 }
@@ -6609,9 +6659,7 @@ async function terminarManualPartes(code, nombreUsuario, manualId) {
     [id, id]
   );
   if (!Number(c.s)) return { success: false, error: 'No se guardó ninguna sección del catálogo.' };
-  // El nuevo reemplaza al anterior del mismo modelo.
-  const [anteriores] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND id <> ?', [m[0].modelo_id, id]);
-  for (const a of anteriores) await borrarManualPartes_(a.id);
+  // Nov-2026: ya no se reemplaza el anterior del mismo modelo (se borra a mano si sobra).
   await pool.query('UPDATE manuales_partes SET completo = 1, secciones = ?, piezas = ? WHERE id = ?', [Number(c.s), Number(c.p), id]);
   await registrarAuditoria_('manuales_partes', id, 'subir', nombreUsuario, 'Catálogo de partes: ' + c.s + ' secciones, ' + c.p + ' piezas');
   return { success: true, secciones: Number(c.s), piezas: Number(c.p) };
@@ -6657,7 +6705,7 @@ async function mapaRefaccionesPorParte_() {
 
 async function datosManualPartes_(manualId) {
   const [man] = await pool.query(`
-    SELECT mp.id, mp.modelo_id, mo.nombre AS modelo, ma.nombre AS marca, mp.secciones, mp.piezas
+    SELECT mp.id, mp.modelo_id, mo.nombre AS modelo, ma.nombre AS marca, mp.secciones, mp.piezas, mp.series
     FROM manuales_partes mp
     LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
     LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
@@ -6695,7 +6743,8 @@ async function datosManualPartes_(manualId) {
   return {
     id: man[0].id,
     modeloId: man[0].modelo_id,
-    modelo: man[0].modelo || '',
+    modelo: (man[0].modelo || '') + textoSeries_(seriesManual_(man[0].series)),
+    series: seriesManual_(man[0].series),
     marca: man[0].marca || '',
     secciones: secs.map((s) => ({
       id: s.id, codigo: s.codigo || '', titulo: s.titulo, aplica: s.aplica || '', serie: s.serie || '',
@@ -6747,12 +6796,16 @@ async function actualizarCodigoPiezaManual(code, nombreUsuario, piezaId, codigoN
 
 async function manualesDisponibles_() {
   const [rows] = await pool.query(`
-    SELECT mp.id, mo.nombre AS modelo, ma.nombre AS marca
+    SELECT mp.id, mo.nombre AS modelo, ma.nombre AS marca, mp.series
     FROM manuales_partes mp
     LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
     LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
-    WHERE mp.completo = 1 ORDER BY ma.nombre, mo.nombre`);
-  return rows.map((r) => ({ id: r.id, modelo: r.modelo || '', marca: r.marca || '' }));
+    WHERE mp.completo = 1 ORDER BY ma.nombre, mo.nombre, mp.id`);
+  return rows.map((r) => ({ id: r.id, modelo: (r.modelo || '') + textoSeries_(seriesManual_(r.series)), marca: r.marca || '' }));
+}
+function textoSeries_(series) {
+  if (!series.length) return '';
+  return ' (serie ' + series.slice(0, 3).join(', ') + (series.length > 3 ? ' y ' + (series.length - 3) + ' más' : '') + ')';
 }
 
 // Catálogo para ver desde el Panel (Refacciones), sin orden.
@@ -6780,15 +6833,20 @@ async function getManualPartesOrden(code, nombreUsuario, orden, manualIdElegido)
   const equipo = { codigo: e.codigo_unidad || '', unidad: e.unidad || '', serie: e.serie || '', modelo: e.modelo || '', marca: e.marca || '' };
   let manualId = Number(manualIdElegido) || null;
   if (!manualId && e.modelo_id) {
-    const [mp] = await pool.query('SELECT id FROM manuales_partes WHERE modelo_id = ? AND completo = 1 ORDER BY id DESC LIMIT 1', [e.modelo_id]);
-    if (mp.length) manualId = mp[0].id;
+    // Nov-2026: primero el catálogo de su número de serie; si no hay, el del modelo (el más nuevo).
+    const [mps] = await pool.query('SELECT id, series FROM manuales_partes WHERE modelo_id = ? AND completo = 1 ORDER BY id DESC', [e.modelo_id]);
+    const serieEq = normalizarSerie_(e.serie);
+    const deSerie = serieEq ? mps.find((x) => seriesManual_(x.series).some((s) => normalizarSerie_(s) === serieEq)) : null;
+    const general = mps.find((x) => !seriesManual_(x.series).length);
+    if (deSerie) manualId = deSerie.id;
+    else if (general) manualId = general.id;
   }
   const manual = manualId ? await datosManualPartes_(manualId) : null;
   let aviso = '';
   if (!manual) {
     aviso = !e.modelo_id
       ? 'El equipo ' + (equipo.codigo || '') + ' no tiene modelo asignado en Maquinaria. Puedes elegir un catálogo de la lista.'
-      : 'Todavía no hay catálogo de partes para el modelo ' + equipo.modelo + '. Súbelo en el Panel (Refacciones → Catálogos de partes) o elige otro de la lista.';
+      : 'Todavía no hay catálogo de partes para el modelo ' + equipo.modelo + (equipo.serie ? ' serie ' + equipo.serie : '') + '. Súbelo en el Panel (Refacciones → Catálogos de partes) o elige otro de la lista.';
   }
   // Falla y fotos de la orden, para que el técnico las vea junto al catálogo.
   const fotos = [];
@@ -9619,12 +9677,12 @@ async function getModelos(code, nombreUsuario) {
   // (ver pobladoSelectoresModeloMnt_/pobladoSelectoresModeloAuto_ en
   // Panel.html). No cambia nada para quien ya usaba este listado tal cual.
   const [rows] = await pool.query(`
-    SELECT m.id AS Id, m.marca_id AS MarcaId, m.nombre AS Nombre,
+    SELECT m.id AS Id, m.marca_id AS MarcaId, m.nombre AS Nombre, m.catalogo_por AS CatalogoPor,
       EXISTS(SELECT 1 FROM maquinaria mm WHERE mm.modelo_id = m.id AND mm.usa_gasolina = 1) AS EsAutomotriz
     FROM modelos_refacciones m
     ORDER BY m.nombre
   `);
-  return rows.map((r) => ({ Id: r.Id, MarcaId: r.MarcaId, Nombre: r.Nombre, EsAutomotriz: !!r.EsAutomotriz }));
+  return rows.map((r) => ({ Id: r.Id, MarcaId: r.MarcaId, Nombre: r.Nombre, CatalogoPor: r.CatalogoPor === 'serie' ? 'serie' : 'modelo', EsAutomotriz: !!r.EsAutomotriz }));
 }
 
 async function guardarModelo(code, nombreUsuario, id, data) {
@@ -9636,15 +9694,18 @@ async function guardarModelo(code, nombreUsuario, id, data) {
     const marcaId = (data.marcaId === '' || data.marcaId === undefined || data.marcaId === null)
       ? null : Number(data.marcaId);
     if (!marcaId) return { success: false, error: 'Elige a qué marca pertenece este modelo.' };
+    // Nov-2026: catálogo de partes por modelo o por número de serie (si no viene, no se toca).
+    const catalogoPor = data.catalogoPor === undefined || data.catalogoPor === null || data.catalogoPor === ''
+      ? null : (data.catalogoPor === 'serie' ? 'serie' : 'modelo');
 
     if (id) {
-      await pool.query('UPDATE modelos_refacciones SET marca_id=?, nombre=? WHERE id=?', [marcaId, nombre, id]);
+      await pool.query('UPDATE modelos_refacciones SET marca_id=?, nombre=?, catalogo_por = COALESCE(?, catalogo_por) WHERE id=?', [marcaId, nombre, catalogoPor, id]);
       return { success: true, id: Number(id) };
     }
 
     const [result] = await pool.query(
-      'INSERT INTO modelos_refacciones (marca_id, nombre) VALUES (?, ?)',
-      [marcaId, nombre]
+      'INSERT INTO modelos_refacciones (marca_id, nombre, catalogo_por) VALUES (?, ?, ?)',
+      [marcaId, nombre, catalogoPor || 'modelo']
     );
     return { success: true, id: result.insertId };
   } catch (err) {
@@ -13268,6 +13329,7 @@ module.exports = {
   exportarOCContpaqi,
   getManualesPartes,
   crearManualPartes,
+  getSeriesModeloCatalogo,
   guardarSeccionManualPartes,
   terminarManualPartes,
   eliminarManualPartes,

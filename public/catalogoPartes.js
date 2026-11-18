@@ -643,7 +643,7 @@
           '(No. | Código de pieza | Descripción | Cant ...). Si es de otra marca, mándaselo a Claude para agregar ese formato.');
       }
       progreso('Se encontraron ' + secciones.length + ' secciones. Guardando...');
-      return llamar_('crearManualPartes', o.code, o.usuario, { modeloId: o.modeloId, nombreArchivo: o.file.name, paginas: doc.numPages });
+      return llamar_('crearManualPartes', o.code, o.usuario, { modeloId: o.modeloId, nombreArchivo: o.file.name, paginas: doc.numPages, series: o.series || [] });
     }).then(function (r) {
       if (!r || !r.success) throw new Error((r && r.error) || 'No se pudo empezar a guardar el catálogo.');
       manualId = r.id;

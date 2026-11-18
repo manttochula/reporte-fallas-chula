@@ -3923,3 +3923,15 @@ UPDATE usuarios SET diesel_cuadros_ocultos = REPLACE(REPLACE(REPLACE(REPLACE(REP
  WHERE @mig_dzc = 0 AND diesel_cuadros_ocultos IS NOT NULL;
 UPDATE usuarios SET diesel_cuadros_ocultos = NULL WHERE @mig_dzc = 0 AND diesel_cuadros_ocultos = '[]';
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('diesel_cuadros_tablero_2026_11', 'hecho');
+
+-- Nov-2026 (Carlos): catálogo de partes por modelo o por número de serie. Cada
+-- modelo dice cómo se le suben los catálogos ('modelo' = uno para todos sus
+-- equipos, como hasta ahora; 'serie' = cada PDF dice a qué series aplica).
+-- Al abrir el catálogo desde una orden manda el de la serie del equipo y, si no
+-- hay, el del modelo. Subir uno nuevo ya no borra los anteriores.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'modelos_refacciones' AND column_name = 'catalogo_por');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE modelos_refacciones ADD COLUMN catalogo_por VARCHAR(10) NOT NULL DEFAULT ''modelo''', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes' AND column_name = 'series');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes ADD COLUMN series TEXT DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

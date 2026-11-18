@@ -568,8 +568,10 @@
   }
 
   // Textos con posición de cada página (formato que espera ManualPartesParser).
+  var pdfjsMod_ = null;
   function leerPdf(file, onProgreso) {
     return cargarPdfJs_().then(function (pdfjs) {
+      pdfjsMod_ = pdfjs;
       return file.arrayBuffer().then(function (buf) {
         return pdfjs.getDocument({ data: new Uint8Array(buf), isEvalSupported: false }).promise;
       });
@@ -587,8 +589,11 @@
               numero: n,
               width: vp.width,
               height: vp.height,
+              // Posición ya en la página como se ve (las páginas acostadas, como
+              // las de John Deere, traen el texto girado).
               items: tc.items.filter(function (i) { return i.str && i.str.trim(); }).map(function (i) {
-                return { str: i.str, x: i.transform[4], y: vp.height - i.transform[5], w: i.width };
+                var t = pdfjsMod_.Util.transform(vp.transform, i.transform);
+                return { str: i.str, x: t[4], y: t[5], w: i.width };
               }),
             });
             return siguiente();
@@ -650,8 +655,8 @@
       return leerPdf(files[k], function (t) { progreso(pref + t); }).then(function (r) {
         var secs = parser.leerCatalogo(r.paginas);
         if (!secs.length) {
-          throw new Error((files.length > 1 ? 'En "' + files[k].name + '" no' : 'No') + ' se encontró ninguna tabla de piezas en el PDF. Por ahora se leen catálogos con el formato de Kubota ' +
-            '(No. | Código de pieza | Descripción | Cant ...). Si es de otra marca, mándaselo a Claude para agregar ese formato.');
+          throw new Error((files.length > 1 ? 'En "' + files[k].name + '" no' : 'No') + ' se encontró ninguna tabla de piezas en el PDF. Por ahora se leen catálogos de Kubota ' +
+            '(No. | Código de pieza | Descripción | Cant ...) y de John Deere (PDF del diagrama de partscatalog.deere.com: "Parts List" con "Part Number"). Si es de otra marca o formato, mándaselo a Claude para agregarlo.');
         }
         leidos.push({ doc: r.doc, secciones: secs });
         paginas += r.doc.numPages;

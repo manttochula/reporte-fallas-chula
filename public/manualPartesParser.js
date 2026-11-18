@@ -1,5 +1,5 @@
 // Lee el TEXTO de un catálogo de partes en PDF (formato de los catálogos de
-// Kubota: L3800, etc.) y lo convierte en secciones con su tabla de piezas.
+// Kubota: L3800, etc.; y desde nov-2026 los de John Deere, ver leerCatalogoJd_) y lo convierte en secciones con su tabla de piezas.
 //
 // No depende de nada: recibe, por página, los textos con su posición (lo
 // que da pdf.js con getTextContent) y regresa las secciones. Lo usa el Panel
@@ -258,5 +258,130 @@
     return secciones;
   }
 
-  return { leerPagina: leerPagina, leerCatalogo: leerCatalogo, partirTitulo_: partirTitulo_ };
+  // ------------------------------------------------------------------
+  // Nov-2026: formato John Deere (lo que se descarga de partscatalog.deere.com
+  // con "Imprimir/PDF" de un diagrama):
+  //   Página del dibujo (a veces acostada): "Parts List", título
+  //     "11AD Valve Cover (007601 - ) - ST969832", el equipo
+  //     "6603 Tractor (PIN: ...) - PC6195 > 20 Engine" y a veces el motor;
+  //     abajo el dibujo (imagen, sin textos) y "Page 1".
+  //   Páginas de la lista: "Part | Quantity Required" y por pieza
+  //     "1 - Valve Cover Button Plug   6", "Part Number : DZ133300",
+  //     "Remarks : SUB FOR DZ122513" (y avisos sueltos).
+  // Se aceptan también los textos en español del mismo sitio.
+  // ------------------------------------------------------------------
+  const JD_LISTA_ = /^(PARTS LIST|LISTA DE PIEZAS|LISTA DE PARTES|LISTA DE REPUESTOS)$/;
+  const JD_NUMERO_ = /^(PART NUMBER|NUMERO DE PIEZA|NUMERO DE PARTE|NO\.? DE PIEZA|NO\.? DE PARTE|N\.? ?º? DE PIEZA)\s*:\s*(.*)$/;
+  const JD_NOTA_ = /^(REMARKS|OBSERVACIONES|COMENTARIOS|NOTAS?)\s*:\s*(.*)$/;
+  const JD_CANTIDAD_ = /^(QUANTITY REQUIRED|CANTIDAD REQUERIDA|CANTIDAD NECESARIA|CANTIDAD)$/;
+  const JD_PAGINA_ = /^(PAGE|PAGINA|PAG\.)\s*\d+(\s+(OF|DE)\s+\d+)?$/;
+
+  function esJohnDeere_(paginas) {
+    return (paginas || []).some(function (p) {
+      return (p.items || []).some(function (i) { return JD_LISTA_.test(sinAcentos_(i.str)); });
+    });
+  }
+
+  // "11AD Valve Cover (007601 - ) - ST969832" -> codigo ST969832, titulo "11AD Valve Cover", serie "007601 -"
+  function partirTituloJd_(texto) {
+    const t = limpiar_(texto);
+    const m = t.match(/^(.*?)\s+-\s+([A-Z]{1,4}[0-9]{3,}[A-Z0-9]*)$/);
+    let resto = m ? m[1] : t;
+    const codigo = m ? m[2] : '';
+    let serie = '';
+    const ms = resto.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+    if (ms) { resto = ms[1]; serie = limpiar_(ms[2]); }
+    return { codigo: codigo, titulo: limpiar_(resto) || t, serie: serie };
+  }
+
+  function leerCatalogoJd_(paginas) {
+    const secciones = [];
+    let actual = null;
+    (paginas || []).forEach(function (pagina) {
+      const items = (pagina.items || [])
+        .map(function (i) { return { str: limpiar_(i.str), x: Number(i.x) || 0, y: Number(i.y) || 0, w: Number(i.w) || 0 }; })
+        .filter(function (i) { return i.str; });
+      const lineas = renglones_(items, 3).filter(function (l) { return !JD_PAGINA_.test(sinAcentos_(l.texto)); });
+      const pie = items.find(function (i) { return JD_PAGINA_.test(sinAcentos_(i.str)); });
+      const alto = Number(pagina.height) || 792;
+
+      // ¿Empieza aquí un diagrama?
+      const iLista = lineas.findIndex(function (l) { return JD_LISTA_.test(sinAcentos_(l.texto)); });
+      let desde = 0;
+      if (iLista !== -1 && lineas[iLista + 1]) {
+        const cab = [lineas[iLista + 1]];
+        for (let k = iLista + 2; k < lineas.length; k++) {
+          if (lineas[k].y - cab[cab.length - 1].y > 30) break;
+          if (JD_CANTIDAD_.test(sinAcentos_(lineas[k].texto.replace(/^.*\s(?=QUANTITY|CANTIDAD)/i, '')))) break;
+          cab.push(lineas[k]);
+        }
+        const tit = partirTituloJd_(cab[0].texto);
+        const equipo = cab[1] ? cab[1].texto : '';
+        const grupo = equipo.indexOf('>') !== -1 ? limpiar_(equipo.split('>').pop()) : '';
+        const aplica = cab[2] ? cab[2].texto : limpiar_(equipo.split(/\s+-\s+/)[0]);
+        const y0 = cab[cab.length - 1].y + 8;
+        const y1 = (pie ? pie.y : alto) - 12;
+        actual = {
+          codigo: tit.codigo,
+          titulo: tit.titulo,
+          aplica: aplica.slice(0, 100),
+          serie: tit.serie ? 'S.N. ' + tit.serie : '',
+          grupo: grupo,
+          idPie: '',
+          paginas: [pagina.numero],
+          paginaDibujo: y1 - y0 > 120 ? pagina.numero : null,
+          dibujo: y1 - y0 > 120 ? { y0: y0, y1: y1 } : null,
+          piezas: [],
+        };
+        secciones.push(actual);
+        desde = iLista + cab.length + 1;
+      } else if (actual) {
+        actual.paginas.push(pagina.numero);
+      }
+      if (!actual) return;
+
+      // Lista de piezas
+      const iEnc = lineas.findIndex(function (l, k) { return k >= desde && l.items.some(function (i) { return JD_CANTIDAD_.test(sinAcentos_(i.str)); }); });
+      const encab = iEnc !== -1 ? lineas[iEnc].items.find(function (i) { return JD_CANTIDAD_.test(sinAcentos_(i.str)); }) : null;
+      // Sin encabezado en esta página: sigue la lista de la página anterior.
+      if (!encab && !actual.colCantidad) return;
+      if (encab) actual.colCantidad = encab.x;
+      const colCant = actual.colCantidad;
+      let pieza = actual.piezas[actual.piezas.length - 1] || null;
+      lineas.slice(encab ? iEnc + 1 : desde).forEach(function (l) {
+        const izq = limpiar_(l.items.filter(function (i) { return i.x < colCant - 20; }).map(function (i) { return i.str; }).join(' '));
+        const der = limpiar_(l.items.filter(function (i) { return i.x >= colCant - 20; }).map(function (i) { return i.str; }).join(' '));
+        if (!izq) return;
+        const sa = sinAcentos_(izq);
+        const mPieza = izq.match(/^([0-9]{1,4}[A-Z]?)\s*-\s+(.+)$/);
+        const mNum = sa.match(JD_NUMERO_);
+        const mNota = sa.match(JD_NOTA_);
+        if (mPieza) {
+          const cant = Number(der.replace(',', '.'));
+          pieza = { ref: mPieza[1], codigo: '', descripcion: mPieza[2], cantidad: der && !isNaN(cant) ? cant : null, serie: '', observaciones: '' };
+          actual.piezas.push(pieza);
+        } else if (!pieza) {
+          return;
+        } else if (mNum) {
+          pieza.codigo = izq.slice(izq.indexOf(':') + 1).replace(/\s+/g, '');
+        } else if (mNota) {
+          pieza.observaciones = limpiar_(pieza.observaciones + ' ' + izq.slice(izq.indexOf(':') + 1));
+        } else if (!pieza.codigo) {
+          pieza.descripcion = limpiar_(pieza.descripcion + ' ' + izq);
+        } else {
+          pieza.observaciones = limpiar_(pieza.observaciones + (pieza.observaciones ? '. ' : '') + izq);
+        }
+      });
+    });
+    return secciones
+      .map(function (s) { delete s.colCantidad; return s; })
+      .filter(function (s) { return s.piezas.length; });
+  }
+
+  function leerCatalogoDetectando(paginas) {
+    if (esJohnDeere_(paginas)) return leerCatalogoJd_(paginas);
+    return leerCatalogo(paginas);
+  }
+
+  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
 });

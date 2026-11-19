@@ -6737,6 +6737,19 @@ async function borrarManualPartes_(id) {
   await pool.query('DELETE FROM manuales_partes WHERE id = ?', [id]);
 }
 
+// Nov-2026: cambiar a qué números de serie aplica un catálogo ya subido.
+// Sin series = catálogo general del modelo.
+async function guardarSeriesManualPartes(code, nombreUsuario, manualId, series) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(manualId);
+  const [m] = await pool.query('SELECT id FROM manuales_partes WHERE id = ? AND completo = 1', [id]);
+  if (!m.length) return { success: false, error: 'No se encontró ese catálogo de partes.' };
+  const lista = limpiarSeries_(series);
+  await pool.query('UPDATE manuales_partes SET series = ? WHERE id = ?', [lista.length ? JSON.stringify(lista) : null, id]);
+  await registrarAuditoria_('manuales_partes', id, 'series', nombreUsuario, lista.length ? 'Series: ' + lista.join(', ').slice(0, 200) : 'General del modelo');
+  return { success: true, series: lista };
+}
+
 // ---- Nov-2026 (Carlos): traducir al español un catálogo en inglés (John Deere) ----
 // Traduce nombres de secciones y grupos, descripciones y notas de las piezas.
 // El texto en inglés se guarda en *_original (se ve en chiquito y el buscador
@@ -13477,6 +13490,7 @@ module.exports = {
   crearManualPartes,
   agregarArchivosManualPartes,
   traducirManualPartes,
+  guardarSeriesManualPartes,
   getSeriesModeloCatalogo,
   guardarSeccionManualPartes,
   terminarManualPartes,

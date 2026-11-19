@@ -4998,7 +4998,7 @@ var PANEL_SOLO_EN_LINEA = {
   importarServiciosAutomotrices: true, guardarImagenMapaHuerta: true, validarUsuario: true,
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
-  crearManualPartes: true, agregarArchivosManualPartes: true, traducirManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
+  crearManualPartes: true, agregarArchivosManualPartes: true, traducirManualPartes: true, guardarSeriesManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
@@ -5574,7 +5574,7 @@ function ocultarControlesSoloLectura(){
       '#ref-add', '.ref-btn-editar', '#ref-btn-save', '#ref-btn-delete',
       '#refcat-add', '.refcat-btn-editar', '#refcat-btn-save', '#refcat-btn-delete',
       '#marca-add', '.marca-btn-editar', '#marca-btn-save', '#marca-btn-delete', '#modelo-agregar', '.modelo-quitar',
-      '#manpar-subir', '.manpar-btn-eliminar', '.manpar-btn-agregar', '.manpar-btn-traducir', '#ocx-abrir',
+      '#manpar-subir', '.manpar-btn-eliminar', '.manpar-btn-agregar', '.manpar-btn-traducir', '.manpar-btn-series', '#ocx-abrir',
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
@@ -21984,11 +21984,12 @@ function renderManualesPartes(){
       <td>${m.Equipos || 0}${m.Equipos ? '' : ' <span class="mnt-subtext">' + ((m.Series || []).length ? '(ningún equipo con esa serie)' : ALL_MANUALES_PARTES.some(function(x){ return x.ModeloId === m.ModeloId && !(x.Series || []).length && x.Id > m.Id; }) ? '(se usa el más nuevo del modelo)' : '(asígnalo en Maquinaria)') + '</span>'}</td>
       <td>${m.Secciones || 0}</td>
       <td>${m.Piezas || 0}${m.PiezasTraducidas ? '<br><span class="mnt-subtext">Traducido al español</span>' : ''}</td>
-      <td>${escapeHtml(m.Archivo || '')}</td>
+      <td>${archivosManualCorto_(m.Archivo)}</td>
       <td>${escapeHtml(m.SubidoPor || '')}${m.CreadoEn ? '<br><span class="mnt-subtext">' + escapeHtml(formatFechaAudit(m.CreadoEn)) + '</span>' : ''}</td>
       <td style="white-space:nowrap;">
         <button type="button" class="export-btn" onclick="verManualPartes(${m.Id})">Ver</button>
         <button type="button" class="export-btn manpar-btn-agregar" onclick="agregarPdfManualPartes(${m.Id})">Agregar PDF</button>
+        <button type="button" class="export-btn manpar-btn-series" onclick="editarSeriesManualPartes(${m.Id})" title="A qué números de serie de equipo aplica este catálogo">No. de serie</button>
         <button type="button" class="export-btn manpar-btn-traducir" onclick="traducirManualPartesPanel(${m.Id})" title="Traduce al español nombres, descripciones y notas (el inglés se queda en chiquito y se puede buscar)">${m.PiezasTraducidas ? 'Traducir lo nuevo' : 'Traducir'}</button>
         <button type="button" class="export-btn manpar-btn-eliminar" onclick="eliminarManualPartesPanel(${m.Id})">Eliminar</button>
       </td>
@@ -22040,6 +22041,39 @@ document.getElementById('manpar-archivo-agregar').addEventListener('change', asy
     this.value = '';
   }
 });
+
+// Nov-2026: con muchos PDF la lista de archivos se vuelve enorme: se ve corta.
+function archivosManualCorto_(texto){
+  const nombres = (texto || '').split(/,\s+(?=[^,]*\.pdf)/i).filter(Boolean);
+  if(nombres.length <= 2) return escapeHtml(texto || '');
+  return '<span title="' + escapeHtml(nombres.join('\n')) + '">' + nombres.length + ' archivos PDF</span><br><span class="mnt-subtext">' + escapeHtml(nombres[0]) + ' y ' + (nombres.length - 1) + ' más</span>';
+}
+
+// Nov-2026: a qué números de serie aplica un catálogo ya subido (vacío = general del modelo).
+function editarSeriesManualPartes(id){
+  const m = ALL_MANUALES_PARTES.find(function(x){ return x.Id === id; });
+  if(!m) return;
+  const statusEl = document.getElementById('manpar-status');
+  const aviso = function(texto, tipo){ statusEl.textContent = texto; statusEl.className = 'maq-modal-status show' + (tipo ? ' ' + tipo : ''); };
+  google.script.run
+    .withSuccessHandler(function(eqs){
+      eqs = eqs || [];
+      const lista = eqs.length ? '\n\nEquipos de este modelo:\n' + eqs.map(function(e){ return '  ' + (e.Unidad || e.CodigoUnidad) + ': ' + e.Serie; }).join('\n') : '\n\n(Ningún equipo de este modelo tiene número de serie en Maquinaria.)';
+      const txt = prompt('Números de serie a los que aplica el catálogo de ' + ((m.Marca || '') + ' ' + (m.Modelo || '')).trim() +
+        ' (sepáralos con coma).\nDéjalo vacío para que sea el catálogo general del modelo.' + lista, (m.Series || []).join(', '));
+      if(txt === null) return;
+      google.script.run
+        .withSuccessHandler(function(r){
+          if(!r || !r.success){ aviso((r && r.error) || 'No se pudieron guardar las series.', 'err'); return; }
+          aviso(r.series.length ? 'Listo: el catálogo aplica a la(s) serie(s) ' + r.series.join(', ') + '. Esos equipos lo abren primero.' : 'Listo: quedó como catálogo general del modelo.', 'ok');
+          cargarManualesPartes();
+        })
+        .withFailureHandler(function(){ aviso('No se pudieron guardar las series. Intenta de nuevo.', 'err'); })
+        .guardarSeriesManualPartes(ACCESS_CODE, PANEL_USUARIO, id, txt);
+    })
+    .withFailureHandler(function(){ aviso('No se pudieron cargar los equipos del modelo.', 'err'); })
+    .getSeriesModeloCatalogo(ACCESS_CODE, PANEL_USUARIO, m.ModeloId);
+}
 
 // Nov-2026: traducir al español (catálogos en inglés, p. ej. John Deere).
 function textoTraduccionManual_(r){

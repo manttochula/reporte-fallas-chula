@@ -72,6 +72,17 @@
     '.cp-inv-no{color:#8a8a8a;}',
     '.cp-notas{color:#666;font-size:11.5px;}',
     '.cp-original{color:#8a8a8a;font-style:italic;font-size:11px;font-weight:normal;}',
+    '.cp-inicio-btn{display:block;width:100%;text-align:left;border:none;background:none;padding:6px 14px 8px;font-size:13px;font-weight:600;cursor:pointer;color:#367c2b;}',
+    '.cp-inicio-btn:hover,.cp-grupo-btn:hover{text-decoration:underline;}',
+    '.cp-grupo-btn{cursor:pointer;}',
+    '.cp-migas{font-size:12.5px;color:#666;margin-bottom:8px;}.cp-migas button{border:none;background:none;padding:0;color:#367c2b;font-weight:600;cursor:pointer;font-size:12.5px;}.cp-migas button:hover{text-decoration:underline;}',
+    '.cp-rejilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-top:10px;}',
+    '.cp-tarjeta{display:flex;flex-direction:column;border:1px solid #e3e3e3;border-radius:8px;background:#fff;padding:8px;cursor:pointer;text-align:left;font:inherit;color:#222;}',
+    '.cp-tarjeta:hover{border-color:#367c2b;box-shadow:0 2px 8px rgba(0,0,0,.08);}',
+    '.cp-tarjeta-img{width:100%;height:150px;object-fit:contain;background:#fff;}',
+    '.cp-tarjeta-sin{height:150px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:12px;background:#fafafa;}',
+    '.cp-tarjeta-tit{margin-top:6px;font-weight:600;font-size:13.5px;color:#367c2b;}',
+    '.cp-tarjeta-sub{font-size:11.5px;color:#777;}',
     '.cp-agregar{padding:5px 10px;border:1px solid #5fa36a;color:#2f6f3a;background:#f2faf3;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap;}',
     '.cp-agregar:disabled{opacity:.6;cursor:default;}',
     '.cp-vacio{color:#888;font-style:italic;padding:20px 0;}',
@@ -134,6 +145,36 @@
     };
   }
 
+  // Grupos del catálogo, en orden. En John Deere el grupo empieza con su
+  // número ("20 Motor", "20 Motor 6068TP063-…"): los que tienen el mismo
+  // número son el mismo grupo (se muestra el nombre más corto) y se ordenan
+  // por número (20, 30, 40, 41…).
+  function gruposDe_(secciones) {
+    var nombre = nombresGrupo_(secciones);
+    var grupos = [];
+    secciones.forEach(function (s) {
+      var n = nombre(s.grupo);
+      var num = s.grupo ? (n.match(/^(\d{1,3})(\s|$)/) || [])[1] : null;
+      var clave = num ? '#' + num : n;
+      var g = grupos.find(function (x) { return x.clave === clave; });
+      if (!g) grupos.push(g = { clave: clave, num: num ? Number(num) : null, g: n, original: '', secs: [], otras: !s.grupo });
+      if (n.length < g.g.length) g.g = n;
+      if (s.grupoOriginal && !g.original) g.original = nombre(s.grupoOriginal);
+      g.secs.push(s);
+    });
+    grupos.forEach(function (g) { g.secs.sort(function (a, b) { return a.titulo.localeCompare(b.titulo, 'es', { numeric: true }); }); });
+    var conNum = grupos.filter(function (g) { return g.num !== null; }).sort(function (a, b) { return a.num - b.num; });
+    var sinNum = grupos.filter(function (g) { return g.num === null && !g.otras; });
+    var otras = grupos.filter(function (g) { return g.otras; });
+    return conNum.concat(sinNum, otras);
+  }
+
+  // Con muchos diagramas se abre en la "portada" (grupos con su dibujo, como
+  // el catálogo de John Deere); con pocos, directo en el primero.
+  function conPortada_(m) {
+    return m && m.secciones.length > 6 && gruposDe_(m.secciones).length > 1;
+  }
+
   // =====================================================================
   // Visor
   // =====================================================================
@@ -148,6 +189,8 @@
       datos: null,
       manual: null,
       seccionId: null,
+      vista: 'seccion', // 'inicio' (grupos) | 'grupo' (diagramas del grupo) | 'seccion'
+      grupoClave: null,
       busqueda: '',
       resaltarPieza: null,
       propuesta: { secciones: [], piezas: {} },
@@ -284,6 +327,8 @@
         return;
       }
       V.seccionId = V.manual.secciones.length ? V.manual.secciones[0].id : null;
+      V.vista = conPortada_(V.manual) ? 'inicio' : 'seccion';
+      V.grupoClave = null;
       pintarSecciones_();
       pintarDetalle_();
       // Botón "✨ Proponer piezas con IA" de la orden: se pide la propuesta
@@ -327,7 +372,7 @@
     var nombre = nombresGrupo_(m.secciones);
     var html = '';
     var boton = function (s, ia) {
-      return '<button type="button" class="cp-sec' + (s.id === V.seccionId && !V.busqueda ? ' cp-activa' : '') + (ia ? ' cp-sec-ia' : '') +
+      return '<button type="button" class="cp-sec' + (s.id === V.seccionId && !V.busqueda && V.vista === 'seccion' ? ' cp-activa' : '') + (ia ? ' cp-sec-ia' : '') +
         '" data-sec="' + s.id + '"' + (s.tituloOriginal ? ' title="' + esc_(s.tituloOriginal) + '"' : '') + '>' + (ia ? '✨ ' : '') + esc_(s.titulo) + (s.serie ? ' <small>' + esc_(s.serie) + '</small>' : '') + '</button>';
     };
     if (V.propuesta.secciones.length) {
@@ -337,24 +382,35 @@
         if (s) html += boton(s, true);
       });
     }
-    var grupos = [];
-    m.secciones.forEach(function (s) {
-      var g = nombre(s.grupo);
-      var grupo = grupos.find(function (x) { return x.g === g; });
-      if (!grupo) grupos.push(grupo = { g: g, original: s.grupoOriginal ? nombre(s.grupoOriginal) : '', secs: [] });
-      grupo.secs.push(s);
-    });
+    var grupos = gruposDe_(m.secciones);
+    if (conPortada_(m)) html = '<button type="button" class="cp-inicio-btn" id="cp-ir-inicio">⌂ Todas las secciones</button>' + html;
     grupos.forEach(function (g) {
-      html += '<div class="cp-grupo"' + (g.original ? ' title="' + esc_(g.original) + '"' : '') + '>' + esc_(g.g) + '</div>';
-      g.secs.slice().sort(function (a, b) { return a.titulo.localeCompare(b.titulo, 'es'); }).forEach(function (s) { html += boton(s, false); });
+      html += '<div class="cp-grupo cp-grupo-btn" data-grupo="' + esc_(g.clave) + '"' + (g.original ? ' title="' + esc_(g.original) + '"' : ' title="Ver los diagramas del grupo"') + '>' + esc_(g.g) + '</div>';
+      g.secs.forEach(function (s) { html += boton(s, false); });
     });
     cont.innerHTML = html;
     Array.prototype.forEach.call(cont.querySelectorAll('.cp-sec'), function (b) {
       b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-sec')), null); });
     });
+    Array.prototype.forEach.call(cont.querySelectorAll('[data-grupo]'), function (b) {
+      b.addEventListener('click', function () { irAGrupo_(b.getAttribute('data-grupo')); });
+    });
+    var ini = document.getElementById('cp-ir-inicio');
+    if (ini) ini.addEventListener('click', function () { irAGrupo_(null); });
+  }
+
+  // Portada (clave null) o diagramas de un grupo.
+  function irAGrupo_(clave) {
+    V.vista = clave ? 'grupo' : 'inicio';
+    V.grupoClave = clave;
+    if (V.busqueda) { V.busqueda = ''; document.getElementById('cp-buscar').value = ''; }
+    pintarSecciones_();
+    pintarDetalle_();
+    document.getElementById('cp-detalle').scrollTop = 0;
   }
 
   function irASeccion_(id, piezaId) {
+    V.vista = 'seccion';
     V.seccionId = id;
     V.resaltarPieza = piezaId || null;
     if (V.busqueda) {
@@ -433,9 +489,16 @@
         res.slice(0, 200).forEach(function (x) { html += filaPieza_(x.p, x.s, true); });
         html += '</tbody></table>';
       }
+    } else if (V.vista === 'inicio' || V.vista === 'grupo') {
+      html += portada_(m);
     } else {
       var s = m.secciones.find(function (x) { return x.id === V.seccionId; }) || m.secciones[0];
       if (!s) { det.innerHTML = '<div class="cp-vacio">Este catálogo no tiene secciones.</div>'; return; }
+      if (conPortada_(m)) {
+        var gS = gruposDe_(m.secciones).find(function (g) { return g.secs.indexOf(s) !== -1; });
+        html += '<div class="cp-migas"><button type="button" data-ir-grupo="">Todas las secciones</button> › ' +
+          (gS ? '<button type="button" data-ir-grupo="' + esc_(gS.clave) + '">' + esc_(gS.g) + '</button> › ' : '') + esc_(s.titulo) + '</div>';
+      }
       html += '<h4>' + esc_(s.titulo) + (s.tituloOriginal ? ' <small class="cp-original">(' + esc_(s.tituloOriginal) + ')</small>' : '') + '</h4><div class="cp-sub">' + esc_([s.codigo, s.grupo, s.aplica, s.serie].filter(Boolean).join(' · ')) + '</div>';
       if (s.imagenUrl) {
         html += '<div class="cp-dibujo-wrap"><img class="cp-dibujo" id="cp-dibujo" alt="Dibujo de ' + esc_(s.titulo) + '" src="' + esc_(u_(s.imagenUrl)) + '" title="Clic para acercar"></div>';
@@ -445,6 +508,12 @@
       html += '</tbody></table>';
     }
     det.innerHTML = html;
+    Array.prototype.forEach.call(det.querySelectorAll('[data-ir-grupo]'), function (b) {
+      b.addEventListener('click', function () { irAGrupo_(b.getAttribute('data-ir-grupo') || null); });
+    });
+    Array.prototype.forEach.call(det.querySelectorAll('[data-tarjeta-sec]'), function (b) {
+      b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-tarjeta-sec')), null); });
+    });
     var img = document.getElementById('cp-dibujo');
     if (img) img.addEventListener('click', function () { img.classList.toggle('cp-zoom'); });
     Array.prototype.forEach.call(det.querySelectorAll('[data-agregar]'), function (b) {
@@ -456,6 +525,38 @@
     Array.prototype.forEach.call(det.querySelectorAll('[data-ir]'), function (b) {
       b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-ir')), Number(b.getAttribute('data-ir-pieza'))); });
     });
+  }
+
+  // Portada estilo John Deere: tarjetas de los grupos (con el dibujo de su
+  // primer diagrama) y, al entrar a un grupo, tarjetas de sus diagramas.
+  function portada_(m) {
+    var grupos = gruposDe_(m.secciones);
+    var tarjeta = function (attrs, s, titulo, sub, tituloOriginal) {
+      return '<button type="button" class="cp-tarjeta" ' + attrs + (tituloOriginal ? ' title="' + esc_(tituloOriginal) + '"' : '') + '>' +
+        (s && s.imagenUrl ? '<img class="cp-tarjeta-img" loading="lazy" alt="" src="' + esc_(u_(s.imagenUrl)) + '">' : '<div class="cp-tarjeta-sin">Sin dibujo</div>') +
+        '<span class="cp-tarjeta-tit">' + esc_(titulo) + '</span>' + (sub ? '<span class="cp-tarjeta-sub">' + esc_(sub) + '</span>' : '') + '</button>';
+    };
+    var html = '';
+    if (V.vista === 'grupo') {
+      var g = grupos.find(function (x) { return x.clave === V.grupoClave; });
+      if (g) {
+        html += '<div class="cp-migas"><button type="button" data-ir-grupo="">Todas las secciones</button> › ' + esc_(g.g) + '</div>';
+        html += '<h4>' + esc_(g.g) + (g.original ? ' <small class="cp-original">(' + esc_(g.original) + ')</small>' : '') + '</h4>' +
+          '<div class="cp-sub">' + g.secs.length + ' diagrama(s)</div><div class="cp-rejilla">';
+        g.secs.forEach(function (s) {
+          html += tarjeta('data-tarjeta-sec="' + s.id + '"', s, s.titulo, [s.serie, s.codigo].filter(Boolean).join(' · '), s.tituloOriginal);
+        });
+        return html + '</div>';
+      }
+    }
+    var eq = V.datos && V.datos.equipo;
+    html += '<h4>' + esc_((m.marca + ' ' + m.modelo).trim()) + '</h4>' +
+      '<div class="cp-sub">' + (eq && eq.serie ? 'Serie del equipo: ' + esc_(eq.serie) + ' · ' : '') + 'Examinar las secciones (' + grupos.length + ') · ' + m.secciones.length + ' diagramas</div><div class="cp-rejilla">';
+    grupos.forEach(function (g) {
+      var conDibujo = g.secs.find(function (s) { return s.imagenUrl; });
+      html += tarjeta('data-ir-grupo="' + esc_(g.clave) + '"', conDibujo, g.g, g.secs.length + ' diagrama(s)', g.original);
+    });
+    return html + '</div>';
   }
 
   function buscarPieza_(id) {
@@ -544,7 +645,7 @@
             b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-ir')), Number(b.getAttribute('data-ir-pieza'))); });
           });
         }
-        if (V.propuesta.secciones.length) V.seccionId = V.propuesta.secciones[0];
+        if (V.propuesta.secciones.length) { V.seccionId = V.propuesta.secciones[0]; V.vista = 'seccion'; }
         pintarSecciones_();
         pintarDetalle_();
       })

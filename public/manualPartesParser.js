@@ -294,6 +294,22 @@
     return { codigo: codigo, titulo: limpiar_(resto) || t, serie: serie };
   }
 
+  // ["11AD Valve Cover (007601 - ) - ST969832", "6603 Tractor (PIN: …) - PC6195 > 20", "Engine", "6068TP063-DZ107919-ETN166062"]
+  //   -> { titulo: {codigo, titulo, serie}, grupo: "20 Engine", aplica: "6068TP063-DZ107919-ETN166062" }
+  function encabezadoJd_(lineas) {
+    const ls = lineas.map(limpiar_).filter(Boolean);
+    let aplica = '';
+    // Renglón del motor/componente: un solo código con guiones (sin espacios).
+    if (ls.length > 1 && /^[0-9A-Z]{4,}(-[0-9A-Z]+)+$/.test(ls[ls.length - 1])) aplica = ls.pop();
+    const todo = ls.join(' ');
+    const m = todo.match(/^(.*?)\s+-\s+([A-Z]{1,4}[0-9]{3,}[A-Z0-9]*)(?=\s|$)\s*(.*)$/);
+    const titulo = partirTituloJd_(m ? m[1] + ' - ' + m[2] : ls[0] || '');
+    const resto = m ? m[3] : ls.slice(1).join(' ');
+    const grupo = resto.indexOf('>') !== -1 ? limpiar_(resto.split('>').pop()) : '';
+    if (!aplica && resto) aplica = limpiar_(resto.split(/\s+-\s+/)[0]);
+    return { titulo: titulo, grupo: grupo.slice(0, 255), aplica: aplica.slice(0, 100) };
+  }
+
   function leerCatalogoJd_(paginas) {
     const secciones = [];
     let actual = null;
@@ -315,10 +331,11 @@
           if (JD_CANTIDAD_.test(sinAcentos_(lineas[k].texto.replace(/^.*\s(?=QUANTITY|CANTIDAD)/i, '')))) break;
           cab.push(lineas[k]);
         }
-        const tit = partirTituloJd_(cab[0].texto);
-        const equipo = cab[1] ? cab[1].texto : '';
-        const grupo = equipo.indexOf('>') !== -1 ? limpiar_(equipo.split('>').pop()) : '';
-        const aplica = cab[2] ? cab[2].texto : limpiar_(equipo.split(/\s+-\s+/)[0]);
+        // Los renglones largos se cortan (el título, el equipo o el grupo
+        // pueden seguir en el renglón de abajo): se juntan y se parten por
+        // su contenido, no por renglón.
+        const enc = encabezadoJd_(cab.map(function (l) { return l.texto; }));
+        const tit = enc.titulo, grupo = enc.grupo, aplica = enc.aplica;
         const y0 = cab[cab.length - 1].y + 8;
         const y1 = (pie ? pie.y : alto) - 12;
         actual = {
@@ -383,5 +400,5 @@
     return leerCatalogo(paginas);
   }
 
-  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
+  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, encabezadoJd_: encabezadoJd_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
 });

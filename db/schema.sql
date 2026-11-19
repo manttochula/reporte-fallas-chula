@@ -3968,3 +3968,11 @@ CREATE TABLE IF NOT EXISTS traducciones_partes (
   creado_en  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_traducciones_partes (original)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+-- Nov-2026 (Carlos): importar pólizas de la aseguradora (PDF de Banorte). En
+-- una flotilla cada vehículo (inciso) trae su prima, su fecha de alta y, si
+-- entró después, su propio PDF (endoso). También se guarda cómo viene el
+-- vehículo en la póliza (descripción y serie) para revisarlo contra Maquinaria.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'seguros_poliza_unidades' AND column_name = 'prima');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE seguros_poliza_unidades ADD COLUMN prima DECIMAL(14,2) DEFAULT NULL, ADD COLUMN alta DATE DEFAULT NULL, ADD COLUMN pdf_url VARCHAR(500) DEFAULT NULL, ADD COLUMN descripcion_poliza VARCHAR(255) DEFAULT NULL, ADD COLUMN serie_poliza VARCHAR(40) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

@@ -12894,7 +12894,9 @@ async function getSeguros(code, nombreUsuario) {
       agenteNombre: p.agente_nombre || '', agenteTelefono: p.agente_telefono || '', agenteCorreo: p.agente_correo || '', telefonoSiniestros: p.telefono_siniestros || '',
       empresaId: p.empresa_id, empresa: p.empresa || '', pdfUrl: p.pdf_url || '', observaciones: p.observaciones || '', cancelada: !!p.cancelada,
       creadoPor: p.creado_por || '', actualizadoPor: p.actualizado_por || '', actualizadoEn: isoOrNull(p.actualizado_en),
-      unidades: uni.filter((u) => u.poliza_id === p.id).map((u) => ({ codigoUnidad: u.codigo_unidad, inciso: u.inciso || '', sumaAsegurada: u.suma_asegurada === null ? null : Number(u.suma_asegurada) })),
+      unidades: uni.filter((u) => u.poliza_id === p.id).map((u) => ({ codigoUnidad: u.codigo_unidad, inciso: u.inciso || '', sumaAsegurada: u.suma_asegurada === null ? null : Number(u.suma_asegurada),
+        prima: u.prima === null || u.prima === undefined ? null : Number(u.prima), alta: u.alta ? fechaSoloOrNull(u.alta) : null, pdfUrl: u.pdf_url || '',
+        descripcionPoliza: u.descripcion_poliza || '', seriePoliza: u.serie_poliza || '' })),
       pagos: pag.filter((x) => x.poliza_id === p.id).map((x) => ({ id: x.id, numero: x.numero, fechaVencimiento: fechaSoloOrNull(x.fecha_vencimiento), monto: Number(x.monto), pagado: !!x.pagado, pagadoEn: fechaSoloOrNull(x.pagado_en), referencia: x.referencia || '', marcadoPor: x.marcado_por || '' })),
     };
     Object.assign(o, estadoPolizaSeguro_(o, hoy));
@@ -12988,8 +12990,13 @@ async function guardarPolizaSeguro(code, nombreUsuario, datos) {
         valores.concat([segTexto_(nombreUsuario, 255), segTexto_(nombreUsuario, 255), pdfUrl || null]));
       polizaId = r.insertId;
     }
+    // Nov-2026: lo que trae cada vehículo desde la importación (prima, alta, PDF del endoso…) se conserva al editar.
+    const [prevUni] = await conn.query('SELECT codigo_unidad, prima, alta, pdf_url, descripcion_poliza, serie_poliza FROM seguros_poliza_unidades WHERE poliza_id = ?', [polizaId]);
     await conn.query('DELETE FROM seguros_poliza_unidades WHERE poliza_id = ?', [polizaId]);
-    await conn.query('INSERT INTO seguros_poliza_unidades (poliza_id, codigo_unidad, inciso, suma_asegurada) VALUES ?', [unidades.map((u) => [polizaId, u.codigo, u.inciso, u.suma])]);
+    await conn.query('INSERT INTO seguros_poliza_unidades (poliza_id, codigo_unidad, inciso, suma_asegurada, prima, alta, pdf_url, descripcion_poliza, serie_poliza) VALUES ?', [unidades.map((u) => {
+      const pv = prevUni.find((x) => x.codigo_unidad === u.codigo) || {};
+      return [polizaId, u.codigo, u.inciso, u.suma, pv.prima === undefined ? null : pv.prima, pv.alta || null, pv.pdf_url || null, pv.descripcion_poliza || null, pv.serie_poliza || null];
+    })]);
     // Pagos: se reemplaza el calendario; los ya pagados conservan quién los marcó.
     const [antes] = await conn.query('SELECT id, pagado, marcado_por FROM seguros_pagos WHERE poliza_id = ?', [polizaId]);
     await conn.query('DELETE FROM seguros_pagos WHERE poliza_id = ?', [polizaId]);
@@ -13012,6 +13019,158 @@ async function guardarPolizaSeguro(code, nombreUsuario, datos) {
   await registrarAuditoria_('seguros_polizas', polizaId, id ? 'editar' : 'crear', nombreUsuario,
     aseguradora + ' ' + numero + ' — ' + inicio + ' a ' + fin + ' — ' + codigos.join(', ') + (pdfUrl ? ' (PDF nuevo)' : ''));
   return { success: true, id: polizaId };
+}
+
+// ---------------------------------------------------------------
+// Nov-2026 (Carlos): importar pólizas desde el PDF de la aseguradora.
+// El Panel lee los PDF (public/polizasParser.js) y manda los vehículos
+// (incisos); aquí se liga cada uno con su equipo de Maquinaria por número
+// de serie (o placas) y se ve si la póliza ya existe. Luego el Panel manda
+// cada póliza ya revisada a importarPolizaSeguro.
+// ---------------------------------------------------------------
+const normSerieSeg_ = (s) => (s || '').toString().toUpperCase().replace(/[^A-Z0-9]/g, '');
+function normEmpresaSeg_(s) {
+  return ' ' + (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\b(S ?A|S ?P ?R|S ?DE ?R ?L|DE|R ?L|C ?V|SAPI|SC|SRL)\b/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+}
+
+async function prepararImportPolizas(code, nombreUsuario, incisos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const lista = (Array.isArray(incisos) ? incisos : []).slice(0, 2000);
+  const [maq] = await pool.query('SELECT codigo_unidad, unidad, serie, placa FROM maquinaria');
+  const porSerie = new Map(), porPlaca = new Map();
+  maq.forEach((m) => {
+    const s = normSerieSeg_(m.serie); if (s.length >= 6) porSerie.set(s, (porSerie.get(s) || []).concat(m));
+    const p = normSerieSeg_(m.placa); if (p.length >= 5) porPlaca.set(p, (porPlaca.get(p) || []).concat(m));
+  });
+  const vehiculos = lista.map((x) => {
+    x = x || {};
+    let encontrado = null, como = '';
+    const s = normSerieSeg_(x.serie);
+    if (s && porSerie.has(s)) { encontrado = porSerie.get(s); como = 'serie'; }
+    else if (s.length === 17) {
+      // A veces en Maquinaria solo está una parte de la serie (los últimos 8 del VIN)
+      const parcial = maq.filter((m) => { const ms = normSerieSeg_(m.serie); return ms.length >= 8 && (s.endsWith(ms) || ms.endsWith(s.slice(-8))); });
+      if (parcial.length === 1) { encontrado = parcial; como = 'serie (parcial)'; }
+    }
+    if (!encontrado && normSerieSeg_(x.placas).length >= 5 && porPlaca.has(normSerieSeg_(x.placas))) { encontrado = porPlaca.get(normSerieSeg_(x.placas)); como = 'placas'; }
+    // El nombre del archivo trae el número económico ("POLIZA DE SEGURO AF-46.pdf")
+    if (!encontrado && x.archivo) {
+      const m = /(?:^|[^A-Z0-9])AF[\s_-]*0*(\d{1,4})(?!\d)/i.exec(x.archivo);
+      if (m) {
+        const cand = maq.filter((q) => new RegExp('^AF[\\s_-]*0*' + m[1] + '(?!\\d)', 'i').test(q.codigo_unidad || ''));
+        if (cand.length === 1) { encontrado = cand; como = 'archivo'; }
+      }
+    }
+    const uno = encontrado && encontrado.length === 1 ? encontrado[0] : null;
+    return { serie: x.serie || '', codigoUnidad: uno ? uno.codigo_unidad : '', como: uno ? como : (encontrado ? 'varios' : ''),
+      opciones: encontrado && encontrado.length > 1 ? encontrado.map((q) => q.codigo_unidad) : [] };
+  });
+  const numeros = Array.from(new Set(lista.map((x) => segTexto_(x && x.poliza, 100)).filter(Boolean)));
+  const [exist] = numeros.length ? await pool.query(
+    'SELECT p.id, p.aseguradora, p.numero_poliza, p.vigencia_inicio, p.vigencia_fin, (SELECT COUNT(*) FROM seguros_poliza_unidades u WHERE u.poliza_id = p.id) AS unidades FROM seguros_polizas p WHERE p.eliminado = 0 AND p.numero_poliza IN (?)', [numeros]) : [[]];
+  const [emps] = await pool.query('SELECT id, nombre FROM empresas');
+  const contratantes = Array.from(new Set(lista.map((x) => (x && x.contratante) || '').filter(Boolean)));
+  const empresas = {};
+  contratantes.forEach((c) => {
+    const nc = normEmpresaSeg_(c);
+    // Palabras del nombre de la empresa que vienen en el contratante (sin "SPR DE RL DE CV"…)
+    const tc = new Set(nc.trim().split(' ').filter((w) => w.length > 1));
+    let mejor = null, mejorP = 0;
+    emps.forEach((e) => {
+      const te = normEmpresaSeg_((e.nombre || '').split(',')[0]).trim().split(' ').filter((w) => w.length > 1);
+      if (!te.length) return;
+      const p = te.filter((w) => tc.has(w)).length / te.length + (te.length > 1 ? 0.001 * te.length : 0);
+      if (p >= 0.75 && p > mejorP) { mejor = e; mejorP = p; }
+    });
+    empresas[c] = mejor ? mejor.id : null;
+  });
+  return { success: true, vehiculos, existentes: exist.map((p) => ({ id: p.id, aseguradora: p.aseguradora, numeroPoliza: p.numero_poliza,
+    vigenciaInicio: fechaSoloOrNull(p.vigencia_inicio), vigenciaFin: fechaSoloOrNull(p.vigencia_fin), unidades: Number(p.unidades) })), empresas };
+}
+
+// Una póliza (flotilla) ya revisada en el Panel. Si ya existe la misma póliza
+// (aseguradora + número + fin de vigencia) se le agregan / actualizan los
+// vehículos; si no, se crea. archivos = PDFs (data URL) que se suben una vez:
+// el de la flotilla (archivoPoliza) y los de los incisos que entraron después.
+async function importarPolizaSeguro(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  datos = datos || {};
+  const aseguradora = segTexto_(datos.aseguradora, 150);
+  const numero = segTexto_(datos.numeroPoliza, 100);
+  const inicio = segFecha_(datos.vigenciaInicio), fin = segFecha_(datos.vigenciaFin);
+  if (!aseguradora || !numero) return { success: false, error: 'Falta la aseguradora o el número de póliza.' };
+  if (!inicio || !fin || fin < inicio) return { success: false, error: 'La vigencia de la póliza ' + numero + ' no es válida.' };
+  const unidades = (Array.isArray(datos.unidades) ? datos.unidades : []).filter((u) => u && segTexto_(u.codigoUnidad, 50));
+  if (!unidades.length) return { success: false, error: 'La póliza ' + numero + ' no tiene ningún vehículo ligado a un equipo.' };
+  const codigos = Array.from(new Set(unidades.map((u) => segTexto_(u.codigoUnidad, 50))));
+  if (codigos.length !== unidades.length) return { success: false, error: 'En la póliza ' + numero + ' hay un equipo elegido en dos vehículos.' };
+  const [existen] = await pool.query('SELECT codigo_unidad FROM maquinaria WHERE codigo_unidad IN (?)', [codigos]);
+  const faltan = codigos.filter((c) => !existen.some((r) => r.codigo_unidad === c));
+  if (faltan.length) return { success: false, error: 'Estas unidades no están en el catálogo: ' + faltan.join(', ') };
+  const archivos = Array.isArray(datos.archivos) ? datos.archivos : [];
+  const urls = [];
+  for (const a of archivos) {
+    if (!a) { urls.push(null); continue; }
+    if (!/^data:application\/pdf;base64,/.test(a)) return { success: false, error: 'Los archivos deben ser PDF.' };
+    if (a.length > 14 * 1024 * 1024) return { success: false, error: 'Un PDF es muy grande (máximo 10 MB).' };
+    urls.push(await guardarArchivo_(a));
+  }
+  const urlDe = (i) => (i === null || i === undefined || i === '' ? null : urls[Number(i)] || null);
+  const pdfPoliza = urlDe(datos.archivoPoliza);
+  const filas = unidades.map((u) => {
+    const prima = segNum_(u.prima);
+    return { codigo: segTexto_(u.codigoUnidad, 50), inciso: segTexto_(u.inciso, 30) || null, prima: Number.isNaN(prima) ? null : prima,
+      alta: segFecha_(u.alta) || null, pdf: urlDe(u.archivo), desc: segTexto_(u.descripcion, 255) || null, serie: segTexto_(u.serie, 40) || null };
+  });
+  const formaPago = SEG_FORMAS_PAGO[datos.formaPago] ? datos.formaPago : null;
+  const cobertura = SEG_COBERTURAS.indexOf(datos.cobertura) !== -1 ? datos.cobertura : null;
+  const conn = await pool.getConnection();
+  let polizaId = 0, nueva = false;
+  try {
+    await conn.beginTransaction();
+    const [ex] = await conn.query('SELECT id, vigencia_inicio, pdf_url FROM seguros_polizas WHERE eliminado = 0 AND aseguradora = ? AND numero_poliza = ? AND vigencia_fin = ? ORDER BY id LIMIT 1 FOR UPDATE',
+      [aseguradora, numero, fin]);
+    if (ex.length) {
+      polizaId = ex[0].id;
+      const ini = fechaSoloOrNull(ex[0].vigencia_inicio);
+      await conn.query(`UPDATE seguros_polizas SET vigencia_inicio = ?, pdf_url = COALESCE(pdf_url, ?), empresa_id = COALESCE(empresa_id, ?),
+          cobertura = COALESCE(cobertura, ?), cobertura_detalle = COALESCE(cobertura_detalle, ?), deducible = COALESCE(deducible, ?), forma_pago = COALESCE(forma_pago, ?),
+          agente_nombre = COALESCE(agente_nombre, ?), telefono_siniestros = COALESCE(telefono_siniestros, ?), actualizado_por = ? WHERE id = ?`,
+        [ini && ini < inicio ? ini : inicio, pdfPoliza, Number(datos.empresaId) || null, cobertura, segTexto_(datos.coberturaDetalle, 2000) || null,
+          segTexto_(datos.deducible, 120) || null, formaPago, segTexto_(datos.agenteNombre, 150) || null, segTexto_(datos.telefonoSiniestros, 60) || null,
+          segTexto_(nombreUsuario, 255), polizaId]);
+    } else {
+      nueva = true;
+      const [r] = await conn.query(
+        `INSERT INTO seguros_polizas (aseguradora, numero_poliza, cobertura, cobertura_detalle, vigencia_inicio, vigencia_fin, prima_total, forma_pago, deducible,
+           agente_nombre, telefono_siniestros, empresa_id, observaciones, creado_por, actualizado_por, pdf_url)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [aseguradora, numero, cobertura, segTexto_(datos.coberturaDetalle, 2000) || null, inicio, fin, formaPago, segTexto_(datos.deducible, 120) || null,
+          segTexto_(datos.agenteNombre, 150) || null, segTexto_(datos.telefonoSiniestros, 60) || null, Number(datos.empresaId) || null,
+          segTexto_(datos.observaciones, 4000) || null, segTexto_(nombreUsuario, 255), segTexto_(nombreUsuario, 255), pdfPoliza]);
+      polizaId = r.insertId;
+    }
+    for (const f of filas) {
+      await conn.query(
+        `INSERT INTO seguros_poliza_unidades (poliza_id, codigo_unidad, inciso, prima, alta, pdf_url, descripcion_poliza, serie_poliza) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE inciso = VALUES(inciso), prima = VALUES(prima), alta = VALUES(alta), pdf_url = COALESCE(VALUES(pdf_url), pdf_url),
+           descripcion_poliza = VALUES(descripcion_poliza), serie_poliza = VALUES(serie_poliza)`,
+        [polizaId, f.codigo, f.inciso, f.prima, f.alta, f.pdf, f.desc, f.serie]);
+    }
+    // Prima de la póliza = suma de las primas de sus vehículos
+    await conn.query('UPDATE seguros_polizas SET prima_total = (SELECT SUM(prima) FROM seguros_poliza_unidades WHERE poliza_id = ?) WHERE id = ? AND (SELECT COUNT(*) FROM seguros_poliza_unidades WHERE poliza_id = ? AND prima IS NOT NULL) > 0',
+      [polizaId, polizaId, polizaId]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+  await registrarAuditoria_('seguros_polizas', polizaId, nueva ? 'crear' : 'editar', nombreUsuario,
+    'Importada del PDF: ' + aseguradora + ' ' + numero + ' — ' + inicio + ' a ' + fin + ' — ' + codigos.join(', '));
+  return { success: true, id: polizaId, nueva, unidades: codigos.length };
 }
 
 async function eliminarPolizaSeguro(code, nombreUsuario, id) {
@@ -13377,6 +13536,8 @@ module.exports = {
   getAjustesServiciosUnidad,
   getSeguros,
   guardarPolizaSeguro,
+  prepararImportPolizas,
+  importarPolizaSeguro,
   eliminarPolizaSeguro,
   marcarPagoSeguro,
   guardarSiniestroSeguro,

@@ -9507,13 +9507,13 @@ async function eliminarDepartamento(code, nombreUsuario, id) { return catalogoDe
 async function getTiposUnidad(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, PESTANAS_CATALOGO_OPERATIVO_, 'visualizar');
   const [rows] = await pool.query(
-    `SELECT t.id AS Id, t.nombre AS Nombre, t.categoria AS Categoria, t.cuenta_contable_id AS CuentaContableId,
+    `SELECT t.id AS Id, t.nombre AS Nombre, t.categoria AS Categoria, t.cuenta_contable_id AS CuentaContableId, t.lleva_seguro AS LlevaSeguro,
             c.nombre AS CuentaNombre, c.numero AS CuentaNumero
      FROM tipos_unidad t LEFT JOIN cuentas_contables c ON c.id = t.cuenta_contable_id ORDER BY t.nombre`
   );
   // Nov-2026: la cuenta de este tipo en cada empresa (la general es CuentaContableId).
   const [tuc] = await pool.query('SELECT tipo_id, empresa_id, cuenta_id FROM tipos_unidad_cuentas');
-  return rows.map((r) => ({ Id: r.Id, Nombre: r.Nombre, Categoria: r.Categoria || '', CuentaContableId: r.CuentaContableId || null,
+  return rows.map((r) => ({ Id: r.Id, Nombre: r.Nombre, Categoria: r.Categoria || '', CuentaContableId: r.CuentaContableId || null, LlevaSeguro: !!r.LlevaSeguro,
     CuentaNombre: r.CuentaNombre || '', CuentaNumero: r.CuentaNumero || '',
     CuentasPorEmpresa: tuc.filter((x) => x.tipo_id === r.Id).map((x) => ({ EmpresaId: x.empresa_id, CuentaId: x.cuenta_id })) }));
 }
@@ -9537,11 +9537,13 @@ async function guardarTipoUnidad(code, nombreUsuario, id, data) {
     const porEmpresa = Array.isArray(data.cuentasPorEmpresa)
       ? data.cuentasPorEmpresa.map((x) => ({ empresaId: Number(x && x.empresaId) || 0, cuentaId: Number(x && x.cuentaId) || 0 })).filter((x) => x.empresaId && x.cuentaId)
       : null;
+    // Nov-2026: ¿lleva seguro? (Seguros → Unidades). Si no viene, no se toca.
+    const llevaSeguro = data.llevaSeguro === undefined || data.llevaSeguro === null ? null : (data.llevaSeguro ? 1 : 0);
     let tipoId = Number(id) || 0;
     if (tipoId) {
-      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=?, cuenta_contable_id=? WHERE id=?', [nombre, categoria, cuentaId, tipoId]);
+      await pool.query('UPDATE tipos_unidad SET nombre=?, categoria=?, cuenta_contable_id=?, lleva_seguro = COALESCE(?, lleva_seguro) WHERE id=?', [nombre, categoria, cuentaId, llevaSeguro, tipoId]);
     } else {
-      const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria, cuenta_contable_id) VALUES (?, ?, ?)', [nombre, categoria, cuentaId]);
+      const [result] = await pool.query('INSERT INTO tipos_unidad (nombre, categoria, cuenta_contable_id, lleva_seguro) VALUES (?, ?, ?, ?)', [nombre, categoria, cuentaId, llevaSeguro || 0]);
       tipoId = result.insertId;
     }
     if (porEmpresa) {
@@ -12878,6 +12880,8 @@ async function getSeguros(code, nombreUsuario) {
   const [uni] = ids.length ? await pool.query('SELECT * FROM seguros_poliza_unidades WHERE poliza_id IN (?) ORDER BY codigo_unidad', [ids]) : [[]];
   const [pag] = ids.length ? await pool.query('SELECT * FROM seguros_pagos WHERE poliza_id IN (?) ORDER BY fecha_vencimiento, numero', [ids]) : [[]];
   const [sin] = await pool.query('SELECT * FROM seguros_siniestros WHERE eliminado = 0 ORDER BY fecha DESC, id DESC');
+  const [tiposSeg] = await pool.query('SELECT nombre FROM tipos_unidad WHERE lleva_seguro = 1');
+  const tiposConSeguro = new Set(tiposSeg.map((t) => (t.nombre || '').trim().toUpperCase()));
   const [maq] = await pool.query(
     `SELECT m.codigo_unidad, m.unidad, m.tipo_unidad, m.placa, m.serie, m.anio, m.usa_gasolina,
             COALESCE(mca.nombre, m.marca) AS marca, COALESCE(mdo.nombre, m.modelo) AS modelo, emp.nombre AS empresa
@@ -12916,12 +12920,15 @@ async function getSeguros(code, nombreUsuario) {
     return {
       codigoUnidad: m.codigo_unidad, unidad: m.unidad, tipoUnidad: m.tipo_unidad || '', placa: m.placa || '', serie: m.serie || '', anio: m.anio || '',
       marca: m.marca || '', modelo: m.modelo || '', empresa: m.empresa || '', automotriz: !!m.usa_gasolina,
+      // Nov-2026: lleva seguro si su tipo de unidad está marcado, o si ya tiene una póliza
+      asegurable: tiposConSeguro.has((m.tipo_unidad || '').trim().toUpperCase()) || suyas.length > 0,
       polizaId: actual ? actual.id : null, estado: actual ? actual.estado : 'sin_seguro', dias: actual ? actual.dias : null,
       siniestros: siniestros.filter((s) => s.codigoUnidad === m.codigo_unidad).length,
     };
   });
   const [empresas] = await pool.query('SELECT id, nombre FROM empresas ORDER BY nombre');
-  return { success: true, hoy, diasPorVencer: SEG_DIAS_POR_VENCER, coberturas: SEG_COBERTURAS, formasPago: Object.keys(SEG_FORMAS_PAGO), polizas, siniestros, unidades, empresas };
+  return { success: true, hoy, diasPorVencer: SEG_DIAS_POR_VENCER, coberturas: SEG_COBERTURAS, formasPago: Object.keys(SEG_FORMAS_PAGO), polizas, siniestros, unidades, empresas,
+    tiposConSeguro: tiposSeg.map((t) => t.nombre) };
 }
 
 async function guardarPolizaSeguro(code, nombreUsuario, datos) {

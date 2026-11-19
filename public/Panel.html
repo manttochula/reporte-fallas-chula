@@ -3258,6 +3258,10 @@
           </select>
           <small style="color:var(--text-dim);">Con esto el sistema decide solo, al capturar un reporte desde el celular, si va a Órdenes Agrícola o a Órdenes Automotriz.</small>
         </div>
+        <div class="maq-field" id="catsimple-f-seguro-wrap" style="display:none;">
+          <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="catsimple-f-seguro" style="width:auto;"> Lleva seguro (vehículo)</label>
+          <small style="color:var(--text-dim);">Solo los equipos de los tipos marcados salen en Seguros → Unidades (y en "Vehículos sin seguro"). Los que ya tienen póliza siempre salen.</small>
+        </div>
         <div class="maq-field" id="catsimple-f-tucuenta-wrap" style="display:none;">
           <label>Cuenta contable (general)</label>
           <select id="catsimple-f-tucuenta"><option value="">Sin cuenta</option></select>
@@ -4529,7 +4533,7 @@
           <option value="sin_seguro">Sin seguro</option>
           <option value="cancelada">Canceladas</option>
         </select>
-        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;" id="seg-solo-auto-wrap"><input type="checkbox" id="seg-solo-auto" checked> Solo automotrices</label>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;" id="seg-solo-auto-wrap"><input type="checkbox" id="seg-solo-auto" checked> Solo los que llevan seguro</label>
         <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;" id="seg-ver-pagados-wrap"><input type="checkbox" id="seg-ver-pagados"> Ver también pagados</label>
         <button class="export-btn" id="seg-add-poliza">+ Nueva póliza</button>
         <button class="export-btn" id="seg-importar" title="Lee los PDF de la aseguradora (Banorte) y liga cada vehículo con su equipo por número de serie">📥 Importar pólizas (PDF)</button>
@@ -21017,7 +21021,7 @@ function segTarjetas_(){
   const d = SEG_DATOS, hoy = d.hoy;
   const activas = d.polizas.filter(function(p){ return !p.cancelada; });
   const cuenta = function(e){ return activas.filter(function(p){ return p.estado === e; }).length; };
-  const sinSeg = d.unidades.filter(function(u){ return u.automotriz && (u.estado === 'sin_seguro' || u.estado === 'vencida'); }).length;
+  const sinSeg = d.unidades.filter(function(u){ return u.asegurable && (u.estado === 'sin_seguro' || u.estado === 'vencida'); }).length;
   const pagos30 = [];
   activas.forEach(function(p){ p.pagos.forEach(function(x){ if(!x.pagado && segDias_(hoy, x.fechaVencimiento) <= 30) pagos30.push(x); }); });
   const abiertos = d.siniestros.filter(function(s){ return s.estatus !== 'cerrado'; }).length;
@@ -21025,7 +21029,7 @@ function segTarjetas_(){
     ['verde', cuenta('vigente'), 'Pólizas vigentes', 'polizas', 'vigente'],
     ['ambar', cuenta('por_vencer'), 'Por vencer (30 días)', 'polizas', 'por_vencer'],
     ['rojo', cuenta('vencida'), 'Vencidas', 'polizas', 'vencida'],
-    ['rojo', sinSeg, 'Automotrices sin seguro vigente', 'unidades', 'sin_seguro'],
+    ['rojo', sinSeg, 'Vehículos sin seguro vigente', 'unidades', 'sin_seguro'],
     ['ambar', pagos30.length, 'Pagos en 30 días o atrasados', 'pagos', ''],
     ['ambar', abiertos, 'Siniestros abiertos', 'siniestros', ''],
   ];
@@ -21071,7 +21075,7 @@ function renderSeguros(){
     const soloAuto = document.getElementById('seg-solo-auto').checked;
     th.innerHTML = '<tr><th>Unidad</th><th>Tipo</th><th>Placa / serie</th><th>Marca / modelo</th><th>Empresa</th><th>Póliza</th><th>Vence</th><th>Estado</th><th>Siniestros</th><th></th></tr>';
     filas = SEG_DATOS.unidades.filter(function(u){
-      if(soloAuto && !u.automotriz) return false;
+      if(soloAuto && !u.asegurable) return false;
       if(est === 'sin_seguro' ? (u.estado !== 'sin_seguro' && u.estado !== 'vencida') : (est && u.estado !== est)) return false;
       const p = u.polizaId ? segPoliza_(u.polizaId) : null;
       return coincide([u.codigoUnidad, u.unidad, u.placa, u.serie, u.marca, u.modelo, p ? p.aseguradora + ' ' + p.numeroPoliza : ''].join(' '));
@@ -21115,7 +21119,7 @@ function renderSeguros(){
     });
   }
   const cols = th.querySelectorAll('th').length;
-  tb.innerHTML = filas.length ? filas.join('') : '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text-dim);padding:24px;">' + (SEG_VISTA === 'polizas' && !SEG_DATOS.polizas.length ? 'Todavía no hay pólizas. Da "+ Nueva póliza".' : 'Nada que mostrar con estos filtros.') + '</td></tr>';
+  tb.innerHTML = filas.length ? filas.join('') : '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text-dim);padding:24px;">' + (SEG_VISTA === 'polizas' && !SEG_DATOS.polizas.length ? 'Todavía no hay pólizas. Da "+ Nueva póliza".' : SEG_VISTA === 'unidades' && document.getElementById('seg-solo-auto').checked && !SEG_DATOS.unidades.some(function(u){ return u.asegurable; }) ? 'Ningún tipo de unidad está marcado como "Lleva seguro". Márcalos en Catálogo → Tipos de unidad (Camioneta, Camión, Auto, Moto, Remolque…).' : 'Nada que mostrar con estos filtros.') + '</td></tr>';
   document.getElementById('seg-add-poliza').style.display = puede ? '' : 'none';
   document.getElementById('seg-importar').style.display = puede ? '' : 'none';
   document.getElementById('seg-add-siniestro').style.display = puede ? '' : 'none';
@@ -22495,9 +22499,10 @@ function renderCatalogoSimple(key){
       if(r.Telefono) partes.push(r.Telefono);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
-    if(cfg.tieneCategoriaExtra && (r.Categoria || r.CuentaNombre)){
+    if(cfg.tieneCategoriaExtra && (r.Categoria || r.CuentaNombre || r.LlevaSeguro)){
       const partes = [];
       if(r.Categoria) partes.push(r.Categoria === 'agricola' ? 'Agrícola' : 'Automotriz');
+      if(r.LlevaSeguro) partes.push('Lleva seguro');
       if(r.CuentaNombre) partes.push('Cuenta: ' + r.CuentaNombre);
       extra = ' <span class="cat-catalogo-extra">(' + escapeHtml(partes.join(' · ')) + ')</span>';
     }
@@ -22586,6 +22591,8 @@ function abrirModalCatalogoSimple(key, registro){
   } else {
     operadorWrap.style.display = 'none';
   }
+  document.getElementById('catsimple-f-seguro-wrap').style.display = cfg.tieneCategoriaExtra ? '' : 'none';
+  if(cfg.tieneCategoriaExtra) document.getElementById('catsimple-f-seguro').checked = !!(registro && registro.LlevaSeguro);
   const categoriaWrap = document.getElementById('catsimple-f-categoria-wrap');
   if(cfg.tieneCategoriaExtra){
     categoriaWrap.style.display = '';
@@ -22711,6 +22718,7 @@ document.getElementById('catsimple-btn-save').addEventListener('click', function
   }
   if(cfg.tieneCategoriaExtra){
     data.categoria = document.getElementById('catsimple-f-categoria').value;
+    data.llevaSeguro = document.getElementById('catsimple-f-seguro').checked;
   }
   if(cfg.tieneCuentaTipo){
     data.cuentaContableId = document.getElementById('catsimple-f-tucuenta').value || null;

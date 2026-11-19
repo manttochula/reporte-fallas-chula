@@ -3976,3 +3976,17 @@ CREATE TABLE IF NOT EXISTS traducciones_partes (
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'seguros_poliza_unidades' AND column_name = 'prima');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE seguros_poliza_unidades ADD COLUMN prima DECIMAL(14,2) DEFAULT NULL, ADD COLUMN alta DATE DEFAULT NULL, ADD COLUMN pdf_url VARCHAR(500) DEFAULT NULL, ADD COLUMN descripcion_poliza VARCHAR(255) DEFAULT NULL, ADD COLUMN serie_poliza VARCHAR(40) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026 (Carlos): en Seguros solo cuentan los tipos de unidad que llevan
+-- seguro (camionetas, camiones, autos, motos, remolques…), no implementos,
+-- generadores, motosierras, motobombas… Se marca en Catálogo → Tipos de
+-- unidad. Una sola vez se marcan los tipos de vehículo por su nombre.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tipos_unidad' AND column_name = 'lleva_seguro');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE tipos_unidad ADD COLUMN lleva_seguro TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @mig_tseg = (SELECT COUNT(*) FROM configuracion WHERE clave = 'tipos_lleva_seguro_2026_11');
+UPDATE tipos_unidad SET lleva_seguro = 1
+ WHERE @mig_tseg = 0 AND (
+   UPPER(nombre) REGEXP '(^|[^A-Z])(CAMIONETA|CAMI.N|TRACTOCAMI.N|AUTO|AUTOM.VIL|AUTOB.S|MOTO|MOTOCICLETA|MOTONETA|CUATRIMOTO|REMOLQUE|PICK ?UP|PIPA|TORTON|RAB.N|CHASIS|VEH.CULO|CAMA BAJA|PLATAFORMA|CAJA SECA|VAN|SED.N|SUV|CAMIONCITO)(S|ES)?([^A-Z]|$)'
+ );
+INSERT IGNORE INTO configuracion (clave, valor) VALUES ('tipos_lleva_seguro_2026_11', 'hecho');

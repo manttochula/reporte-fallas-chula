@@ -6530,7 +6530,8 @@ async function getManualesPartes(code, nombreUsuario) {
   const [rows] = await pool.query(`
     SELECT mp.id AS Id, mp.modelo_id AS ModeloId, mo.nombre AS Modelo, ma.nombre AS Marca,
            mp.nombre_archivo AS Archivo, mp.paginas AS Paginas, mp.secciones AS Secciones, mp.piezas AS Piezas,
-           mp.subido_por AS SubidoPor, mp.creado_en AS CreadoEn, mp.series AS SeriesJson, mo.catalogo_por AS CatalogoPor
+           mp.subido_por AS SubidoPor, mp.creado_en AS CreadoEn, mp.series AS SeriesJson, mo.catalogo_por AS CatalogoPor,
+           (SELECT COUNT(*) FROM manuales_partes_piezas pz WHERE pz.manual_id = mp.id AND pz.descripcion_original IS NOT NULL) AS PiezasTraducidas
     FROM manuales_partes mp
     LEFT JOIN modelos_refacciones mo ON mo.id = mp.modelo_id
     LEFT JOIN marcas_refacciones ma ON ma.id = mo.marca_id
@@ -6551,7 +6552,7 @@ async function getManualesPartes(code, nombreUsuario) {
       ? delModelo.filter((e) => set.has(normalizarSerie_(e.serie))).length
       : (r.Id === ultimoGeneral ? delModelo.filter((e) => !conSerie.has(normalizarSerie_(e.serie))).length : 0);
     const { SeriesJson, ...resto } = r;
-    return { ...resto, CatalogoPor: r.CatalogoPor === 'serie' ? 'serie' : 'modelo', Equipos: equipos };
+    return { ...resto, CatalogoPor: r.CatalogoPor === 'serie' ? 'serie' : 'modelo', Equipos: equipos, PiezasTraducidas: Number(r.PiezasTraducidas) || 0 };
   });
 }
 
@@ -6736,6 +6737,82 @@ async function borrarManualPartes_(id) {
   await pool.query('DELETE FROM manuales_partes WHERE id = ?', [id]);
 }
 
+// ---- Nov-2026 (Carlos): traducir al español un catálogo en inglés (John Deere) ----
+// Traduce nombres de secciones y grupos, descripciones y notas de las piezas.
+// El texto en inglés se guarda en *_original (se ve en chiquito y el buscador
+// lo encuentra). Lo ya traducido se guarda en traducciones_partes y se reusa.
+// Cada llamada traduce un bloque (para no tardar demasiado): el Panel la
+// repite mientras regrese pendientes > 0.
+const TRADUCIR_POR_LLAMADA_ = 120;
+async function traducirManualPartes(code, nombreUsuario, manualId) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const id = Number(manualId);
+  const [m] = await pool.query('SELECT id FROM manuales_partes WHERE id = ? AND completo = 1', [id]);
+  if (!m.length) return { success: false, error: 'No se encontró ese catálogo de partes.' };
+  const campos = [
+    { tabla: 'manuales_partes_secciones', col: 'titulo' },
+    { tabla: 'manuales_partes_secciones', col: 'grupo' },
+    { tabla: 'manuales_partes_piezas', col: 'descripcion' },
+    { tabla: 'manuales_partes_piezas', col: 'observaciones' },
+  ];
+  const textos = new Set();
+  for (const c of campos) {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT ${c.col} AS t FROM ${c.tabla} WHERE manual_id = ? AND ${c.col}_original IS NULL AND ${c.col} IS NOT NULL AND TRIM(${c.col}) <> ''`, [id]);
+    rows.forEach((r) => textos.add(r.t));
+  }
+  const lista = Array.from(textos);
+  const cache = new Map();
+  for (let i = 0; i < lista.length; i += 500) {
+    const [rows] = await pool.query('SELECT original, traduccion FROM traducciones_partes WHERE original IN (?)', [lista.slice(i, i + 500)]);
+    rows.forEach((r) => cache.set(r.original, r.traduccion));
+  }
+  const faltan = lista.filter((t) => !cache.has(t));
+  const bloque = faltan.slice(0, TRADUCIR_POR_LLAMADA_);
+  if (bloque.length) {
+    const prompt =
+      'Traduce al español de México estos textos de un catálogo de partes de tractores John Deere (nombres de secciones, grupos, ' +
+      'descripciones de piezas y notas). Usa los nombres que usa un mecánico de maquinaria agrícola en México ' +
+      '(ej. "Valve Cover" = "Tapa de válvulas", "Gasket" = "Junta", "Hexagonal Flange Nut" = "Tuerca hexagonal con brida", "Engine" = "Motor").\n' +
+      'Reglas: NO cambies números de parte ni códigos (DZ122513, RE503027, ST969832, 6068TP063...), ni el número/código que va al inicio ' +
+      'de una sección o grupo ("11AD Valve Cover" = "11AD Tapa de válvulas", "20 Engine" = "20 Motor"), ni medidas ("M10 X 20", "125 A"). ' +
+      '"SUB FOR X" = "SUSTITUYE A X"; "MARKED X" = "MARCADO X"; "This part has been substituted." = "Esta pieza fue sustituida.". ' +
+      'Respeta mayúsculas: si viene todo en mayúsculas, contesta en mayúsculas. Si un texto ya está en español o no se traduce, regrésalo igual.\n\n' +
+      'Textos (JSON):\n' + JSON.stringify(bloque) + '\n\n' +
+      'Responde ÚNICAMENTE un objeto JSON, sin texto antes ni después, con la traducción de cada texto en el MISMO orden: {"t":["...", "..."]}';
+    let r = null;
+    try { r = extraerJson_(await preguntarleAClaudeTexto_(prompt)); } catch (e) {
+      return { success: false, error: 'No se pudo traducir con la IA: ' + ((e && e.message) || e) };
+    }
+    const t = r && Array.isArray(r.t) ? r.t : null;
+    if (!t || t.length !== bloque.length) return { success: false, error: 'La IA no regresó la traducción completa. Intenta de nuevo.' };
+    const filas = [];
+    bloque.forEach((orig, k) => {
+      const tr = (t[k] === null || t[k] === undefined ? '' : t[k]).toString().replace(/\s+/g, ' ').trim().slice(0, 255);
+      const valor = tr || orig;
+      cache.set(orig, valor);
+      filas.push([orig, valor]);
+    });
+    await pool.query('INSERT INTO traducciones_partes (original, traduccion) VALUES ? ON DUPLICATE KEY UPDATE traduccion = VALUES(traduccion)', [filas]);
+  }
+  // Aplicar todo lo que ya tiene traducción
+  let aplicados = 0;
+  for (const c of campos) {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT ${c.col} AS t FROM ${c.tabla} WHERE manual_id = ? AND ${c.col}_original IS NULL AND ${c.col} IS NOT NULL AND TRIM(${c.col}) <> ''`, [id]);
+    for (const row of rows) {
+      if (!cache.has(row.t)) continue;
+      const [u] = await pool.query(
+        `UPDATE ${c.tabla} SET ${c.col}_original = ${c.col}, ${c.col} = ? WHERE manual_id = ? AND ${c.col} = ? AND ${c.col}_original IS NULL`,
+        [cache.get(row.t), id, row.t]);
+      aplicados += u.affectedRows || 0;
+    }
+  }
+  const pendientes = faltan.length - bloque.length;
+  if (!pendientes) await registrarAuditoria_('manuales_partes', id, 'traducir', nombreUsuario, 'Catálogo de partes traducido al español');
+  return { success: true, traducidos: bloque.length, reusados: lista.length - faltan.length, aplicados, pendientes, total: lista.length };
+}
+
 async function eliminarManualPartes(code, nombreUsuario, id) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
   const idNum = Number(id);
@@ -6777,11 +6854,11 @@ async function datosManualPartes_(manualId) {
     WHERE mp.id = ? AND mp.completo = 1`, [manualId]);
   if (!man.length) return null;
   const [secs] = await pool.query(
-    'SELECT id, codigo, titulo, aplica, serie, grupo, imagen_url FROM manuales_partes_secciones WHERE manual_id = ? AND pendiente = 0 ORDER BY orden, id',
+    'SELECT id, codigo, titulo, titulo_original, aplica, serie, grupo, grupo_original, imagen_url FROM manuales_partes_secciones WHERE manual_id = ? AND pendiente = 0 ORDER BY orden, id',
     [manualId]
   );
   const [pzs] = await pool.query(
-    'SELECT id, seccion_id, ref, codigo, codigo_norm, codigo_anterior, descripcion, cantidad, serie, observaciones FROM manuales_partes_piezas WHERE manual_id = ? ORDER BY id',
+    'SELECT id, seccion_id, ref, codigo, codigo_norm, codigo_anterior, descripcion, descripcion_original, cantidad, serie, observaciones, observaciones_original FROM manuales_partes_piezas WHERE manual_id = ? ORDER BY id',
     [manualId]
   );
   const buscar = await mapaRefaccionesPorParte_();
@@ -6796,9 +6873,11 @@ async function datosManualPartes_(manualId) {
       codigo: p.codigo || '',
       codigoAnterior: p.codigo_anterior || '',
       descripcion: p.descripcion || '',
+      descripcionOriginal: p.descripcion_original && p.descripcion_original !== p.descripcion ? p.descripcion_original : '',
       cantidad: p.cantidad !== null ? Number(p.cantidad) : null,
       serie: p.serie || '',
       observaciones: p.observaciones || '',
+      observacionesOriginal: p.observaciones_original && p.observaciones_original !== p.observaciones ? p.observaciones_original : '',
       refaccionId: ref ? ref.id : null,
       refaccionCodigo: ref ? ref.codigo || '' : '',
       refaccionTexto: ref ? ((ref.no_parte ? ref.no_parte + ' - ' : '') + ref.descripcion) : '',
@@ -6814,6 +6893,8 @@ async function datosManualPartes_(manualId) {
     secciones: secs.map((s) => ({
       id: s.id, codigo: s.codigo || '', titulo: s.titulo, aplica: s.aplica || '', serie: s.serie || '',
       grupo: s.grupo || '', imagenUrl: s.imagen_url || '', piezas: porSeccion.get(s.id) || [],
+      tituloOriginal: s.titulo_original && s.titulo_original !== s.titulo ? s.titulo_original : '',
+      grupoOriginal: s.grupo_original && s.grupo_original !== s.grupo ? s.grupo_original : '',
     })),
   };
 }
@@ -13395,6 +13476,7 @@ module.exports = {
   getManualesPartes,
   crearManualPartes,
   agregarArchivosManualPartes,
+  traducirManualPartes,
   getSeriesModeloCatalogo,
   guardarSeccionManualPartes,
   terminarManualPartes,

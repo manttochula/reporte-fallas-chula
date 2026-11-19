@@ -400,5 +400,5 @@
     return leerCatalogo(paginas);
   }
 
-  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, encabezadoJd_: encabezadoJd_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
+  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, encabezadoJd_: encabezadoJd_, esJohnDeere: esJohnDeere_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
 });

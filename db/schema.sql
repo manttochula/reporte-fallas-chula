@@ -3950,3 +3950,21 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_len = (SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes' AND column_name = 'nombre_archivo');
 SET @sql_alter = IF(@col_len < 2000, 'ALTER TABLE manuales_partes MODIFY COLUMN nombre_archivo VARCHAR(2000) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- Nov-2026 (Carlos): traducir al español los catálogos de partes en inglés
+-- (John Deere). Se guarda el texto original para verlo en chiquito y buscarlo.
+-- *_original NULL = todavía no se traduce. "traducciones_partes" = lo ya
+-- traducido (se reusa en otros catálogos y no se vuelve a pagar la IA).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes_secciones' AND column_name = 'titulo_original');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes_secciones ADD COLUMN titulo_original VARCHAR(255) DEFAULT NULL, ADD COLUMN grupo_original VARCHAR(255) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'manuales_partes_piezas' AND column_name = 'descripcion_original');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE manuales_partes_piezas ADD COLUMN descripcion_original VARCHAR(255) DEFAULT NULL, ADD COLUMN observaciones_original VARCHAR(255) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+CREATE TABLE IF NOT EXISTS traducciones_partes (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  original   VARCHAR(255) NOT NULL,
+  traduccion VARCHAR(255) NOT NULL,
+  creado_en  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_traducciones_partes (original)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

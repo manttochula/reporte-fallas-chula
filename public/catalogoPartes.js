@@ -71,6 +71,7 @@
     '.cp-inv-si{color:#2f6f3a;font-weight:600;}',
     '.cp-inv-no{color:#8a8a8a;}',
     '.cp-notas{color:#666;font-size:11.5px;}',
+    '.cp-original{color:#8a8a8a;font-style:italic;font-size:11px;font-weight:normal;}',
     '.cp-agregar{padding:5px 10px;border:1px solid #5fa36a;color:#2f6f3a;background:#f2faf3;border-radius:5px;cursor:pointer;font-size:12px;white-space:nowrap;}',
     '.cp-agregar:disabled{opacity:.6;cursor:default;}',
     '.cp-vacio{color:#888;font-style:italic;padding:20px 0;}',
@@ -327,7 +328,7 @@
     var html = '';
     var boton = function (s, ia) {
       return '<button type="button" class="cp-sec' + (s.id === V.seccionId && !V.busqueda ? ' cp-activa' : '') + (ia ? ' cp-sec-ia' : '') +
-        '" data-sec="' + s.id + '">' + (ia ? '✨ ' : '') + esc_(s.titulo) + (s.serie ? ' <small>' + esc_(s.serie) + '</small>' : '') + '</button>';
+        '" data-sec="' + s.id + '"' + (s.tituloOriginal ? ' title="' + esc_(s.tituloOriginal) + '"' : '') + '>' + (ia ? '✨ ' : '') + esc_(s.titulo) + (s.serie ? ' <small>' + esc_(s.serie) + '</small>' : '') + '</button>';
     };
     if (V.propuesta.secciones.length) {
       html += '<div class="cp-grupo">Propuestas por la IA</div>';
@@ -340,11 +341,11 @@
     m.secciones.forEach(function (s) {
       var g = nombre(s.grupo);
       var grupo = grupos.find(function (x) { return x.g === g; });
-      if (!grupo) grupos.push(grupo = { g: g, secs: [] });
+      if (!grupo) grupos.push(grupo = { g: g, original: s.grupoOriginal ? nombre(s.grupoOriginal) : '', secs: [] });
       grupo.secs.push(s);
     });
     grupos.forEach(function (g) {
-      html += '<div class="cp-grupo">' + esc_(g.g) + '</div>';
+      html += '<div class="cp-grupo"' + (g.original ? ' title="' + esc_(g.original) + '"' : '') + '>' + esc_(g.g) + '</div>';
       g.secs.slice().sort(function (a, b) { return a.titulo.localeCompare(b.titulo, 'es'); }).forEach(function (s) { html += boton(s, false); });
     });
     cont.innerHTML = html;
@@ -389,11 +390,13 @@
       '<td class="cp-col-codigo">' + esc_(p.codigo || '—') +
         (V.opts.puedeEditarCodigo && p.codigo ? ' <button type="button" class="cp-editar-codigo" data-editar-codigo="' + p.id + '" title="Actualizar el código (el proveedor lo cambió)">✎</button>' : '') +
         (p.codigoAnterior ? '<br><span class="cp-notas" title="Código que traía el manual">antes: ' + esc_(p.codigoAnterior) + '</span>' : '') + '</td>' +
-      '<td>' + esc_(p.descripcion) + (motivo ? '<span class="cp-motivo">✨ ' + esc_(motivo) + '</span>' : '') +
+      '<td>' + esc_(p.descripcion) + (p.descripcionOriginal ? '<br><span class="cp-notas cp-original" title="Como viene en el catálogo">' + esc_(p.descripcionOriginal) + '</span>' : '') +
+      (motivo ? '<span class="cp-motivo">✨ ' + esc_(motivo) + '</span>' : '') +
       (p.cantidad !== null && p.cantidad !== undefined ? '<span class="cp-sec-movil cp-notas">Lleva ' + esc_(p.cantidad) + '</span>' : '') +
       (conSeccion ? '<span class="cp-sec-movil"><button type="button" class="cp-ir" data-ir="' + seccion.id + '" data-ir-pieza="' + p.id + '">' + esc_(seccion.titulo) + '</button></span>' : '') + '</td>' +
       '<td class="cp-col-cant">' + (p.cantidad !== null && p.cantidad !== undefined ? esc_(p.cantidad) : '') + '</td>' +
-      '<td class="cp-col-notas"><span class="cp-notas">' + esc_(notas) + '</span></td>' +
+      '<td class="cp-col-notas"><span class="cp-notas">' + esc_(notas) + '</span>' +
+        (p.observacionesOriginal ? '<br><span class="cp-notas cp-original" title="Como viene en el catálogo">' + esc_(p.observacionesOriginal) + '</span>' : '') + '</td>' +
       '<td>' + inv + '</td>' +
       (puede ? '<td>' + accion + '</td>' : '') +
       '</tr>';
@@ -416,9 +419,9 @@
       var palabras = q.split(/\s+/).filter(Boolean);
       var res = [];
       m.secciones.forEach(function (s) {
-        var tit = norm_(s.titulo);
+        var tit = norm_(s.titulo + ' ' + (s.tituloOriginal || ''));
         s.piezas.forEach(function (p) {
-          var texto = norm_(p.descripcion + ' ' + p.observaciones + ' ' + p.codigo + ' ' + (p.codigoAnterior || '') + ' ' + p.refaccionCodigo + ' ' + p.folioComercial) + ' ' + tit;
+          var texto = norm_(p.descripcion + ' ' + p.observaciones + ' ' + (p.descripcionOriginal || '') + ' ' + (p.observacionesOriginal || '') + ' ' + p.codigo + ' ' + (p.codigoAnterior || '') + ' ' + p.refaccionCodigo + ' ' + p.folioComercial) + ' ' + tit;
           var porCodigo = qCodigo.length >= 4 && (p.codigo + ' ' + (p.codigoAnterior || '')).toUpperCase().replace(/[^0-9A-Z ]/g, '').split(' ').some(function (c) { return c.indexOf(qCodigo) !== -1; });
           if (porCodigo || palabras.every(function (w) { return texto.indexOf(w) !== -1; })) res.push({ p: p, s: s });
         });
@@ -433,7 +436,7 @@
     } else {
       var s = m.secciones.find(function (x) { return x.id === V.seccionId; }) || m.secciones[0];
       if (!s) { det.innerHTML = '<div class="cp-vacio">Este catálogo no tiene secciones.</div>'; return; }
-      html += '<h4>' + esc_(s.titulo) + '</h4><div class="cp-sub">' + esc_([s.codigo, s.grupo, s.aplica, s.serie].filter(Boolean).join(' · ')) + '</div>';
+      html += '<h4>' + esc_(s.titulo) + (s.tituloOriginal ? ' <small class="cp-original">(' + esc_(s.tituloOriginal) + ')</small>' : '') + '</h4><div class="cp-sub">' + esc_([s.codigo, s.grupo, s.aplica, s.serie].filter(Boolean).join(' · ')) + '</div>';
       if (s.imagenUrl) {
         html += '<div class="cp-dibujo-wrap"><img class="cp-dibujo" id="cp-dibujo" alt="Dibujo de ' + esc_(s.titulo) + '" src="' + esc_(u_(s.imagenUrl)) + '" title="Clic para acercar"></div>';
       }
@@ -658,7 +661,7 @@
           throw new Error((files.length > 1 ? 'En "' + files[k].name + '" no' : 'No') + ' se encontró ninguna tabla de piezas en el PDF. Por ahora se leen catálogos de Kubota ' +
             '(No. | Código de pieza | Descripción | Cant ...) y de John Deere (PDF del diagrama de partscatalog.deere.com: "Parts List" con "Part Number"). Si es de otra marca o formato, mándaselo a Claude para agregarlo.');
         }
-        leidos.push({ doc: r.doc, secciones: secs });
+        leidos.push({ doc: r.doc, secciones: secs, ingles: !!(parser.esJohnDeere && parser.esJohnDeere(r.paginas)) });
         paginas += r.doc.numPages;
         total += secs.length;
         return leerUno(k + 1);
@@ -698,11 +701,43 @@
       return llamar_('terminarManualPartes', o.code, o.usuario, manualId, agregando ? { nombreArchivo: nombres, paginas: paginas } : null);
     }).then(function (r) {
       if (!r || !r.success) throw new Error((r && r.error) || 'No se pudo terminar de guardar el catálogo.');
-      return r;
+      // Nov-2026: los catálogos en inglés (John Deere) se traducen al español
+      // al subirlos. Si la traducción falla el catálogo ya quedó guardado:
+      // se avisa y se puede repetir con el botón "Traducir".
+      if (!leidos.some(function (L) { return L.ingles; }) || o.traducir === false) return r;
+      return traducir({ manualId: manualId, code: o.code, usuario: o.usuario, onProgreso: progreso }).then(function (t) {
+        r.traduccion = t;
+        return r;
+      }, function (e) {
+        r.traduccionError = (e && e.message) || 'No se pudo traducir.';
+        return r;
+      });
     });
   }
 
-  window.CatalogoPartes = { abrir: abrir, cerrar: cerrar, subirPdf: subirPdf, leerPdf: leerPdf, verFotos: verFotos };
+  // Traduce al español un catálogo ya subido (en bloques, hasta terminar).
+  function traducir(o) {
+    var progreso = o.onProgreso || function () {};
+    var hechos = 0;
+    var vueltas = 0;
+    function otra() {
+      vueltas++;
+      if (vueltas > 60) return Promise.reject(new Error('La traducción se quedó a medias. Presiona "Traducir" otra vez para seguir.'));
+      return llamar_('traducirManualPartes', o.code, o.usuario, o.manualId).then(function (r) {
+        if (!r || !r.success) throw new Error((r && r.error) || 'No se pudo traducir.');
+        hechos += r.traducidos || 0;
+        if (r.pendientes > 0) {
+          progreso('Traduciendo al español... faltan ' + r.pendientes + ' textos');
+          return otra();
+        }
+        return { textos: r.total, traducidosIa: hechos };
+      });
+    }
+    progreso('Traduciendo al español...');
+    return otra();
+  }
+
+  window.CatalogoPartes = { abrir: abrir, cerrar: cerrar, subirPdf: subirPdf, traducir: traducir, leerPdf: leerPdf, verFotos: verFotos };
 
   // Visor de fotos suelto (lo usan el Panel y Taller para las fotos de la
   // orden): CatalogoPartes.verFotos([url, ...], indice)

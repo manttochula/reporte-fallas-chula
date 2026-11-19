@@ -4998,7 +4998,7 @@ var PANEL_SOLO_EN_LINEA = {
   importarServiciosAutomotrices: true, guardarImagenMapaHuerta: true, validarUsuario: true,
   guardarSuscripcionAvisos: true, quitarSuscripcionAvisos: true, probarAvisoEquipo: true, guardarTelegramToken: true,
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
-  crearManualPartes: true, agregarArchivosManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
+  crearManualPartes: true, agregarArchivosManualPartes: true, traducirManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
@@ -5574,7 +5574,7 @@ function ocultarControlesSoloLectura(){
       '#ref-add', '.ref-btn-editar', '#ref-btn-save', '#ref-btn-delete',
       '#refcat-add', '.refcat-btn-editar', '#refcat-btn-save', '#refcat-btn-delete',
       '#marca-add', '.marca-btn-editar', '#marca-btn-save', '#marca-btn-delete', '#modelo-agregar', '.modelo-quitar',
-      '#manpar-subir', '.manpar-btn-eliminar', '.manpar-btn-agregar', '#ocx-abrir',
+      '#manpar-subir', '.manpar-btn-eliminar', '.manpar-btn-agregar', '.manpar-btn-traducir', '#ocx-abrir',
       '#prov-add', '.prov-btn-editar', '#prov-btn-save', '#prov-btn-delete',
       '#cot-add', '#cot-btn-generar', '.cot-btn-cancelar', '.cot-btn-reactivar',
       '#cot-ver-cancelar', '#cot-ver-reactivar', '.cot-aut-btn', '.cot-corregir-btn',
@@ -21983,12 +21983,13 @@ function renderManualesPartes(){
       <td>${escapeHtml(m.Modelo || '—')}${(m.Series || []).length ? '<br><span class="mnt-subtext">Serie: ' + escapeHtml(m.Series.join(', ')) + '</span>' : (m.CatalogoPor === 'serie' ? '<br><span class="mnt-subtext">General del modelo (series sin catálogo propio)</span>' : '')}</td>
       <td>${m.Equipos || 0}${m.Equipos ? '' : ' <span class="mnt-subtext">' + ((m.Series || []).length ? '(ningún equipo con esa serie)' : ALL_MANUALES_PARTES.some(function(x){ return x.ModeloId === m.ModeloId && !(x.Series || []).length && x.Id > m.Id; }) ? '(se usa el más nuevo del modelo)' : '(asígnalo en Maquinaria)') + '</span>'}</td>
       <td>${m.Secciones || 0}</td>
-      <td>${m.Piezas || 0}</td>
+      <td>${m.Piezas || 0}${m.PiezasTraducidas ? '<br><span class="mnt-subtext">Traducido al español</span>' : ''}</td>
       <td>${escapeHtml(m.Archivo || '')}</td>
       <td>${escapeHtml(m.SubidoPor || '')}${m.CreadoEn ? '<br><span class="mnt-subtext">' + escapeHtml(formatFechaAudit(m.CreadoEn)) + '</span>' : ''}</td>
       <td style="white-space:nowrap;">
         <button type="button" class="export-btn" onclick="verManualPartes(${m.Id})">Ver</button>
         <button type="button" class="export-btn manpar-btn-agregar" onclick="agregarPdfManualPartes(${m.Id})">Agregar PDF</button>
+        <button type="button" class="export-btn manpar-btn-traducir" onclick="traducirManualPartesPanel(${m.Id})" title="Traduce al español nombres, descripciones y notas (el inglés se queda en chiquito y se puede buscar)">${m.PiezasTraducidas ? 'Traducir lo nuevo' : 'Traducir'}</button>
         <button type="button" class="export-btn manpar-btn-eliminar" onclick="eliminarManualPartesPanel(${m.Id})">Eliminar</button>
       </td>
     </tr>`;
@@ -22029,7 +22030,7 @@ document.getElementById('manpar-archivo-agregar').addEventListener('change', asy
       files: archivos, manualId: id, code: ACCESS_CODE, usuario: PANEL_USUARIO,
       onProgreso: function(t){ aviso('Agregando a ' + nombre + ': ' + t + ' (no cierres esta página)'); }
     });
-    aviso('Listo: se agregaron ' + r.nuevas + ' secciones a ' + nombre + (r.reemplazadas ? ' (' + r.reemplazadas + ' reemplazaron a las anteriores)' : '') + '. Ahora tiene ' + r.secciones + ' secciones y ' + r.piezas + ' piezas.', 'ok');
+    aviso('Listo: se agregaron ' + r.nuevas + ' secciones a ' + nombre + (r.reemplazadas ? ' (' + r.reemplazadas + ' reemplazaron a las anteriores)' : '') + '. Ahora tiene ' + r.secciones + ' secciones y ' + r.piezas + ' piezas.' + textoTraduccionManual_(r), r.traduccionError ? 'err' : 'ok');
     cargarManualesPartes();
   } catch(e){
     aviso((e && e.message) || 'No se pudieron agregar los archivos.', 'err');
@@ -22039,6 +22040,35 @@ document.getElementById('manpar-archivo-agregar').addEventListener('change', asy
     this.value = '';
   }
 });
+
+// Nov-2026: traducir al español (catálogos en inglés, p. ej. John Deere).
+function textoTraduccionManual_(r){
+  if(r && r.traduccionError) return ' Pero no se pudo traducir al español: ' + r.traduccionError + ' Presiona "Traducir" en la tabla para intentarlo otra vez.';
+  if(r && r.traduccion) return ' Se tradujo al español.';
+  return '';
+}
+async function traducirManualPartesPanel(id){
+  if(MANUAL_PARTES_SUBIENDO) return;
+  if(!window.CatalogoPartes){ alert('No se pudo cargar el visor del catálogo. Recarga la página.'); return; }
+  const statusEl = document.getElementById('manpar-status');
+  const aviso = function(texto, tipo){ statusEl.textContent = texto; statusEl.className = 'maq-modal-status show' + (tipo ? ' ' + tipo : ''); };
+  const m = ALL_MANUALES_PARTES.find(function(x){ return x.Id === id; });
+  const nombre = m ? ((m.Marca || '') + ' ' + (m.Modelo || '')).trim() : 'el catálogo';
+  MANUAL_PARTES_SUBIENDO = true;
+  const btns = Array.from(document.querySelectorAll('#manpar-btn-subir, .manpar-btn-agregar, .manpar-btn-traducir'));
+  btns.forEach(function(b){ b.disabled = true; });
+  try {
+    const r = await window.CatalogoPartes.traducir({ manualId: id, code: ACCESS_CODE, usuario: PANEL_USUARIO,
+      onProgreso: function(t){ aviso(nombre + ': ' + t + ' (no cierres esta página)'); } });
+    aviso('Listo: ' + nombre + ' quedó en español' + (r.textos ? ' (' + r.textos + ' textos)' : ' (no había nada nuevo que traducir)') + '. El inglés se ve en chiquito y también se puede buscar.', 'ok');
+    cargarManualesPartes();
+  } catch(e){
+    aviso((e && e.message) || 'No se pudo traducir.', 'err');
+  } finally {
+    MANUAL_PARTES_SUBIENDO = false;
+    btns.forEach(function(b){ b.disabled = false; });
+  }
+}
 
 function eliminarManualPartesPanel(id){
   const m = ALL_MANUALES_PARTES.find(function(x){ return x.Id === id; });
@@ -22075,7 +22105,7 @@ document.getElementById('manpar-btn-subir').addEventListener('click', async func
       files: archivos, modeloId: modeloId, series: series, code: ACCESS_CODE, usuario: PANEL_USUARIO,
       onProgreso: function(t){ aviso(t + ' (no cierres esta página)'); }
     });
-    aviso('Listo: se guardaron ' + r.secciones + ' secciones y ' + r.piezas + ' piezas' + (archivos.length > 1 ? ' de ' + archivos.length + ' archivos' : '') + (r.reemplazadas ? ' (' + r.reemplazadas + ' secciones repetidas se reemplazaron por la del archivo más nuevo)' : '') + '.', 'ok');
+    aviso('Listo: se guardaron ' + r.secciones + ' secciones y ' + r.piezas + ' piezas' + (archivos.length > 1 ? ' de ' + archivos.length + ' archivos' : '') + (r.reemplazadas ? ' (' + r.reemplazadas + ' secciones repetidas se reemplazaron por la del archivo más nuevo)' : '') + '.' + textoTraduccionManual_(r), r.traduccionError ? 'err' : 'ok');
     document.getElementById('manpar-archivo').value = '';
     document.getElementById('manpar-series-otras').value = '';
     Array.from(document.querySelectorAll('#manpar-series-equipos input')).forEach(function(i){ i.checked = false; });

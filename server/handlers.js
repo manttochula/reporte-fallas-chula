@@ -6329,8 +6329,10 @@ async function getRefaccionesNecesarias(code, nombreUsuario, orden) {
   // la pieza sí está ligada al catálogo — así también se ve el no. de
   // parte en la lista de "piezas", no solo la descripción.
   const ocPorRef = await ocsDeOrden_(orden);
+  const llegadaPorRef = await llegadasAutorizadasDeOrden_(orden);
   const items = guardadas.map((n) => ({
     oc: n.RefaccionId ? ocPorRef[n.RefaccionId] || null : null,
+    llegada: n.RefaccionId ? llegadaPorRef[n.RefaccionId] || null : null,
     id: n.Id,
     refaccionId: n.RefaccionId || null,
     texto: n.RefaccionId ? ((n.RefaccionNoParte ? n.RefaccionNoParte + ' - ' : '') + n.RefaccionDescripcion) : (n.TextoLibre || ''),
@@ -10600,6 +10602,46 @@ async function guardarFoliosOc(code, nombreUsuario, empresaId, data) {
 }
 
 // Para la orden (Refaccionamiento): OC/gasto directo de cada refacción.
+// Nov-2026 (Carlos): fecha en que llega cada refacción AUTORIZADA de la orden
+// (la fecha de entrega que dio el proveedor en su cotización; se puede
+// cambiar desde "Refacciones necesarias"). refaccion_id -> { fecha, proveedor, folio }
+async function llegadasAutorizadasDeOrden_(orden) {
+  const [rows] = await pool.query(
+    `SELECT sci.refaccion_id, ri.fecha_entrega, p.nombre AS proveedor, s.folio
+     FROM solicitud_cotizacion_respuesta_items ri
+     JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+     JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+     LEFT JOIN proveedores p ON p.id = s.proveedor_id
+     WHERE ri.autorizado = 1 AND s.estado <> 'cancelada' AND s.orden = ?
+     ORDER BY ri.id`,
+    [orden]
+  );
+  const porRef = {};
+  rows.forEach((r) => {
+    porRef[r.refaccion_id] = { fecha: r.fecha_entrega ? fechaSoloOrNull(r.fecha_entrega) : null, proveedor: r.proveedor || '', folio: r.folio || '' };
+  });
+  return porRef;
+}
+
+// Cambiar la fecha de llegada de una refacción autorizada de la orden
+// (aunque ya vaya en una OC: es solo la fecha prometida).
+async function cambiarFechaLlegadaRefaccion(code, nombreUsuario, orden, refaccionId, fecha) {
+  await requiereAccesoOrdenSeccionPorFolio_(code, nombreUsuario, orden, 'capturar');
+  const f = (fecha || '').toString().slice(0, 10) || null;
+  if (f && !/^\d{4}-\d{2}-\d{2}$/.test(f)) return { success: false, error: 'La fecha no es válida.' };
+  const [r] = await pool.query(
+    `UPDATE solicitud_cotizacion_respuesta_items ri
+     JOIN solicitud_cotizacion_items sci ON sci.id = ri.item_id
+     JOIN solicitudes_cotizacion s ON s.id = sci.solicitud_id
+     SET ri.fecha_entrega = ?
+     WHERE ri.autorizado = 1 AND s.estado <> 'cancelada' AND s.orden = ? AND sci.refaccion_id = ?`,
+    [f, orden, Number(refaccionId) || 0]
+  );
+  if (!r.affectedRows) return { success: false, error: 'Esa refacción no tiene una cotización autorizada en esta orden.' };
+  await registrarAuditoria_('reportes', orden, 'fecha llegada', nombreUsuario, 'Refacción ' + refaccionId + ': llega ' + (f || 'sin fecha'));
+  return { success: true, fecha: f };
+}
+
 async function ocsDeOrden_(orden) {
   const [rows] = await pool.query(
     'SELECT x.refaccion_id, x.tipo, x.serie, x.folio, x.fecha_oc, x.exportado_por, x.agente_estado, e.nombre AS empresa FROM oc_exportaciones x LEFT JOIN empresas e ON e.id = x.empresa_id WHERE x.orden = ? ORDER BY x.exportado_en',
@@ -13478,6 +13520,7 @@ module.exports = {
   interpretarRefaccionesTexto,
   interpretarRefaccionesFoto,
   getRefaccionesNecesarias,
+  cambiarFechaLlegadaRefaccion,
   guardarRefaccionesNecesarias,
   getProveedoresPorMarca,
   asignarProveedorAMarca,

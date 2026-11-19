@@ -1245,6 +1245,9 @@
   .ocp-aviso{ color:#b3261e; font-size:11.5px; margin-top:3px; }
   .ocp-totales{ display:flex; gap:14px; flex-wrap:wrap; justify-content:flex-end; font-size:12.5px; margin-top:6px; }
   .refnec-item-oc{ font-size:10.5px; padding:2px 6px; border-radius:3px; background: rgba(60,110,200,0.15); color:#2b5bb5; white-space:nowrap; }
+  .refnec-item-llegada{ font-size:10.5px; padding:2px 6px; border-radius:3px; border:none; cursor:pointer; background: rgba(40,140,80,0.15); color:#1f7a45; white-space:nowrap; font-family:inherit; }
+  .refnec-item-llegada.refnec-llegada-atrasada{ background: rgba(200,50,50,0.15); color:#b42318; font-weight:600; }
+  .refnec-item-llegada.refnec-llegada-sin{ background: rgba(120,120,120,0.15); color:#666; }
   /* Varias fotos por orden (modal "Ver"): miniaturas + "Agregar más fotos" */
   .modal-fotos-extra{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 4px; }
   .modal-fotos-extra:empty{ display:none; }
@@ -5001,7 +5004,7 @@ var PANEL_SOLO_EN_LINEA = {
   crearManualPartes: true, agregarArchivosManualPartes: true, traducirManualPartes: true, guardarSeriesManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
   guardarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
-  actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
+  actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, cambiarFechaLlegadaRefaccion: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
 function panelAbrirDb_(nombre, store, opciones){
@@ -14006,7 +14009,7 @@ function abrirModalRefaccionesNecesarias(orden){
       if(!result) return;
       if((result.items || []).length > 0){
         REFNEC_LISTA_TRABAJO = result.items.map(function(it){
-          return { id: it.id, texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, origen: it.origen, oc: it.oc || null,
+          return { id: it.id, texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, origen: it.origen, oc: it.oc || null, llegada: it.llegada || null,
             entregado: !!it.entregado, entregadoPor: it.entregadoPor || '', entregadoEn: it.entregadoEn || null };
         });
       } else if((result.sugeridas || []).length > 0){
@@ -14071,6 +14074,7 @@ function renderRefnecLista(){
       <span class="refnec-item-cantidad">×<input type="number" class="refnec-item-cantidad-input" min="0.01" step="0.01" value="${cantidadValor}" onclick="event.stopPropagation()" oninput="actualizarCantidadRefnec(${idx}, this.value)"></span>
       <span class="refnec-item-badge">${badge}</span>
       ${it.oc ? '<span class="refnec-item-oc" title="Exportada a CONTPAQi ' + escapeHtml((it.oc.empresa ? '(' + it.oc.empresa + ') ' : '') + (it.oc.fecha || '') + ' por ' + (it.oc.por || '')) + '">' + (it.oc.tipo === 'oc' ? 'OC ' + escapeHtml(it.oc.serie + ' ' + it.oc.folio) + (it.oc.agente === 'cargada' ? ' ✓ en Comercial' : it.oc.agente === 'pendiente' ? ' · cargando a Comercial' : it.oc.agente === 'error' ? ' ⚠ error al cargar' : '') : 'Gasto directo') + '</span>' : ''}
+      ${llegadaRefnecHtml_(it, idx)}
       ${entregadoHtml}
       ${btnAgregar}
       <button type="button" class="refnec-item-btn refnec-item-quitar" onclick="quitarItemRefnec(${idx})">Quitar</button>
@@ -14083,6 +14087,43 @@ function renderRefnecLista(){
 // pasar por "Guardar lista" — pega directo al servidor (igual que Insumos)
 // y refresca la fila de la orden de fondo para que la columna
 // Refaccionamiento de la tabla ya muestre el avance actualizado.
+// Nov-2026 (Carlos): fecha en que llega la refacción autorizada (la que dio
+// el proveedor en su cotización). Se puede cambiar con un clic.
+function llegadaRefnecHtml_(it, idx){
+  if(!it.llegada || it.entregado) return '';
+  const f = it.llegada.fecha;
+  const hoy = new Date(); const hoyIso = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  const atrasada = f && f < hoyIso, esHoy = f && f === hoyIso;
+  const texto = !f ? 'Autorizada · sin fecha de llegada' : atrasada ? 'Debía llegar ' + fechaOcCorta_(f) + ' (atrasada)' : esHoy ? 'Llega hoy ' + fechaOcCorta_(f) : 'Llega ' + fechaOcCorta_(f);
+  const titulo = 'Fecha de entrega que dio ' + (it.llegada.proveedor || 'el proveedor') + (it.llegada.folio ? ' en ' + it.llegada.folio : '') + '. Clic para cambiarla.';
+  return '<button type="button" class="refnec-item-llegada' + (atrasada ? ' refnec-llegada-atrasada' : !f ? ' refnec-llegada-sin' : '') + '" title="' + escapeHtml(titulo) + '" onclick="cambiarLlegadaRefnec(' + idx + ')">📦 ' + escapeHtml(texto) + '</button>';
+}
+
+function cambiarLlegadaRefnec(idx){
+  const it = REFNEC_LISTA_TRABAJO[idx];
+  if(!it || !it.llegada || !it.refaccionId) return;
+  const actual = it.llegada.fecha ? fechaOcCorta_(it.llegada.fecha) : '';
+  const txt = prompt('¿Qué día llega "' + it.texto + '"? (dd/mm/aaaa)\nDéjalo vacío si todavía no se sabe.', actual);
+  if(txt === null) return;
+  let iso = '';
+  const t = txt.trim();
+  if(t){
+    const m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(t) || null;
+    const m2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t);
+    if(m){ const y = m[3].length === 2 ? '20' + m[3] : m[3]; iso = y + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0'); }
+    else if(m2) iso = t;
+    else { alert('Escribe la fecha como día/mes/año, por ejemplo 25/11/2026.'); return; }
+  }
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ alert((r && r.error) || 'No se pudo cambiar la fecha.'); return; }
+      it.llegada.fecha = r.fecha;
+      renderRefnecLista();
+    })
+    .withFailureHandler(function(){ alert('No se pudo cambiar la fecha. Intenta de nuevo.'); })
+    .cambiarFechaLlegadaRefaccion(ACCESS_CODE, PANEL_USUARIO, REFNEC_ORDEN_ACTUAL, it.refaccionId, iso);
+}
+
 function marcarRefnecEntregado(idx){
   const it = REFNEC_LISTA_TRABAJO[idx];
   if(!it || !it.id) return;

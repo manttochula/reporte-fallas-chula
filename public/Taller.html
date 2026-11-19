@@ -273,6 +273,8 @@
   .fotos-extra-lista:empty{ display:none; }
   .foto-extra-mini{ width:84px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--line); cursor:zoom-in; }
   .rn-item-oc{ background: rgba(60,110,200,0.2) !important; color:#8fb3ff !important; }
+  .rn-item-llegada{ background: rgba(40,160,90,0.2) !important; color:#7fe0a3 !important; }
+  .rn-item-llegada.rn-llegada-atrasada{ background: rgba(220,60,60,0.25) !important; color:#ff9b9b !important; }
   .rn-vacio{ color: var(--text-dim); font-size:12px; font-style:italic; padding:4px 0; }
   .rn-status{ font-size:11.5px; margin-top:6px; font-family:'IBM Plex Mono',monospace; display:none; }
   .rn-status.show{ display:block; }
@@ -1329,7 +1331,7 @@ function rnCargar(orden){
         // Si hay refacciones guardadas en el celular sin enviar, esas son las que valen.
         var lista = pend || items;
         REFNEC_TALLER[orden] = { cargado: true, items: lista.map(function(it){
-          return { texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, piezaManualId: it.piezaManualId || null, origen: it.origen, oc: it.oc || null };
+          return { texto: it.texto, cantidad: it.cantidad, refaccionId: it.refaccionId, piezaManualId: it.piezaManualId || null, origen: it.origen, oc: it.oc || null, llegada: it.llegada || null, entregado: !!it.entregado };
         }) };
         rnRenderLista(orden);
       });
@@ -1388,6 +1390,17 @@ function rnRenderLista(orden, listaEl){
       oc.className = 'rn-item-badge rn-item-oc';
       oc.textContent = it.oc.tipo === 'oc' ? ('OC ' + it.oc.serie + ' ' + it.oc.folio + (it.oc.agente === 'cargada' ? ' ✓ en Comercial' : it.oc.agente === 'pendiente' ? ' · cargando a Comercial' : it.oc.agente === 'error' ? ' ⚠ error al cargar' : '')) : 'Gasto directo';
       row.appendChild(oc);
+    }
+
+    // Nov-2026: fecha en que llega la refacción autorizada
+    if(it.llegada && !it.entregado){
+      var ll = document.createElement('span');
+      var hoyT = new Date(); var hoyIsoT = hoyT.getFullYear() + '-' + String(hoyT.getMonth() + 1).padStart(2, '0') + '-' + String(hoyT.getDate()).padStart(2, '0');
+      var fT = it.llegada.fecha;
+      var fmtT = fT ? fT.slice(8, 10) + '/' + fT.slice(5, 7) + '/' + fT.slice(0, 4) : '';
+      ll.className = 'rn-item-badge rn-item-llegada' + (fT && fT < hoyIsoT ? ' rn-llegada-atrasada' : '');
+      ll.textContent = !fT ? 'Autorizada · sin fecha de llegada' : fT < hoyIsoT ? 'Debía llegar ' + fmtT + ' (atrasada)' : fT === hoyIsoT ? 'Llega hoy' : 'Llega ' + fmtT;
+      row.appendChild(ll);
     }
 
     var quitar = document.createElement('button');

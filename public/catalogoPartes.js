@@ -16,8 +16,8 @@
   'use strict';
 
   var CSS = [
-    '.cp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:3000;display:flex;align-items:stretch;justify-content:center;padding:12px;box-sizing:border-box;font-family:inherit;}',
-    '.cp-ventana{background:#fff;color:#222;border-radius:10px;width:100%;max-width:1200px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.35);}',
+    '.cp-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:3000;display:flex;align-items:stretch;justify-content:center;padding:0;box-sizing:border-box;font-family:inherit;}',
+    '.cp-ventana{background:#fff;color:#222;border-radius:0;width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;}',
     '.cp-cabeza{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid #e5e5e5;}',
     '.cp-titulo{flex:1;font-size:16px;font-weight:600;line-height:1.3;}',
     '.cp-equipo{display:block;font-size:12px;font-weight:400;color:#666;}',
@@ -46,6 +46,11 @@
     '.cp-ia-panel{display:none;margin:10px 14px 0;padding:10px 12px;border-radius:6px;background:#f7f3ff;border:1px solid #ddd0f7;font-size:13px;}',
     '.cp-ia-panel.cp-mostrar{display:block;}',
     '.cp-ia-resumen{margin-bottom:6px;color:#3d2a6b;}',
+    '.cp-ia-cabeza{display:flex;gap:10px;align-items:flex-start;}.cp-ia-cabeza .cp-ia-resumen{flex:1;min-width:0;}',
+    '.cp-ia-toggle{flex:none;border:1px solid #c9b8ef;background:#fff;color:#5b3fa6;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;}',
+    '#cp-ia-lista{max-height:30vh;overflow:auto;}',
+    '.cp-ia-panel.cp-plegado #cp-ia-lista,.cp-ia-panel.cp-plegado .cp-ia-nota-fila{display:none;}',
+    '.cp-ia-panel.cp-plegado .cp-ia-resumen{margin-bottom:0;}',
     '.cp-ia-nota-fila{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}',
     '.cp-ia-nota{flex:1;min-width:180px;padding:7px;border:1px solid #ccc;border-radius:6px;font-size:13px;}',
     '.cp-cuerpo{flex:1;display:grid;grid-template-columns:minmax(0,280px) minmax(0,1fr);min-height:0;}',
@@ -59,7 +64,9 @@
     '.cp-detalle{overflow:auto;padding:12px 14px;}',
     '.cp-detalle h4{margin:0 0 2px;font-size:15px;}',
     '.cp-sub{font-size:12px;color:#777;margin-bottom:8px;}',
-    '.cp-dibujo-wrap{overflow:auto;border:1px solid #eee;border-radius:6px;margin-bottom:10px;background:#fff;max-height:60vh;}',
+    '.cp-dibujo-wrap{overflow:auto;border:1px solid #eee;border-radius:6px;margin-bottom:10px;background:#fff;max-height:45vh;position:sticky;top:-12px;z-index:2;box-shadow:0 4px 8px -6px rgba(0,0,0,.25);}',
+    '.cp-dibujo{max-height:44vh;object-fit:contain;}.cp-dibujo.cp-zoom{max-height:none;}',
+    '.cp-detalle tr[data-pieza]{scroll-margin-top:calc(45vh + 30px);}',
     '.cp-dibujo{display:block;width:100%;max-width:760px;margin:0 auto;cursor:zoom-in;}',
     '.cp-dibujo.cp-zoom{width:200%;max-width:none;cursor:zoom-out;}',
     '.cp-tabla{width:100%;border-collapse:collapse;font-size:12.5px;}',
@@ -98,7 +105,7 @@
     '.cp-ventana .cp-tabla tbody td{color:#222;font-size:12.5px;padding:6px;}',
     '.cp-ventana input,.cp-ventana select{background:#fff;color:#222;font-family:inherit;}',
     '.cp-ventana input::placeholder{color:#888;}',
-    '@media (max-width:760px){.cp-overlay{padding:0;}.cp-ventana{border-radius:0;}.cp-cuerpo{grid-template-columns:1fr;grid-template-rows:auto 1fr;}',
+    '@media (max-width:760px){.cp-dibujo-wrap{max-height:30vh;}.cp-detalle tr[data-pieza]{scroll-margin-top:calc(30vh + 30px);}.cp-dibujo{max-height:29vh;}.cp-overlay{padding:0;}.cp-ventana{border-radius:0;}.cp-cuerpo{grid-template-columns:1fr;grid-template-rows:auto 1fr;}',
     '.cp-secciones{max-height:32vh;border-right:none;border-bottom:1px solid #eee;}.cp-tabla .cp-col-notas,.cp-tabla .cp-col-no,.cp-tabla .cp-col-sec,.cp-tabla .cp-col-cant{display:none;}.cp-sec-movil{display:block;}',
     '.cp-ventana .cp-tabla tbody td,.cp-ventana .cp-tabla thead th{padding:6px 4px;}.cp-detalle{padding:10px;}',
     '.cp-agregar{padding:5px 7px;}}',
@@ -210,7 +217,8 @@
       '</div>' +
       '<div class="cp-aviso" id="cp-aviso"></div>' +
       '<div class="cp-falla" id="cp-falla"><div class="cp-falla-texto" id="cp-falla-texto"></div><div class="cp-fotos" id="cp-fotos"></div></div>' +
-      '<div class="cp-ia-panel" id="cp-ia-panel"><div class="cp-ia-resumen" id="cp-ia-resumen"></div>' +
+      '<div class="cp-ia-panel" id="cp-ia-panel"><div class="cp-ia-cabeza"><div class="cp-ia-resumen" id="cp-ia-resumen"></div>' +
+      '<button type="button" class="cp-ia-toggle" id="cp-ia-toggle" style="display:none">▲ Ocultar sugerencias</button></div>' +
       '<div id="cp-ia-lista"></div>' +
       '<div class="cp-ia-nota-fila"><input type="text" class="cp-ia-nota" id="cp-ia-nota" placeholder="¿No es eso? Describe la falla con tus palabras y vuelve a proponer">' +
       '<button type="button" class="cp-btn cp-btn-ia" id="cp-ia-otra">Volver a proponer</button></div></div>' +
@@ -228,6 +236,7 @@
     });
     var btnIa = document.getElementById('cp-ia');
     if (btnIa) btnIa.addEventListener('click', function () { proponer_(''); });
+    document.getElementById('cp-ia-toggle').addEventListener('click', function () { plegarIa_(!/cp-plegado/.test(document.getElementById('cp-ia-panel').className)); });
     document.getElementById('cp-ia-otra').addEventListener('click', function () {
       proponer_(document.getElementById('cp-ia-nota').value.trim());
     });
@@ -390,7 +399,7 @@
     });
     cont.innerHTML = html;
     Array.prototype.forEach.call(cont.querySelectorAll('.cp-sec'), function (b) {
-      b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-sec')), null); });
+      b.addEventListener('click', function () { plegarIa_(true); irASeccion_(Number(b.getAttribute('data-sec')), null); });
     });
     Array.prototype.forEach.call(cont.querySelectorAll('[data-grupo]'), function (b) {
       b.addEventListener('click', function () { irAGrupo_(b.getAttribute('data-grupo')); });
@@ -422,7 +431,7 @@
     var det = document.getElementById('cp-detalle');
     if (piezaId) {
       var fila = det.querySelector('tr[data-pieza="' + piezaId + '"]');
-      if (fila && fila.scrollIntoView) fila.scrollIntoView({ block: 'center' });
+      if (fila && fila.scrollIntoView) fila.scrollIntoView({ block: document.getElementById('cp-dibujo') ? 'start' : 'center' });
     } else det.scrollTop = 0;
   }
 
@@ -612,6 +621,17 @@
     });
   }
 
+  // Las sugerencias de la IA se pueden ocultar para ver el dibujo completo
+  // (se ocultan solas al ir a la sección de una pieza sugerida).
+  function plegarIa_(plegar) {
+    var panel = document.getElementById('cp-ia-panel');
+    var btn = document.getElementById('cp-ia-toggle');
+    if (!panel || !/cp-mostrar/.test(panel.className)) return;
+    panel.className = 'cp-ia-panel cp-mostrar' + (plegar ? ' cp-plegado' : '');
+    var n = Object.keys((V && V.propuesta && V.propuesta.piezas) || {}).length;
+    if (btn) btn.textContent = plegar ? '▼ Ver sugerencias' + (n ? ' (' + n + ')' : '') : '▲ Ocultar sugerencias';
+  }
+
   function proponer_(nota) {
     if (!V || !V.manual || !V.opts.orden) return;
     var panel = document.getElementById('cp-ia-panel');
@@ -620,6 +640,7 @@
     var btns = [document.getElementById('cp-ia'), document.getElementById('cp-ia-otra')];
     btns.forEach(function (b) { if (b) b.disabled = true; });
     panel.className = 'cp-ia-panel cp-mostrar';
+    document.getElementById('cp-ia-toggle').style.display = 'none';
     resumen.textContent = 'La IA está revisando la falla y el catálogo... (tarda unos segundos)';
     lista.innerHTML = '';
     var esteV = V;
@@ -642,8 +663,10 @@
             b.addEventListener('click', function () { agregar_(Number(b.getAttribute('data-agregar')), b); });
           });
           Array.prototype.forEach.call(lista.querySelectorAll('[data-ir]'), function (b) {
-            b.addEventListener('click', function () { irASeccion_(Number(b.getAttribute('data-ir')), Number(b.getAttribute('data-ir-pieza'))); });
+            b.addEventListener('click', function () { plegarIa_(true); irASeccion_(Number(b.getAttribute('data-ir')), Number(b.getAttribute('data-ir-pieza'))); });
           });
+          document.getElementById('cp-ia-toggle').style.display = '';
+          plegarIa_(false);
         }
         if (V.propuesta.secciones.length) { V.seccionId = V.propuesta.secciones[0]; V.vista = 'seccion'; }
         pintarSecciones_();

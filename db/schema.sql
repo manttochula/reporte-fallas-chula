@@ -3990,3 +3990,14 @@ UPDATE tipos_unidad SET lleva_seguro = 1
    UPPER(nombre) REGEXP '(^|[^A-Z])(CAMIONETA|CAMI.N|TRACTOCAMI.N|AUTO|AUTOM.VIL|AUTOB.S|MOTO|MOTOCICLETA|MOTONETA|CUATRIMOTO|REMOLQUE|PICK ?UP|PIPA|TORTON|RAB.N|CHASIS|VEH.CULO|CAMA BAJA|PLATAFORMA|CAJA SECA|VAN|SED.N|SUV|CAMIONCITO)(S|ES)?([^A-Z]|$)'
  );
 INSERT IGNORE INTO configuracion (clave, valor) VALUES ('tipos_lleva_seguro_2026_11', 'hecho');
+
+-- Nov-2026 (Carlos): dar de baja un equipo (vendido, siniestro total, chatarra…).
+-- Deja de salir en Seguros y en las listas para elegir equipo; su historial
+-- se queda. Si tenía póliza, sale de la póliza a la fecha de baja y se guarda
+-- la devolución estimada de la prima no devengada (para pedirla por correo).
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'maquinaria' AND column_name = 'baja_fecha');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE maquinaria ADD COLUMN baja_fecha DATE DEFAULT NULL, ADD COLUMN baja_motivo VARCHAR(255) DEFAULT NULL, ADD COLUMN baja_por VARCHAR(255) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'seguros_poliza_unidades' AND column_name = 'baja_fecha');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE seguros_poliza_unidades ADD COLUMN baja_fecha DATE DEFAULT NULL, ADD COLUMN devolucion_estimada DECIMAL(14,2) DEFAULT NULL', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;

@@ -979,6 +979,10 @@
   .seg-acc{ display:flex; gap:6px; flex-wrap:wrap; }
   #seg-pol-overlay .maq-modal, #seg-sin-overlay .maq-modal{ max-width:900px; }
   #seg-imp-overlay .maq-modal{ max-width:min(96vw, 1250px); }
+  #baja-overlay .maq-modal{ max-width:720px; }
+  .baja-poliza{ border:1px solid #d9dee5; border-radius:8px; padding:10px 12px; margin:10px 0; font-size:13px; color:#222; }
+  .baja-poliza pre{ white-space:pre-wrap; background:#f5f7fa; border-radius:6px; padding:8px; font-family:inherit; font-size:12.5px; margin:8px 0; color:#222; }
+  .seg-badge.baja{ background:rgba(120,120,120,0.18); color:var(--text-dim); }
   .seg-imp-grupo{ border:1px solid #d9dee5; border-radius:8px; margin:10px 0; overflow:hidden; }
   .seg-imp-cab{ background:#f3f6f9; padding:8px 12px; display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; font-size:13px; color:#222; }
   .seg-imp-cab b{ font-size:14px; }
@@ -2969,6 +2973,7 @@
               <option value="">Todos los estatus</option>
               <option value="En trabajo">En trabajo</option>
               <option value="En mantenimiento">En mantenimiento</option>
+              <option value="baja">Dados de baja</option>
             </select>
             <select id="maq-tipo-filter"><option value="">Todos los tipos</option></select>
             <select id="maq-marca-filter"><option value="">Todas las marcas</option></select>
@@ -3083,6 +3088,8 @@
         <div class="maq-field"><label>Notas / observaciones</label><textarea id="maq-f-observaciones" placeholder="Se reemplaza automáticamente por la falla si el equipo está en mantenimiento"></textarea></div>
         <div class="maq-modal-actions">
           <button class="maq-delete-btn" id="maq-btn-delete" style="display:none;">Eliminar</button>
+          <button type="button" class="maq-delete-btn" id="maq-btn-baja" style="display:none;" title="Vendido, siniestro total, chatarra… Deja de salir en las listas y en Seguros; su historial se queda">Dar de baja</button>
+          <button type="button" class="seg-btn-claro" id="maq-btn-reactivar" style="display:none;">Reactivar</button>
           <button class="maq-save-btn" id="maq-btn-save">Guardar</button>
         </div>
         <div class="maq-modal-status" id="maq-modal-status"></div>
@@ -4544,6 +4551,25 @@
       <div class="table-wrap"><table id="seg-tabla"><thead id="seg-thead"></thead><tbody id="seg-tbody"></tbody></table></div>
     </div>
 
+    <div class="maq-modal-overlay" id="baja-overlay">
+      <div class="maq-modal">
+        <button class="maq-modal-close" id="baja-cerrar">&times;</button>
+        <h3 id="baja-titulo">Dar de baja</h3>
+        <div id="baja-form">
+          <div class="mnt-subtext" style="margin-bottom:8px;">El equipo deja de salir en las listas para elegir equipo (órdenes, combustible, movimientos…) y en Seguros. Su historial se queda y se puede reactivar. Si tiene una póliza vigente, sale de la póliza a esta fecha y se prepara el correo al agente para pedir la devolución de lo que no se usó.</div>
+          <div class="maq-row">
+            <div class="maq-field"><label>Fecha de baja *</label><input type="date" id="baja-fecha"></div>
+            <div class="maq-field"><label>Motivo *</label>
+              <select id="baja-motivo-sel"><option value="">Elige...</option><option>Vendido</option><option>Siniestro (pérdida total)</option><option>Robo</option><option>Chatarra / desecho</option><option>Devuelto (arrendado)</option><option value="otro">Otro…</option></select></div>
+          </div>
+          <div class="maq-field" id="baja-motivo-otro-wrap" style="display:none;"><label>¿Cuál?</label><input type="text" id="baja-motivo-otro"></div>
+          <div class="maq-modal-actions"><button type="button" class="maq-delete-btn" id="baja-guardar">Dar de baja</button></div>
+        </div>
+        <div class="maq-modal-status" id="baja-status"></div>
+        <div id="baja-polizas"></div>
+      </div>
+    </div>
+
     <div class="maq-modal-overlay" id="seg-imp-overlay">
       <div class="maq-modal">
         <button class="maq-modal-close" id="seg-imp-cerrar">&times;</button>
@@ -5038,7 +5064,7 @@ var PANEL_SOLO_EN_LINEA = {
   buscarChatsTelegram: true, guardarTelegramChat: true, probarAvisoTelegram: true, quitarTelegram: true,
   crearManualPartes: true, agregarArchivosManualPartes: true, traducirManualPartes: true, guardarSeriesManualPartes: true, guardarSeccionManualPartes: true, terminarManualPartes: true, proponerPiezasManual: true,
   agregarFotosOrden: true, exportarOCContpaqi: true, guardarCargaAutomatica: true, accionOcComercial: true, guardarFoliosOc: true,
-  guardarPolizaSeguro: true, prepararImportPolizas: true, importarPolizaSeguro: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
+  guardarPolizaSeguro: true, prepararImportPolizas: true, importarPolizaSeguro: true, darDeBajaUnidad: true, reactivarUnidad: true, confirmarOrdenTerminada: true, regresarOrdenTerminada: true, corregirTiemposOrden: true, guardarVerificacion: true, eliminarVerificacion: true, guardarPlacaVerificacion: true, marcarExentaVerificacion: true, permitirOcRepetida: true, registrarAvanceManual: true, eliminarAvanceManual: true, asignarTractorPlan: true, eliminarAsignacionPlan: true, guardarRendimientoTractor: true, guardarDiaExtraPlan: true, subirFacturaCombustible: true, eliminarFacturaCombustible: true, sellarFacturaCombustible: true,
   actualizarCodigoPiezaManual: true, crearSolicitudDiesel: true, firmarSolicitudDiesel: true, autorizarSolicitudDiesel: true, rechazarSolicitudDiesel: true, guardarFolioComercialCotizacion: true, cambiarRefaccionCotizacion: true, corregirRespuestaItem: true, cambiarFechaLlegadaRefaccion: true, prepararOcProveedor: true, generarOcProveedor: true, marcarOcEnviada: true, cancelarOcProveedor: true,
 };
 function panelEsConsulta_(fn){ return /^get[A-Z]/.test(fn); }
@@ -5575,7 +5601,7 @@ function ocultarControlesSoloLectura(){
     ocultar(['.mv-btn-editar', '.mv-btn-eliminar', '#mv-btn-save', '#mv-btn-nuevo']);
   }
   if(!puedeCapturarMaquinariaOCatalogo()){
-    ocultar(['#maq-modal-overlay .maq-save-btn', '#maq-modal-overlay .maq-delete-btn']);
+    ocultar(['#maq-modal-overlay .maq-save-btn', '#maq-modal-overlay .maq-delete-btn', '#maq-btn-reactivar']);
   }
   if(!puedeCapturarPestana('maquinaria')){
     ocultar(['#maq-btn-add']);
@@ -12065,6 +12091,7 @@ const dzImplementoCombo = crearComboBuscable('dz-f-implemento-texto', 'dz-f-impl
 function equiposDieselPermitidos(codigoUnidadExtra){
   return ALL_MAQUINARIA.filter(function(r){
     if((r.Unidad || r.CodigoUnidad || '').trim().toUpperCase().startsWith('IA')) return false;
+    if(r.BajaFecha) return codigoUnidadExtra && r.CodigoUnidad === codigoUnidadExtra;
     if(r.UsaDiesel) return true;
     return codigoUnidadExtra && r.CodigoUnidad === codigoUnidadExtra;
   }).slice().sort(function(a,b){ return (a.Unidad || '').localeCompare(b.Unidad || '', 'es'); });
@@ -12074,7 +12101,7 @@ function equiposDieselPermitidos(codigoUnidadExtra){
 // el modal manual de captura (dzImplementoCombo) y por la tabla de revisión
 // de "Capturar bitácora por foto" (ver renderBitFilas).
 function implementosDieselDisponibles_(){
-  return ALL_MAQUINARIA.filter(function(r){ return (r.Unidad || r.CodigoUnidad || '').trim().toUpperCase().startsWith('IA'); })
+  return ALL_MAQUINARIA.filter(function(r){ return !r.BajaFecha && (r.Unidad || r.CodigoUnidad || '').trim().toUpperCase().startsWith('IA'); })
     .slice().sort(function(a,b){ return (a.Unidad || '').localeCompare(b.Unidad || '', 'es'); });
 }
 
@@ -12795,6 +12822,7 @@ const CA_PROVEEDOR_DEFAULT = 'COMBUSTIBLES DE LA CUENCA DEL PAPALOAPAN';
 // por Carlos: no lo dejaba capturar para unos equipos "IA" de gasolina.
 function equiposGasolinaPermitidos(codigoUnidadExtra){
   return ALL_MAQUINARIA.filter(function(r){
+    if(r.BajaFecha) return codigoUnidadExtra && r.CodigoUnidad === codigoUnidadExtra;
     if(r.UsaGasolina) return true;
     return codigoUnidadExtra && r.CodigoUnidad === codigoUnidadExtra;
   }).slice().sort(function(a,b){ return (a.Unidad || '').localeCompare(b.Unidad || '', 'es'); });
@@ -13269,7 +13297,7 @@ function poblarSelectsMovimiento(codigoUnidadAConservar){
   // que usan diesel, a diferencia del combo de Diesel) — se incluye el de
   // un movimiento ya existente aunque ya no exista en el Catálogo, para no
   // perder de vista cuál era al editarlo.
-  const equipos = ALL_MAQUINARIA.slice().sort(function(a,b){ return (a.Unidad || '').localeCompare(b.Unidad || '', 'es'); });
+  const equipos = ALL_MAQUINARIA.filter(function(r){ return !r.BajaFecha || r.CodigoUnidad === codigoUnidadAConservar; }).sort(function(a,b){ return (a.Unidad || '').localeCompare(b.Unidad || '', 'es'); });
   mvUnidadCombo.setOpciones(equipos.map(function(r){ return { value: r.CodigoUnidad, label: r.Unidad || r.CodigoUnidad }; }));
 }
 
@@ -13750,7 +13778,7 @@ function poblarSelectHuertaOrdenNueva(){
 function renderOrnUnitOptions(filterText){
   const dropdown = document.getElementById('orn-unit-dropdown');
   const q = (filterText || '').trim().toUpperCase();
-  const opciones = ALL_MAQUINARIA.map(function(r){
+  const opciones = ALL_MAQUINARIA.filter(function(r){ return !r.BajaFecha; }).map(function(r){
     return { v: r.CodigoUnidad, l: (r.Unidad || r.CodigoUnidad || '').toString() };
   }).filter(function(u){ return u.v && u.l; });
   const matches = (q === '' ? opciones.slice(0, 40) : opciones.filter(function(u){ return u.l.toUpperCase().includes(q); }).slice(0, 40));
@@ -17516,6 +17544,7 @@ function renderResumenHuertas(){
   if(tieneCatalogo){
     const conteoPorHuerta = {};
     ALL_MAQUINARIA.forEach(function(eq){
+      if(eq.BajaFecha) return;
       const huerta = (eq.Huerta || '').trim();
       if(!huerta) return;
       if(maqDeptActivo && (eq.Departamento || '').toUpperCase() !== maqDeptActivo) return;
@@ -17753,9 +17782,12 @@ function getMaquinariaFiltrada(){
   const tipo = document.getElementById('maq-tipo-filter').value;
   const marca = document.getElementById('maq-marca-filter').value;
   return ALL_MAQUINARIA.filter(function(r){
+    // Nov-2026: los dados de baja solo salen con el filtro "Dados de baja"
+    if(estatus === 'baja') { if(!r.BajaFecha) return false; }
+    else if(r.BajaFecha) return false;
     if(maqDeptActivo && (r.Departamento || '').toUpperCase() !== maqDeptActivo) return false;
     if(huerta && (r.Huerta || '').toUpperCase() !== huerta.toUpperCase()) return false;
-    if(estatus && r.Estatus !== estatus) return false;
+    if(estatus && estatus !== 'baja' && r.Estatus !== estatus) return false;
     if(tipo && (r.TipoUnidad || '').toUpperCase() !== tipo.toUpperCase()) return false;
     if(marca && (r.Marca || '').toUpperCase() !== marca.toUpperCase()) return false;
     if(q){
@@ -17794,7 +17826,7 @@ function renderMaquinaria(){
       <td>${escapeHtml(r.Huerta || '—')}</td>
       <td>${escapeHtml(r.Unidad || r.CodigoUnidad)}${r.TipoUnidad ? ' <span class="maq-obs">(' + escapeHtml(r.TipoUnidad) + ')</span>' : ''}</td>
       <td>${escapeHtml(modeloSerie)}</td>
-      <td><span class="maq-status"><span class="maq-dot ${enMantenimiento ? 'warn' : 'ok'}"></span>${escapeHtml(r.Estatus || '')}</span></td>
+      <td>${r.BajaFecha ? '<span class="maq-status" style="color:var(--text-dim);">Dado de baja ' + escapeHtml(fechaOcCorta_(r.BajaFecha)) + (r.BajaMotivo ? '<br><span class="maq-obs">' + escapeHtml(r.BajaMotivo) + '</span>' : '') + '</span>' : `<span class="maq-status"><span class="maq-dot ${enMantenimiento ? 'warn' : 'ok'}"></span>${escapeHtml(r.Estatus || '')}</span>`}</td>
       <td class="maq-obs">${escapeHtml(r.ObservacionMostrada || '—')}</td>
     </tr>
     `;
@@ -18032,9 +18064,14 @@ function abrirModalMaquinaria(registro){
     document.getElementById('maq-f-combustible-tipo').value = registro.CombustibleAutomotrizTipo === 'diesel' ? 'diesel' : 'gasolina';
     document.getElementById('maq-f-observaciones').value = (registro.Estatus === 'En mantenimiento') ? '' : (registro.Observaciones || '');
     document.getElementById('maq-btn-delete').style.display = '';
+    document.getElementById('maq-btn-baja').style.display = registro.BajaFecha ? 'none' : '';
+    document.getElementById('maq-btn-reactivar').style.display = registro.BajaFecha ? '' : 'none';
+    if(registro.BajaFecha) document.getElementById('maq-modal-title').textContent = 'Editar equipo (dado de baja el ' + fechaOcCorta_(registro.BajaFecha) + (registro.BajaMotivo ? ': ' + registro.BajaMotivo : '') + ')';
   } else {
     document.getElementById('maq-modal-title').textContent = 'Agregar equipo';
     document.getElementById('maq-btn-delete').style.display = 'none';
+    document.getElementById('maq-btn-baja').style.display = 'none';
+    document.getElementById('maq-btn-reactivar').style.display = 'none';
   }
   maqModalOverlay.classList.add('open');
 }
@@ -20784,7 +20821,7 @@ let SEG_CARGADO = false;
 let SEG_VISTA = 'polizas';
 let SEG_POL_UNIDADES = [];   // filas del modal de póliza
 let SEG_POL_PAGOS = [];
-const SEG_ESTADO_TXT = { vigente: 'Vigente', por_vencer: 'Por vencer', vencida: 'Vencida', cancelada: 'Cancelada', futura: 'Aún no inicia', sin_seguro: 'Sin seguro' };
+const SEG_ESTADO_TXT = { vigente: 'Vigente', por_vencer: 'Por vencer', vencida: 'Vencida', cancelada: 'Cancelada', futura: 'Aún no inicia', sin_seguro: 'Sin seguro', baja: 'Dado de baja' };
 const SEG_SIN_TXT = { abierto: 'Abierto', en_proceso: 'En proceso', cerrado: 'Cerrado' };
 const SEG_FORMAS_N = { contado: 1, semestral: 2, trimestral: 4, mensual: 12 };
 
@@ -21059,7 +21096,7 @@ function renderSeguros(){
       if(est === 'sin_seguro') return false;
       return coincide([p.aseguradora, p.numeroPoliza, p.cobertura, p.empresa].concat(p.unidades.map(function(u){ return nomUni(u.codigoUnidad); })).join(' '));
     }).map(function(p){
-      const unis = p.unidades.map(function(u){ const x = segUnidad_(u.codigoUnidad); return '<div>' + escapeHtml(u.codigoUnidad) + (u.inciso ? ' <span class="seg-sub">inc. ' + escapeHtml(u.inciso) + '</span>' : '') + (x ? ' <span class="seg-sub">' + escapeHtml(x.unidad + (x.placa ? ' · ' + x.placa : '')) + '</span>' : '') + (u.pdfUrl ? ' <a class="seg-sub" href="' + escapeHtml(u.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '') + '</div>'; }).join('');
+      const unis = p.unidades.map(function(u){ const x = segUnidad_(u.codigoUnidad); return '<div>' + escapeHtml(u.codigoUnidad) + (u.inciso ? ' <span class="seg-sub">inc. ' + escapeHtml(u.inciso) + '</span>' : '') + (x ? ' <span class="seg-sub">' + escapeHtml(x.unidad + (x.placa ? ' · ' + x.placa : '')) + '</span>' : '') + (u.pdfUrl ? ' <a class="seg-sub" href="' + escapeHtml(u.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '') + (u.bajaFecha ? ' <span class="seg-badge baja">Baja ' + escapeHtml(segFechaTxt_(u.bajaFecha)) + '</span>' + (u.devolucionEstimada !== null ? ' <span class="seg-sub">dev. ' + segMoney_(u.devolucionEstimada) + '</span>' : '') + ' <button type="button" class="row-view seg-btn-correo-baja" data-poliza="' + p.id + '" data-codigo="' + escapeHtml(u.codigoUnidad) + '" title="Correo al agente para pedir la devolución">✉ Devolución</button>' : '') + '</div>'; }).join('');
       const prox = p.proximoPago ? segMoney_(p.proximoPago.monto) + '<div class="seg-sub">' + segFechaTxt_(p.proximoPago.fechaVencimiento) + '</div>' : (p.pagos.length ? '<span class="seg-badge pagado">Pagada</span>' : '—');
       let acc = p.pdfUrl ? '<a class="row-view" href="' + escapeHtml(p.pdfUrl) + '" target="_blank" rel="noopener">PDF</a>' : '';
       if(puede) acc += '<button type="button" class="row-view seg-btn-editar" data-id="' + p.id + '">Editar</button><button type="button" class="row-view seg-btn-renovar" data-id="' + p.id + '" title="Nueva póliza con las mismas unidades y la vigencia siguiente">Renovar</button><button type="button" class="row-view seg-btn-eliminar" data-id="' + p.id + '">Eliminar</button>';
@@ -21076,13 +21113,15 @@ function renderSeguros(){
     th.innerHTML = '<tr><th>Unidad</th><th>Tipo</th><th>Placa / serie</th><th>Marca / modelo</th><th>Empresa</th><th>Póliza</th><th>Vence</th><th>Estado</th><th>Siniestros</th><th></th></tr>';
     filas = SEG_DATOS.unidades.filter(function(u){
       if(soloAuto && !u.asegurable) return false;
+      if(u.estado === 'baja' && soloAuto) return false;
       if(est === 'sin_seguro' ? (u.estado !== 'sin_seguro' && u.estado !== 'vencida') : (est && u.estado !== est)) return false;
       const p = u.polizaId ? segPoliza_(u.polizaId) : null;
       return coincide([u.codigoUnidad, u.unidad, u.placa, u.serie, u.marca, u.modelo, p ? p.aseguradora + ' ' + p.numeroPoliza : ''].join(' '));
     }).map(function(u){
       const p = u.polizaId ? segPoliza_(u.polizaId) : null;
       let acc = '';
-      if(puede && (!p || u.estado === 'vencida' || u.estado === 'por_vencer')) acc = '<button type="button" class="row-view seg-btn-asegurar" data-codigo="' + escapeHtml(u.codigoUnidad) + '">Asegurar</button>';
+      if(puede && u.estado !== 'baja' && (!p || u.estado === 'vencida' || u.estado === 'por_vencer')) acc = '<button type="button" class="row-view seg-btn-asegurar" data-codigo="' + escapeHtml(u.codigoUnidad) + '">Asegurar</button>';
+      if(puede && u.estado !== 'baja') acc += '<button type="button" class="row-view seg-btn-baja" data-codigo="' + escapeHtml(u.codigoUnidad) + '" title="Vendido, siniestro total, chatarra…">Dar de baja</button>';
       return '<tr><td><b>' + escapeHtml(u.codigoUnidad) + '</b><div class="seg-sub">' + escapeHtml(u.unidad) + '</div></td><td>' + escapeHtml(u.tipoUnidad || '—') + '</td>'
         + '<td>' + escapeHtml(u.placa || '—') + (u.serie ? '<div class="seg-sub">' + escapeHtml(u.serie) + '</div>' : '') + '</td><td>' + escapeHtml([u.marca, u.modelo, u.anio].filter(Boolean).join(' ') || '—') + '</td>'
         + '<td>' + escapeHtml((u.empresa || '—').split(',')[0]) + '</td><td>' + (p ? escapeHtml(p.aseguradora) + '<div class="seg-sub">' + escapeHtml(p.numeroPoliza) + (function(){ const pu = p.unidades.find(function(x){ return x.codigoUnidad === u.codigoUnidad; }) || {}; const url = pu.pdfUrl || p.pdfUrl; return (pu.inciso ? ' · inciso ' + escapeHtml(pu.inciso) : '') + (url ? ' · <a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">PDF</a>' : ''); })() + '</div>' : '—') + '</td>'
@@ -21486,12 +21525,134 @@ document.getElementById('seg-imp-guardar').addEventListener('click', async funct
   } finally { btn.disabled = false; }
 });
 document.getElementById('seg-add-siniestro').addEventListener('click', function(){ segAbrirSiniestro_(null); });
+
+// ---------- Dar de baja un equipo (nov-2026) ----------
+// Desde Maquinaria (Editar equipo) o desde Seguros → Unidades. Si estaba en
+// una póliza vigente, el servidor lo saca a la fecha de baja y calcula la
+// devolución estimada; aquí se arma el correo al agente para pedirla.
+let BAJA_CODIGO = null, BAJA_LISTO = null, BAJA_DATOS = null;
+function bajaStatus_(t, tipo){ const el = document.getElementById('baja-status'); el.textContent = t || ''; el.className = 'maq-modal-status' + (t ? ' show' : '') + (tipo ? ' ' + tipo : ''); }
+function abrirBajaUnidad_(codigo, nombre, alTerminar){
+  BAJA_CODIGO = codigo; BAJA_LISTO = alTerminar || null; BAJA_DATOS = null;
+  document.getElementById('baja-titulo').textContent = 'Dar de baja ' + (nombre || codigo);
+  document.getElementById('baja-form').style.display = '';
+  const hoy = new Date();
+  document.getElementById('baja-fecha').value = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+  document.getElementById('baja-motivo-sel').value = '';
+  document.getElementById('baja-motivo-otro').value = '';
+  document.getElementById('baja-motivo-otro-wrap').style.display = 'none';
+  document.getElementById('baja-polizas').innerHTML = '';
+  bajaStatus_('');
+  const ov = document.getElementById('baja-overlay');
+  if(ov.parentNode !== document.body) document.body.appendChild(ov);
+  ov.classList.add('open');
+}
+document.getElementById('baja-motivo-sel').addEventListener('change', function(){ document.getElementById('baja-motivo-otro-wrap').style.display = this.value === 'otro' ? '' : 'none'; });
+document.getElementById('baja-cerrar').addEventListener('click', function(){ document.getElementById('baja-overlay').classList.remove('open'); });
+document.getElementById('baja-guardar').addEventListener('click', function(){
+  const sel = document.getElementById('baja-motivo-sel').value;
+  const motivo = sel === 'otro' ? document.getElementById('baja-motivo-otro').value.trim() : sel;
+  const fecha = document.getElementById('baja-fecha').value;
+  if(!fecha){ bajaStatus_('Captura la fecha de baja.', 'err'); return; }
+  if(!motivo){ bajaStatus_('Elige el motivo de la baja.', 'err'); return; }
+  const btn = this; btn.disabled = true;
+  bajaStatus_('Guardando...');
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.disabled = false;
+      if(!r || !r.success){ bajaStatus_((r && r.error) || 'No se pudo dar de baja.', 'err'); return; }
+      document.getElementById('baja-form').style.display = 'none';
+      if(r.polizas && r.polizas.length){
+        mostrarCorreosBaja_(r, true);
+      } else {
+        bajaStatus_('Listo: ' + (r.unidad.unidad || r.unidad.codigo) + ' quedó dado de baja el ' + fechaOcCorta_(r.fecha) + '. No estaba en ninguna póliza vigente.', 'ok');
+      }
+      if(BAJA_LISTO) BAJA_LISTO(r);
+    })
+    .withFailureHandler(function(e){ btn.disabled = false; bajaStatus_((e && e.message) || 'No se pudo dar de baja.', 'err'); })
+    .darDeBajaUnidad(ACCESS_CODE, PANEL_USUARIO, BAJA_CODIGO, { fecha: fecha, motivo: motivo });
+});
+
+function correoBaja_(r, x){
+  const veh = (r.unidad.unidad || r.unidad.codigo) + (x.descripcion ? ' (' + x.descripcion + ')' : '');
+  const asunto = 'Baja de vehículo y devolución de prima – póliza ' + x.numeroPoliza + (x.inciso ? ' inciso ' + x.inciso : '');
+  const cuerpo = 'Buen día' + (x.agenteNombre ? ' ' + x.agenteNombre : '') + ',\n\n' +
+    'Por medio del presente le solicitamos dar de baja de la póliza ' + x.numeroPoliza + ' (' + x.aseguradora + ')' + (x.empresa ? ' a nombre de ' + x.empresa.split(',')[0] : '') + ' el siguiente vehículo:\n\n' +
+    '  • ' + veh + '\n' + (x.inciso ? '  • Inciso: ' + x.inciso + '\n' : '') + ((x.serie || r.unidad.serie) ? '  • Serie: ' + (x.serie || r.unidad.serie) + '\n' : '') + (r.unidad.placa ? '  • Placas: ' + r.unidad.placa + '\n' : '') +
+    '  • Fecha de baja: ' + fechaOcCorta_(r.fecha) + (r.motivo ? ' (' + r.motivo.toLowerCase() + ')' : '') + '\n\n' +
+    'Asimismo, le solicitamos la devolución de la prima no devengada del ' + fechaOcCorta_(r.fecha) + ' al ' + fechaOcCorta_(x.vigenciaFin) + ' (fin de vigencia)' +
+    (x.devolucion !== null && x.devolucion !== undefined ? ', que de acuerdo con nuestro cálculo es de aproximadamente ' + dineroOc_(x.devolucion) + (x.prima ? ' de una prima de ' + dineroOc_(x.prima) : '') : '') + '.\n\n' +
+    'Quedamos atentos al endoso de baja y a la nota de crédito o devolución correspondiente.\n\nSaludos,\n' + (PANEL_USUARIO || 'Chula Brand');
+  return { para: (x.agenteCorreo || '').split(/[,;\s]+/).filter(Boolean), asunto: asunto, cuerpo: cuerpo };
+}
+function mostrarCorreosBaja_(r, recienDada){
+  BAJA_DATOS = r;
+  const ov = document.getElementById('baja-overlay');
+  if(!ov.classList.contains('open')){
+    document.getElementById('baja-titulo').textContent = 'Devolución de prima — ' + (r.unidad.unidad || r.unidad.codigo);
+    document.getElementById('baja-form').style.display = 'none';
+    bajaStatus_('');
+    if(ov.parentNode !== document.body) document.body.appendChild(ov);
+    ov.classList.add('open');
+  }
+  if(recienDada) bajaStatus_('Listo: ' + (r.unidad.unidad || r.unidad.codigo) + ' quedó dado de baja el ' + fechaOcCorta_(r.fecha) + ' y salió de ' + r.polizas.length + ' póliza(s). Manda el correo al agente para pedir la devolución:', 'ok');
+  document.getElementById('baja-polizas').innerHTML = r.polizas.map(function(x, i){
+    const c = correoBaja_(r, x);
+    return '<div class="baja-poliza"><b>' + escapeHtml(x.aseguradora + ' · póliza ' + x.numeroPoliza) + '</b>' + (x.inciso ? ' · inciso ' + escapeHtml(x.inciso) : '') +
+      '<div class="seg-sub">Vigencia hasta ' + escapeHtml(fechaOcCorta_(x.vigenciaFin)) + (x.devolucion !== null && x.devolucion !== undefined ? ' · devolución estimada <b>' + dineroOc_(x.devolucion) + '</b>' + (x.prima ? ' de ' + dineroOc_(x.prima) : '') + (x.diasRestantes ? ' (' + x.diasRestantes + ' de ' + x.diasTotales + ' días)' : '') : ' · sin prima registrada para calcular la devolución') + '</div>' +
+      (c.para.length ? '<div class="seg-sub">Para: ' + escapeHtml(c.para.join(', ')) + '</div>' : '<div class="seg-sub" style="color:#9a6700;">La póliza no tiene el correo del agente: escríbelo en el correo (o captúralo en Editar póliza).</div>') +
+      '<pre>' + escapeHtml('Asunto: ' + c.asunto + '\n\n' + c.cuerpo) + '</pre>' + botonesCorreoHtml_('seg-btn-claro baja-correo', 'data-i="' + i + '"') + '<div class="seg-sub baja-correo-res" data-i="' + i + '"></div></div>';
+  }).join('');
+  document.querySelectorAll('#baja-polizas .baja-correo').forEach(function(b){
+    b.addEventListener('click', function(){
+      const i = Number(b.getAttribute('data-i'));
+      const c = correoBaja_(BAJA_DATOS, BAJA_DATOS.polizas[i]);
+      const msg = enviarCorreoVia_(b.getAttribute('data-via'), c.para, c.asunto, c.cuerpo);
+      const res = document.querySelector('#baja-polizas .baja-correo-res[data-i="' + i + '"]');
+      if(res) res.textContent = msg;
+    });
+  });
+}
+
+document.getElementById('maq-btn-baja').addEventListener('click', function(){
+  const codigo = document.getElementById('maq-f-codigo').value;
+  const reg = ALL_MAQUINARIA.find(function(r){ return r.CodigoUnidad === codigo; });
+  cerrarModalMaquinaria();
+  abrirBajaUnidad_(codigo, reg ? reg.Unidad : codigo, function(){ cargarMaquinaria(); if(SEG_CARGADO) cargarSeguros(); });
+});
+document.getElementById('maq-btn-reactivar').addEventListener('click', function(){
+  const codigo = document.getElementById('maq-f-codigo').value;
+  if(!confirm('¿Reactivar este equipo? Vuelve a salir en las listas. (Si estaba en una póliza, no se vuelve a agregar: hazlo en Seguros si aplica.)')) return;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ alert((r && r.error) || 'No se pudo reactivar.'); return; }
+      cerrarModalMaquinaria();
+      cargarMaquinaria();
+      if(SEG_CARGADO) cargarSeguros();
+    })
+    .withFailureHandler(function(){ alert('No se pudo reactivar. Intenta de nuevo.'); })
+    .reactivarUnidad(ACCESS_CODE, PANEL_USUARIO, codigo);
+});
 document.getElementById('seg-tbody').addEventListener('click', function(e){
   const b = e.target.closest('button'); if(!b) return;
   const id = Number(b.getAttribute('data-id'));
   if(b.classList.contains('seg-btn-editar') || b.classList.contains('seg-btn-ver')) segAbrirPoliza_(segPoliza_(id));
   else if(b.classList.contains('seg-btn-renovar')) segAbrirPoliza_(segPoliza_(id), { renovar: true });
   else if(b.classList.contains('seg-btn-eliminar')){ const p = segPoliza_(id); segAccionSimple_('eliminarPolizaSeguro', [id], '¿Eliminar la póliza ' + (p ? p.aseguradora + ' ' + p.numeroPoliza : '') + '? (Si solo ya no cubre, mejor edítala y márcala como cancelada.)'); }
+  else if(b.classList.contains('seg-btn-baja')){
+    const u = segUnidad_(b.getAttribute('data-codigo'));
+    abrirBajaUnidad_(b.getAttribute('data-codigo'), u ? u.unidad : '', function(){ cargarSeguros(); if(typeof cargarMaquinaria === 'function' && MAQUINARIA_CARGADA) cargarMaquinaria(); });
+  }
+  else if(b.classList.contains('seg-btn-correo-baja')){
+    const p = segPoliza_(Number(b.getAttribute('data-poliza')));
+    const c = b.getAttribute('data-codigo');
+    const pu = p && p.unidades.find(function(x){ return x.codigoUnidad === c; });
+    const u = segUnidad_(c) || {};
+    if(!p || !pu) return;
+    mostrarCorreosBaja_({ unidad: { codigo: c, unidad: u.unidad || c, serie: u.serie || pu.seriePoliza || '', placa: u.placa || '' }, fecha: pu.bajaFecha, motivo: u.bajaMotivo || '',
+      polizas: [{ polizaId: p.id, aseguradora: p.aseguradora, numeroPoliza: p.numeroPoliza, inciso: pu.inciso, vigenciaFin: p.vigenciaFin, prima: pu.prima, devolucion: pu.devolucionEstimada,
+        agenteNombre: p.agenteNombre, agenteCorreo: p.agenteCorreo, empresa: p.empresa, descripcion: pu.descripcionPoliza, serie: pu.seriePoliza || u.serie || '' }] });
+  }
   else if(b.classList.contains('seg-btn-asegurar')){
     const c = b.getAttribute('data-codigo');
     const vieja = SEG_DATOS.polizas.find(function(p){ return !p.cancelada && p.unidades.some(function(u){ return u.codigoUnidad === c; }); });

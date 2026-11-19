@@ -2335,7 +2335,7 @@ async function leerBitacoraDiesel(code, nombreUsuario, fotosDataUrl) {
   }
 
   const [maqRows] = await pool.query(
-    `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria WHERE usa_diesel = 1 ORDER BY unidad`
+    `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria WHERE usa_diesel = 1 AND baja_fecha IS NULL ORDER BY unidad`
   );
   if (maqRows.length === 0) {
     throw new Error(
@@ -2350,7 +2350,7 @@ async function leerBitacoraDiesel(code, nombreUsuario, fotosDataUrl) {
   // con diesel" (el implemento en sí no carga diesel, el tractor sí).
   const [implRows] = await pool.query(
     `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria
-     WHERE UPPER(TRIM(COALESCE(unidad, codigo_unidad))) LIKE 'IA%' ORDER BY unidad`
+     WHERE UPPER(TRIM(COALESCE(unidad, codigo_unidad))) LIKE 'IA%' AND baja_fecha IS NULL ORDER BY unidad`
   );
   const listaEquipos = maqRows.map((m) => '- ' + m.CodigoUnidad + ' (' + m.Unidad + ')').join('\n');
   const listaImplementos = implRows.map((m) => '- ' + m.CodigoUnidad + ' (' + m.Unidad + ')').join('\n');
@@ -2730,7 +2730,7 @@ async function leerTicketsGasolina(code, nombreUsuario, fotosDataUrl) {
   }
 
   const [maqRows] = await pool.query(
-    `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria WHERE usa_gasolina = 1 ORDER BY unidad`
+    `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad FROM maquinaria WHERE usa_gasolina = 1 AND baja_fecha IS NULL ORDER BY unidad`
   );
   if (maqRows.length === 0) {
     throw new Error(
@@ -3543,7 +3543,8 @@ const MAQUINARIA_SELECT = `
     m.admite_terceros AS AdmiteTerceros,
     m.empresa_id      AS EmpresaId,
     m.referencia_comercial AS ReferenciaComercial, m.huerta_contable AS HuertaContable, m.segmento AS SegmentoContable,
-    emp.nombre        AS Empresa
+    emp.nombre        AS Empresa,
+    DATE_FORMAT(m.baja_fecha, '%Y-%m-%d') AS BajaFecha, m.baja_motivo AS BajaMotivo, m.baja_por AS BajaPor
   FROM maquinaria m
   LEFT JOIN empresas emp ON emp.id = m.empresa_id
   LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
@@ -3748,6 +3749,63 @@ async function guardarMaquinaria(code, nombreUsuario, codigoUnidad, data) {
 async function eliminarMaquinaria(code, nombreUsuario, codigoUnidad) {
   await requierePermisoPanel_(code, nombreUsuario, ['maquinaria', 'catalogo'], 'capturar');
   await pool.query('DELETE FROM maquinaria WHERE codigo_unidad = ?', [codigoUnidad]);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------
+// Nov-2026 (Carlos): dar de baja / reactivar un equipo. Con baja ya no sale
+// en las listas para elegir equipo ni en Seguros; su historial se queda.
+// Si estaba en una póliza vigente, sale de ella a la fecha de baja y se
+// calcula la devolución estimada de la prima no devengada (proporcional a
+// los días que faltaban); el Panel arma el correo al agente para pedirla.
+// ---------------------------------------------------------------
+async function darDeBajaUnidad(code, nombreUsuario, codigoUnidad, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, ['maquinaria', 'catalogo', 'seguros'], 'capturar');
+  datos = datos || {};
+  const codigo = (codigoUnidad || '').toString().trim();
+  const fecha = (datos.fecha || '').toString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return { success: false, error: 'Captura la fecha de baja.' };
+  const motivo = (datos.motivo || '').toString().trim().slice(0, 255);
+  if (!motivo) return { success: false, error: 'Escribe el motivo de la baja.' };
+  const [[m]] = await pool.query('SELECT codigo_unidad, unidad, serie, placa, baja_fecha FROM maquinaria WHERE codigo_unidad = ?', [codigo]);
+  if (!m) return { success: false, error: 'No se encontró el equipo.' };
+  if (m.baja_fecha) return { success: false, error: 'Ese equipo ya está dado de baja.' };
+  const usuario = (nombreUsuario || '').toString().trim().slice(0, 255);
+  await pool.query('UPDATE maquinaria SET baja_fecha = ?, baja_motivo = ?, baja_por = ? WHERE codigo_unidad = ?', [fecha, motivo, usuario || null, codigo]);
+  // Pólizas que lo cubrían después de esa fecha
+  const [pu] = await pool.query(
+    `SELECT u.poliza_id, u.inciso, u.prima, DATE_FORMAT(u.alta, '%Y-%m-%d') AS alta, u.descripcion_poliza, u.serie_poliza,
+            p.aseguradora, p.numero_poliza, DATE_FORMAT(p.vigencia_inicio, '%Y-%m-%d') AS inicio, DATE_FORMAT(p.vigencia_fin, '%Y-%m-%d') AS fin,
+            p.prima_total, p.agente_nombre, p.agente_correo, e.nombre AS empresa,
+            (SELECT COUNT(*) FROM seguros_poliza_unidades x WHERE x.poliza_id = p.id) AS unidades
+     FROM seguros_poliza_unidades u JOIN seguros_polizas p ON p.id = u.poliza_id LEFT JOIN empresas e ON e.id = p.empresa_id
+     WHERE u.codigo_unidad = ? AND u.baja_fecha IS NULL AND p.eliminado = 0 AND p.cancelada = 0 AND p.vigencia_fin > ?`,
+    [codigo, fecha]);
+  const dias = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+  const polizas = [];
+  for (const x of pu) {
+    const desde = x.alta && x.alta > x.inicio ? x.alta : x.inicio;
+    const total = Math.max(1, dias(desde, x.fin));
+    const restantes = Math.max(0, Math.min(total, dias(fecha < desde ? desde : fecha, x.fin)));
+    // Prima del vehículo; si no se tiene, la de la póliza entre sus unidades
+    const prima = x.prima !== null ? Number(x.prima) : (x.prima_total !== null && Number(x.unidades) ? Number(x.prima_total) / Number(x.unidades) : null);
+    const devolucion = prima === null ? null : Math.round(prima * restantes / total * 100) / 100;
+    await pool.query('UPDATE seguros_poliza_unidades SET baja_fecha = ?, devolucion_estimada = ? WHERE poliza_id = ? AND codigo_unidad = ?', [fecha, devolucion, x.poliza_id, codigo]);
+    await registrarAuditoria_('seguros_polizas', x.poliza_id, 'editar', nombreUsuario, 'Baja de ' + codigo + ' el ' + fecha + ' (' + motivo + ')' + (devolucion !== null ? '; devolución estimada $' + devolucion.toFixed(2) : ''));
+    polizas.push({ polizaId: x.poliza_id, aseguradora: x.aseguradora, numeroPoliza: x.numero_poliza, inciso: x.inciso || '', vigenciaFin: x.fin, desde,
+      prima, diasRestantes: restantes, diasTotales: total, devolucion, agenteNombre: x.agente_nombre || '', agenteCorreo: x.agente_correo || '', empresa: x.empresa || '',
+      descripcion: x.descripcion_poliza || '', serie: x.serie_poliza || m.serie || '' });
+  }
+  await registrarAuditoria_('maquinaria', codigo, 'editar', nombreUsuario, 'Baja del equipo el ' + fecha + ': ' + motivo);
+  return { success: true, unidad: { codigo, unidad: m.unidad, serie: m.serie || '', placa: m.placa || '' }, fecha, motivo, polizas };
+}
+
+async function reactivarUnidad(code, nombreUsuario, codigoUnidad) {
+  await requierePermisoPanel_(code, nombreUsuario, ['maquinaria', 'catalogo', 'seguros'], 'capturar');
+  const codigo = (codigoUnidad || '').toString().trim();
+  const [r] = await pool.query('UPDATE maquinaria SET baja_fecha = NULL, baja_motivo = NULL, baja_por = NULL WHERE codigo_unidad = ? AND baja_fecha IS NOT NULL', [codigo]);
+  if (!r.affectedRows) return { success: false, error: 'Ese equipo no está dado de baja.' };
+  await registrarAuditoria_('maquinaria', codigo, 'editar', nombreUsuario, 'Equipo reactivado (se quitó la baja)');
   return { success: true };
 }
 
@@ -4811,7 +4869,7 @@ async function getRendimientoMaquinaria(code, nombreUsuario) {
     `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, rendimiento_max AS RendimientoMax,
             horas_max AS HorasMax, actualizado_en AS ActualizadoEn
      FROM maquinaria
-     WHERE usa_diesel = 1
+     WHERE usa_diesel = 1 AND baja_fecha IS NULL
      ORDER BY unidad`
   );
   return normalizaFilas(rows);
@@ -4825,7 +4883,7 @@ async function getUnidadesDieselPermitidas() {
   const [rows] = await pool.query(
     `SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad
      FROM maquinaria
-     WHERE usa_diesel = 1`
+     WHERE usa_diesel = 1 AND baja_fecha IS NULL`
   );
   return normalizaFilas(rows);
 }
@@ -5660,7 +5718,7 @@ async function guardarServicioMantenimiento_(nombreUsuario, reglaId, codigoUnida
 async function getEquiposAutomotrices(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'servicios_automotrices', 'visualizar');
   const [rows] = await pool.query(
-    'SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, modelo_id AS ModeloId FROM maquinaria WHERE usa_gasolina = 1 ORDER BY unidad'
+    'SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, modelo_id AS ModeloId FROM maquinaria WHERE usa_gasolina = 1 AND baja_fecha IS NULL ORDER BY unidad'
   );
   return rows.map((r) => ({ CodigoUnidad: r.CodigoUnidad, Unidad: r.Unidad, ModeloId: r.ModeloId }));
 }
@@ -8735,7 +8793,7 @@ function esEquipoAvanceHuerta_(tipoUnidad) {
 
 async function equiposAvanceHuerta_() {
   const [rows] = await pool.query(
-    'SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, tipo_unidad AS TipoUnidad, color_mapa AS ColorMapa FROM maquinaria ORDER BY unidad'
+    'SELECT codigo_unidad AS CodigoUnidad, unidad AS Unidad, tipo_unidad AS TipoUnidad, color_mapa AS ColorMapa FROM maquinaria WHERE baja_fecha IS NULL ORDER BY unidad'
   );
   const porTipo = rows.filter((r) => esEquipoAvanceHuerta_(r.TipoUnidad));
   const filtradoPorTipo = porTipo.length > 0;
@@ -12883,7 +12941,7 @@ async function getSeguros(code, nombreUsuario) {
   const [tiposSeg] = await pool.query('SELECT nombre FROM tipos_unidad WHERE lleva_seguro = 1');
   const tiposConSeguro = new Set(tiposSeg.map((t) => (t.nombre || '').trim().toUpperCase()));
   const [maq] = await pool.query(
-    `SELECT m.codigo_unidad, m.unidad, m.tipo_unidad, m.placa, m.serie, m.anio, m.usa_gasolina,
+    `SELECT m.codigo_unidad, m.unidad, m.tipo_unidad, m.placa, m.serie, m.anio, m.usa_gasolina, DATE_FORMAT(m.baja_fecha, '%Y-%m-%d') AS baja_fecha, m.baja_motivo,
             COALESCE(mca.nombre, m.marca) AS marca, COALESCE(mdo.nombre, m.modelo) AS modelo, emp.nombre AS empresa
      FROM maquinaria m
      LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
@@ -12900,7 +12958,8 @@ async function getSeguros(code, nombreUsuario) {
       creadoPor: p.creado_por || '', actualizadoPor: p.actualizado_por || '', actualizadoEn: isoOrNull(p.actualizado_en),
       unidades: uni.filter((u) => u.poliza_id === p.id).map((u) => ({ codigoUnidad: u.codigo_unidad, inciso: u.inciso || '', sumaAsegurada: u.suma_asegurada === null ? null : Number(u.suma_asegurada),
         prima: u.prima === null || u.prima === undefined ? null : Number(u.prima), alta: u.alta ? fechaSoloOrNull(u.alta) : null, pdfUrl: u.pdf_url || '',
-        descripcionPoliza: u.descripcion_poliza || '', seriePoliza: u.serie_poliza || '' })),
+        descripcionPoliza: u.descripcion_poliza || '', seriePoliza: u.serie_poliza || '',
+        bajaFecha: u.baja_fecha ? fechaSoloOrNull(u.baja_fecha) : null, devolucionEstimada: u.devolucion_estimada === null || u.devolucion_estimada === undefined ? null : Number(u.devolucion_estimada) })),
       pagos: pag.filter((x) => x.poliza_id === p.id).map((x) => ({ id: x.id, numero: x.numero, fechaVencimiento: fechaSoloOrNull(x.fecha_vencimiento), monto: Number(x.monto), pagado: !!x.pagado, pagadoEn: fechaSoloOrNull(x.pagado_en), referencia: x.referencia || '', marcadoPor: x.marcado_por || '' })),
     };
     Object.assign(o, estadoPolizaSeguro_(o, hoy));
@@ -12915,14 +12974,16 @@ async function getSeguros(code, nombreUsuario) {
   }));
   // Por unidad: la póliza que la cubre hoy (vigente/por vencer); si no, la más reciente.
   const unidades = maq.map((m) => {
-    const suyas = polizas.filter((p) => !p.cancelada && p.unidades.some((u) => u.codigoUnidad === m.codigo_unidad));
+    // Nov-2026: la unidad ya no cuenta en una póliza de la que se dio de baja.
+    const suyas = polizas.filter((p) => !p.cancelada && p.unidades.some((u) => u.codigoUnidad === m.codigo_unidad && !u.bajaFecha));
     const actual = suyas.find((p) => p.estado === 'vigente' || p.estado === 'por_vencer') || suyas[0] || null;
     return {
       codigoUnidad: m.codigo_unidad, unidad: m.unidad, tipoUnidad: m.tipo_unidad || '', placa: m.placa || '', serie: m.serie || '', anio: m.anio || '',
       marca: m.marca || '', modelo: m.modelo || '', empresa: m.empresa || '', automotriz: !!m.usa_gasolina,
       // Nov-2026: lleva seguro si su tipo de unidad está marcado, o si ya tiene una póliza
-      asegurable: tiposConSeguro.has((m.tipo_unidad || '').trim().toUpperCase()) || suyas.length > 0,
-      polizaId: actual ? actual.id : null, estado: actual ? actual.estado : 'sin_seguro', dias: actual ? actual.dias : null,
+      asegurable: !m.baja_fecha && (tiposConSeguro.has((m.tipo_unidad || '').trim().toUpperCase()) || suyas.length > 0),
+      polizaId: actual ? actual.id : null, estado: m.baja_fecha ? 'baja' : (actual ? actual.estado : 'sin_seguro'), dias: actual ? actual.dias : null,
+      bajaFecha: m.baja_fecha || null, bajaMotivo: m.baja_motivo || '',
       siniestros: siniestros.filter((s) => s.codigoUnidad === m.codigo_unidad).length,
     };
   });
@@ -13543,6 +13604,8 @@ module.exports = {
   getAjustesServiciosUnidad,
   getSeguros,
   guardarPolizaSeguro,
+  darDeBajaUnidad,
+  reactivarUnidad,
   prepararImportPolizas,
   importarPolizaSeguro,
   eliminarPolizaSeguro,

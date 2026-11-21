@@ -10053,11 +10053,13 @@ function ahRenderAvancePorActividad_(){
     var activa = AH_ACTIVIDADES_FILTRO_TRABAJO === r.trabajo;
     return '<button type="button" class="ah-avance-act' + (activa ? ' activa' : '') + '" data-trabajo="' + escapeHtml(r.trabajo) + '" title="Ver esta actividad en la tabla y en el mapa">'
       + '<div class="ah-avance-act-nombre">' + escapeHtml(r.trabajo) + '</div>'
-      + '<div class="ah-avance-act-pct">' + r.pctCompletado + '%</div>'
-      + '<div class="ah-prog-bar-track"><div class="ah-prog-bar-fill' + (r.pctCompletado >= 100 ? ' ah-prog-completado' : '') + '" style="width:' + Math.min(100, r.pctCompletado) + '%"></div></div>'
-      + '<div class="ah-avance-act-sub">' + ahTextoHectareas_(r.haCompletadas) + ' completadas de ' + ahTextoHectareas_(res.totalHa) + ' de la huerta<br>'
+      // Nov-2026 (Carlos): el porcentaje principal es el que cuenta lo parcial;
+      // el de solo cuadros completos queda abajo.
+      + '<div class="ah-avance-act-pct">' + r.pctConParcial + '%</div>'
+      + '<div class="ah-prog-bar-track"><div class="ah-prog-bar-fill' + (r.pctConParcial >= 100 ? ' ah-prog-completado' : '') + '" style="width:' + Math.min(100, r.pctConParcial) + '%"></div></div>'
+      + '<div class="ah-avance-act-sub">' + ahTextoHectareas_(r.haPonderadas) + ' avanzadas de ' + ahTextoHectareas_(res.totalHa) + ' de la huerta<br>'
       + r.completados + ' de ' + r.cuadros + ' cuadro(s) completos' + (r.enAvance ? ' · ' + r.enAvance + ' en avance' : '')
-      + '<br>Contando lo parcial: ' + r.pctConParcial + '%</div>'
+      + '<br>Solo cuadros completos: ' + r.pctCompletado + '% (' + ahTextoHectareas_(r.haCompletadas) + ')</div>'
       + '</button>';
   }).join('');
   ahRenderMapaActividad_();
@@ -10104,7 +10106,7 @@ function ahRenderMapaActividad_(){
   });
   if(!bounds.isEmpty()) AH_GOOGLE_MAP_ACTIVIDAD.fitBounds(bounds);
   var res = ahResumenPorActividad_(AH_ACTIVIDADES, AH_CUADROS).lista.find(function(r){ return r.trabajo === trabajo; });
-  document.getElementById('ah-actividad-mapa-leyenda').innerHTML = '<b style="color:var(--text);">' + escapeHtml(trabajo) + (res ? ': ' + res.pctCompletado + '% de la huerta completado' : '') + '</b>'
+  document.getElementById('ah-actividad-mapa-leyenda').innerHTML = '<b style="color:var(--text);">' + escapeHtml(trabajo) + (res ? ': ' + res.pctConParcial + '% de avance (' + res.pctCompletado + '% en cuadros completos)' : '') + '</b>'
     + '<span><i style="background:#2ecc71"></i>Completado</span><span><i style="background:#E8871E"></i>En avance</span><span><i style="background:#ffffff;opacity:.5"></i>Pendiente</span><span><i style="background:#9A9D9E;opacity:.4"></i>Sin esta actividad</span>';
 }
 

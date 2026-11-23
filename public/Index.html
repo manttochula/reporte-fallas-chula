@@ -165,6 +165,31 @@
     font-weight: 600;
   }
   main{ padding: 20px; }
+  /* Nov-2026 (Carlos): menú de inicio con cuadros; al entrar a uno se ve
+     solo esa sección con "← Menú" arriba. Las pestañas siguen en el HTML
+     (las usa la lógica y el Panel las oculta por usuario), pero no se ven. */
+  header .tabs{ display:none !important; }
+  .inicio-volver{
+    display:inline-flex; align-items:center; gap:6px; margin:0 0 10px; padding:7px 12px 7px 10px;
+    background: var(--panel); border:1px solid var(--line); border-radius:4px; color: var(--text);
+    font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:0.06em; text-transform:uppercase; cursor:pointer;
+  }
+  .inicio-volver[hidden]{ display:none; }
+  .inicio-hola{ font-size:14px; color: var(--text-dim); margin: 0 0 14px; }
+  .inicio-hola b{ color: var(--text); font-weight:600; }
+  .inicio-grid{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .inicio-cuadro{
+    display:flex; flex-direction:column; align-items:flex-start; gap:10px; text-align:left;
+    min-height:132px; padding:16px 14px; border-radius:8px; cursor:pointer;
+    background: var(--panel); border:1px solid var(--line); color: var(--text);
+    font-family:'Inter', sans-serif; -webkit-tap-highlight-color: transparent; transition: transform .08s ease, border-color .15s ease;
+  }
+  .inicio-cuadro:active{ transform: scale(0.97); border-color: var(--amber); }
+  .inicio-cuadro .ic{ width:40px; height:40px; border-radius:8px; display:flex; align-items:center; justify-content:center; background: rgba(232,135,30,0.14); color: var(--amber); }
+  .inicio-cuadro .ic svg{ width:24px; height:24px; }
+  .inicio-cuadro .t{ font-family:'Oswald', sans-serif; font-weight:600; font-size:17px; text-transform:uppercase; letter-spacing:0.02em; line-height:1.15; }
+  .inicio-cuadro .d{ font-size:12px; color: var(--text-dim); line-height:1.35; }
+  .inicio-pie{ margin-top:22px; text-align:center; }
   .field{ margin-bottom: 18px; }
   .field-check{
     display:flex;
@@ -693,6 +718,7 @@
 </div>
 <div class="app">
   <header>
+    <button type="button" class="inicio-volver" id="inicio-volver" hidden>&larr; Menú</button>
     <div class="eyebrow">Flota &amp; Mantenimiento</div>
     <h1 id="app-nombre">Reporte de Fallas</h1>
     <div class="tabs">
@@ -719,7 +745,12 @@
         <button type="button" class="secundario" id="install-banner-cerrar">Ahora no</button>
       </div>
     </div>
-    <div id="view-form">
+    <div id="view-inicio">
+      <div class="inicio-hola" id="inicio-hola"></div>
+      <div class="inicio-grid" id="inicio-grid"></div>
+      <div class="inicio-pie"><span class="change-user-link" id="inicio-cambiar-usuario">Cambiar usuario</span></div>
+    </div>
+    <div id="view-form" style="display:none;">
       <div class="field">
         <label>Número de unidad <span class="req">*</span></label>
         <div class="unit-select" id="unit-select">
@@ -1635,9 +1666,9 @@ function appAplicarModulos_(datos){
   var ocultas = Array.isArray(datos.pestanasCelularOcultas) ? datos.pestanasCelularOcultas : [];
   var soloAvance = ocultas.indexOf('form') !== -1 && ocultas.indexOf('avance') === -1;
   var titulo = soloAvance ? 'Avance Huertas' : 'Reporte de Fallas';
-  var h1 = document.getElementById('app-nombre');
-  if(h1) h1.textContent = titulo;
+  APP_TITULO_ = titulo;
   document.title = titulo;
+  inicioRender_();
 }
 document.getElementById('tab-taller').addEventListener('click', function(){ window.location.href = appUrlTaller_(); });
 
@@ -1847,6 +1878,103 @@ document.getElementById('btn-change-user').addEventListener('click', function(){
   mostrarLogin();
 });
 
+// ------------------------------------------------------------
+// Menú de inicio con cuadros (nov-2026, Carlos: "que vengan opciones en
+// cuadros y una vez entrado a una te aparezca lo que lleva"). Cada cuadro
+// es una de las pestañas que esta persona puede ver (las ocultas desde
+// Usuarios en el Panel no salen; Taller solo si tiene el módulo). Si solo
+// tiene una, entra directo sin menú. El botón "atrás" del celular regresa
+// al menú.
+// ------------------------------------------------------------
+var APP_TITULO_ = 'Reporte de Fallas';
+var INICIO_SECCION_ = null;      // id de la pestaña abierta, o null = en el menú
+var INICIO_PRIMERA_ = true;
+var INICIO_UNICA_ = false;
+var INICIO_ICONOS_ = {
+  form: '<path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
+  diesel: '<path d="M4 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M3 21h13"/><path d="M6 8h7"/><path d="M15 9h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V8l-3-3"/>',
+  solicitud: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 17c1.5-2 2.5-2 3.5 0s2 2 3.5 0"/>',
+  avance: '<path d="M3 20h18"/><path d="M6 16V10"/><path d="M11 16V6"/><path d="M16 16v-4"/><path d="M20 4l-4 4-3-2-4 4"/>',
+  misreportes: '<path d="M9 5h10"/><path d="M9 12h10"/><path d="M9 19h10"/><path d="M4 5h.01"/><path d="M4 12h.01"/><path d="M4 19h.01"/>',
+  movimientos: '<path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/>',
+  taller: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>'
+};
+var INICIO_OPCIONES_ = [
+  { id: 'form', t: 'Reportar falla', d: 'Reporta una falla de un equipo' },
+  { id: 'avance', t: 'Avance huerta', d: 'Registra el avance de las actividades' },
+  { id: 'diesel', t: 'Cargar diésel', d: 'Registra la carga de combustible' },
+  { id: 'solicitud', t: 'Solicitar diésel', d: 'Pide diésel y fírmalo' },
+  { id: 'misreportes', t: 'Mis reportes', d: 'Revisa cómo van tus reportes' },
+  { id: 'movimientos', t: 'Movimientos', d: 'Mueve equipos entre huertas' },
+  { id: 'taller', t: 'Taller', d: 'Órdenes de trabajo del taller' }
+];
+function inicioOpcion_(id){ return INICIO_OPCIONES_.filter(function(o){ return o.id === id; })[0]; }
+function inicioVisibles_(){
+  return INICIO_OPCIONES_.filter(function(o){
+    var tab = document.getElementById('tab-' + o.id);
+    return tab && tab.style.display !== 'none';
+  });
+}
+function inicioRender_(soloPintar){
+  var lista = inicioVisibles_();
+  var grid = document.getElementById('inicio-grid');
+  grid.innerHTML = lista.map(function(o){
+    return '<button type="button" class="inicio-cuadro" data-id="' + o.id + '">'
+      + '<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (INICIO_ICONOS_[o.id] || '') + '</svg></span>'
+      + '<span class="t">' + o.t + '</span><span class="d">' + o.d + '</span></button>';
+  }).join('');
+  grid.querySelectorAll('.inicio-cuadro').forEach(function(b){
+    b.addEventListener('click', function(){ inicioAbrir_(b.getAttribute('data-id')); });
+  });
+  var nombre = localStorage.getItem('reporte_usuario') || '';
+  document.getElementById('inicio-hola').innerHTML = nombre ? 'Hola, <b>' + escapeHtmlAttr(nombre) + '</b>. ¿Qué vas a hacer?' : '';
+  if(soloPintar) return;
+  INICIO_UNICA_ = lista.length === 1;
+  var sigueVisible = INICIO_SECCION_ && lista.some(function(o){ return o.id === INICIO_SECCION_; });
+  if(INICIO_UNICA_){ INICIO_PRIMERA_ = false; inicioAbrir_(lista[0].id, true); return; }
+  if(INICIO_PRIMERA_ || !sigueVisible){ INICIO_PRIMERA_ = false; inicioMostrar_(); return; }
+  inicioEnSeccion_(document.getElementById('tab-' + INICIO_SECCION_));
+}
+function inicioMostrar_(){
+  INICIO_SECCION_ = null;
+  ['form', 'diesel', 'movimientos', 'misreportes', 'avance', 'solicitud'].forEach(function(id){
+    var v = document.getElementById('view-' + id); if(v) v.style.display = 'none';
+  });
+  if(typeof avanceDetenerIndicadorGps_ === 'function') avanceDetenerIndicadorGps_();
+  document.getElementById('view-inicio').style.display = 'block';
+  document.getElementById('inicio-volver').hidden = true;
+  document.getElementById('app-nombre').textContent = APP_TITULO_;
+  window.scrollTo(0, 0);
+}
+function inicioAbrir_(id, sinHistorial){
+  var tab = document.getElementById('tab-' + id);
+  if(!tab) return;
+  if(!sinHistorial && !INICIO_UNICA_){ try { history.pushState({ seccion: id }, ''); } catch(e){} }
+  tab.click(); // Taller abre su propia pantalla; las demás pasan por activarPestana
+  window.scrollTo(0, 0);
+}
+// La llama activarPestana: cada vez que se muestra una sección.
+function inicioEnSeccion_(tab){
+  var id = tab.id.replace('tab-', '');
+  INICIO_SECCION_ = id;
+  document.getElementById('view-inicio').style.display = 'none';
+  document.getElementById('inicio-volver').hidden = INICIO_UNICA_;
+  var o = inicioOpcion_(id);
+  document.getElementById('app-nombre').textContent = INICIO_UNICA_ ? APP_TITULO_ : (o ? o.t : APP_TITULO_);
+}
+document.getElementById('inicio-volver').addEventListener('click', function(){
+  if(history.state && history.state.seccion){ history.back(); } else { inicioMostrar_(); }
+});
+window.addEventListener('popstate', function(){
+  if(INICIO_SECCION_ && !INICIO_UNICA_) inicioMostrar_();
+});
+document.getElementById('inicio-cambiar-usuario').addEventListener('click', function(){
+  document.getElementById('btn-change-user').click();
+});
+// Al cambiar de usuario, al volver a entrar se empieza en el menú.
+document.getElementById('btn-change-user').addEventListener('click', function(){ INICIO_PRIMERA_ = true; INICIO_SECCION_ = null; });
+inicioRender_(true);
+
 // --- Cambio de pestañas ---
 var tabForm = document.getElementById('tab-form');
 var tabDiesel = document.getElementById('tab-diesel');
@@ -1866,6 +1994,7 @@ function activarPestana(tabActivo, viewActivo){
   [viewForm, viewDiesel, viewMovimientos, viewMisReportes, viewAvance, viewSolicitud].forEach(function(v){ v.style.display = 'none'; });
   tabActivo.classList.add('active');
   viewActivo.style.display = 'block';
+  if(typeof inicioEnSeccion_ === 'function') inicioEnSeccion_(tabActivo);
   if(typeof avanceDetenerIndicadorGps_ === 'function' && viewActivo !== viewAvance) avanceDetenerIndicadorGps_();
 }
 

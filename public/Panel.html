@@ -1101,17 +1101,32 @@
     padding:8px 10px; font-size:13px; color:#1c1c1c; cursor:pointer; font-family:'Inter',sans-serif;
   }
   .maq-multisel-btn:after{ content:'▾'; float:right; color:#888; }
+  /* Nov-2026: el panel se abre "fixed" junto al botón (hacia arriba si no
+     cabe abajo) para que no lo recorte el contenedor, con buscador,
+     Todos/Ninguno y la lista con su propio scroll. */
   .maq-multisel-panel{
-    display:none; position:absolute; top:100%; left:0; margin-top:4px; z-index:220;
-    background:#fff; border:1px solid #ccc; border-radius:4px; min-width:260px; max-height:280px;
-    overflow-y:auto; box-shadow:0 4px 14px rgba(0,0,0,0.18); padding:6px 0;
+    display:none; position:fixed; z-index:3000;
+    background:#fff; border:1px solid #ccc; border-radius:6px; width:340px; max-width:calc(100vw - 24px);
+    box-shadow:0 8px 24px rgba(0,0,0,0.22); flex-direction:column; overflow:hidden;
   }
-  .maq-multisel-panel.show{ display:block; }
+  .maq-multisel-panel.show{ display:flex; }
+  .maq-multisel-cabeza{ padding:8px; border-bottom:1px solid #eee; display:flex; flex-direction:column; gap:6px; flex:0 0 auto; }
+  .maq-multisel-cabeza input[type="search"]{ width:100%; box-sizing:border-box; padding:7px 9px; border:1px solid #ccc; border-radius:4px; font-size:13px; color:#1c1c1c; background:#fff; }
+  .maq-multisel-acciones{ display:flex; gap:6px; align-items:center; font-size:12px; color:#666; }
+  .maq-multisel-acciones button{ background:#f3f3f3; border:1px solid #ccc; border-radius:4px; padding:3px 8px; font-size:12px; cursor:pointer; color:#1c1c1c; }
+  .maq-multisel-acciones span{ margin-left:auto; }
+  .maq-multisel-lista{ overflow-y:auto; flex:1 1 auto; padding:4px 0; min-height:60px; }
+  .maq-multisel-pie{ border-top:1px solid #eee; padding:6px 8px; text-align:right; flex:0 0 auto; }
+  .maq-multisel-pie button{ background: var(--maq-green, #1f4d3a); color:#fff; border:0; border-radius:4px; padding:6px 16px; font-size:13px; cursor:pointer; }
   .maq-multisel-opcion{
-    display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:13px; color:#1c1c1c; cursor:pointer;
+    display:flex !important; align-items:center; justify-content:flex-start; gap:10px; padding:7px 12px; margin:0 !important;
+    font-size:13px; color:#1c1c1c; cursor:pointer; text-align:left !important; width:auto; text-transform:none; letter-spacing:normal; font-weight:400;
   }
   .maq-multisel-opcion:hover{ background:#f0f0f0; }
-  .maq-multisel-opcion input{ width:auto; margin:0; }
+  .maq-filters .maq-multisel-opcion input{ width:16px !important; min-width:0 !important; height:16px; margin:0 !important; padding:0 !important; flex:0 0 auto !important; }
+  .maq-filters .maq-multisel-cabeza input[type="search"]{ flex:none; min-width:0; }
+  .maq-multisel-opcion .nom{ flex:1 1 auto; }
+  .maq-multisel-opcion .cnt{ color:#888; font-size:12px; flex:0 0 auto; }
   .maq-multisel-vacio{ padding:10px 12px; font-size:12.5px; color:#888; font-style:italic; }
 
   /* Bloques del reporte agrupado por departamento, cada uno con su propia
@@ -17653,23 +17668,80 @@ function poblarMultiselModelos(){
   if(modelos.length === 0){
     panel.innerHTML = '<div class="maq-multisel-vacio">Todavía no hay modelos en el catálogo.</div>';
   } else {
-    panel.innerHTML = modelos.map(function(m){
-      const id = 'maq-modelo-chk-' + m.replace(/[^a-zA-Z0-9]/g, '_');
-      const checked = MAQ_MODELOS_SELECCIONADOS.has(m) ? ' checked' : '';
-      return '<label class="maq-multisel-opcion" for="' + id + '">'
-        + '<input type="checkbox" id="' + id + '" value="' + escapeHtml(m) + '"' + checked + '>'
-        + escapeHtml(m) + '</label>';
-    }).join('');
-    panel.querySelectorAll('input[type="checkbox"]').forEach(function(chk){
+    const cuantos = {};
+    ALL_MAQUINARIA.forEach(function(r){ const m = (r.Modelo || '').toString().trim(); if(m) cuantos[m] = (cuantos[m] || 0) + 1; });
+    const buscaPrevio = (document.getElementById('maq-modelo-buscar') || {}).value || '';
+    panel.innerHTML = '<div class="maq-multisel-cabeza">'
+      + '<input type="search" id="maq-modelo-buscar" placeholder="Buscar modelo..." autocomplete="off">'
+      + '<div class="maq-multisel-acciones"><button type="button" id="maq-modelo-todos">Marcar los visibles</button>'
+      + '<button type="button" id="maq-modelo-ninguno">Ninguno</button><span id="maq-modelo-conteo"></span></div></div>'
+      + '<div class="maq-multisel-lista" id="maq-modelo-lista">' + modelos.map(function(m){
+        const id = 'maq-modelo-chk-' + m.replace(/[^a-zA-Z0-9]/g, '_');
+        const checked = MAQ_MODELOS_SELECCIONADOS.has(m) ? ' checked' : '';
+        return '<label class="maq-multisel-opcion" for="' + id + '" data-busca="' + escapeHtml(m.toLowerCase()) + '">'
+          + '<input type="checkbox" id="' + id + '" value="' + escapeHtml(m) + '"' + checked + '>'
+          + '<span class="nom">' + escapeHtml(m) + '</span><span class="cnt">' + (cuantos[m] || 0) + '</span></label>';
+      }).join('') + '<div class="maq-multisel-vacio" id="maq-modelo-sin" style="display:none;">Ningún modelo coincide.</div></div>'
+      + '<div class="maq-multisel-pie"><button type="button" id="maq-modelo-listo">Listo</button></div>';
+    const cambio = function(){ actualizarBotonMultiselModelos(); renderReporteModelo(); };
+    panel.querySelectorAll('#maq-modelo-lista input[type="checkbox"]').forEach(function(chk){
       chk.addEventListener('change', function(){
         if(chk.checked) MAQ_MODELOS_SELECCIONADOS.add(chk.value); else MAQ_MODELOS_SELECCIONADOS.delete(chk.value);
-        actualizarBotonMultiselModelos();
-        renderReporteModelo();
+        cambio();
       });
     });
+    const buscar = document.getElementById('maq-modelo-buscar');
+    buscar.value = buscaPrevio;
+    buscar.addEventListener('input', filtrarMultiselModelos_);
+    document.getElementById('maq-modelo-todos').addEventListener('click', function(){
+      panel.querySelectorAll('#maq-modelo-lista .maq-multisel-opcion').forEach(function(l){
+        if(l.style.display === 'none') return;
+        const c = l.querySelector('input'); c.checked = true; MAQ_MODELOS_SELECCIONADOS.add(c.value);
+      });
+      cambio();
+    });
+    document.getElementById('maq-modelo-ninguno').addEventListener('click', function(){
+      panel.querySelectorAll('#maq-modelo-lista input').forEach(function(c){ c.checked = false; });
+      MAQ_MODELOS_SELECCIONADOS.clear();
+      cambio();
+    });
+    document.getElementById('maq-modelo-listo').addEventListener('click', cerrarMultiselModelos_);
+    filtrarMultiselModelos_();
   }
   actualizarBotonMultiselModelos();
 }
+
+function filtrarMultiselModelos_(){
+  const b = document.getElementById('maq-modelo-buscar');
+  const q = (b ? b.value : '').trim().toLowerCase();
+  let vis = 0;
+  document.querySelectorAll('#maq-modelo-lista .maq-multisel-opcion').forEach(function(l){
+    const ok = !q || l.getAttribute('data-busca').indexOf(q) !== -1;
+    l.style.display = ok ? '' : 'none';
+    if(ok) vis++;
+  });
+  const sin = document.getElementById('maq-modelo-sin');
+  if(sin) sin.style.display = vis ? 'none' : '';
+}
+
+// Coloca el panel junto al botón: abajo si cabe, si no hacia arriba; la
+// lista se ajusta al espacio disponible para que siempre se vea completa.
+function posicionarMultiselModelos_(){
+  const panel = document.getElementById('maq-modelo-multisel-panel');
+  if(!panel.classList.contains('show')) return;
+  const r = document.getElementById('maq-modelo-multisel-btn').getBoundingClientRect();
+  const abajo = window.innerHeight - r.bottom - 12, arriba = r.top - 12;
+  const haciaArriba = abajo < 320 && arriba > abajo;
+  const alto = Math.max(180, Math.min(460, haciaArriba ? arriba : abajo));
+  panel.style.maxHeight = alto + 'px';
+  panel.style.left = Math.max(12, Math.min(r.left, window.innerWidth - panel.offsetWidth - 12)) + 'px';
+  if(haciaArriba){ panel.style.top = ''; panel.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+  else { panel.style.bottom = ''; panel.style.top = (r.bottom + 4) + 'px'; }
+}
+function cerrarMultiselModelos_(){ document.getElementById('maq-modelo-multisel-panel').classList.remove('show'); }
+window.addEventListener('resize', posicionarMultiselModelos_);
+document.getElementById('maq-modelo-multisel-panel').addEventListener('keydown', function(e){ if(e.key === 'Escape') cerrarMultiselModelos_(); });
+window.addEventListener('scroll', posicionarMultiselModelos_, true);
 
 function actualizarBotonMultiselModelos(){
   const btn = document.getElementById('maq-modelo-multisel-btn');
@@ -17679,7 +17751,13 @@ function actualizarBotonMultiselModelos(){
 
 document.getElementById('maq-modelo-multisel-btn').addEventListener('click', function(e){
   e.stopPropagation();
-  document.getElementById('maq-modelo-multisel-panel').classList.toggle('show');
+  const panel = document.getElementById('maq-modelo-multisel-panel');
+  panel.classList.toggle('show');
+  if(panel.classList.contains('show')){
+    posicionarMultiselModelos_();
+    const b = document.getElementById('maq-modelo-buscar');
+    if(b) b.focus();
+  }
 });
 document.addEventListener('click', function(e){
   const wrap = document.getElementById('maq-modelo-multisel');

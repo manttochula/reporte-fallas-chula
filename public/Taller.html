@@ -305,6 +305,7 @@
     text-align:center; padding: 40px; color: var(--text-dim);
     font-family:'IBM Plex Mono', monospace; font-size: 13px;
   }
+  .tl-ir-reporte{ display:block; margin-top:16px; text-align:center; font-size:13px; color:var(--text-dim); text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -324,6 +325,7 @@
     </div>
     <button class="save-btn" id="login-btn" style="width:100%;">Entrar</button>
     <div class="login-status" id="login-status"></div>
+    <a class="tl-ir-reporte" id="tl-ir-reporte" href="/">¿Vas a reportar fallas? Entrar a Reporte de Fallas &rarr;</a>
   </div>
 </div>
 
@@ -804,8 +806,24 @@ document.getElementById('login-btn').addEventListener('click', intentarLogin);
 document.getElementById('login-pass').addEventListener('keydown', function(e){
   if(e.key === 'Enter'){ intentarLogin(); }
 });
+// Nov-2026 (Carlos, iPhone): quien entraba a "/" con un usuario que solo
+// tiene Taller quedaba atorado aquí (la app lo regresaba a Taller y este
+// login solo lista usuarios de Taller). Desde el login se puede ir al de
+// Reporte de Fallas, y "Cambiar usuario" también cierra esa sesión.
+function tlIrAReporte_(e){
+  if(e) e.preventDefault();
+  localStorage.removeItem('taller_nombre');
+  localStorage.removeItem('reporte_usuario');
+  window.location.href = window.APP_SERVIDOR ? 'index.html' : '/';
+}
+document.getElementById('tl-ir-reporte').addEventListener('click', tlIrAReporte_);
 document.getElementById('btn-change-user').addEventListener('click', function(){
   localStorage.removeItem('taller_nombre');
+  if(!window.APP_SERVIDOR && localStorage.getItem('reporte_usuario')){
+    // Llegó desde Reporte de Fallas: se cierra también esa sesión para que
+    // "/" no lo vuelva a mandar aquí con el mismo usuario.
+    localStorage.removeItem('reporte_usuario');
+  }
   if(window.APP_SERVIDOR){
     // En la app se entra desde la pantalla principal (sirve para Reportar y Taller).
     localStorage.removeItem('reporte_usuario');

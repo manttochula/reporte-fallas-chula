@@ -857,7 +857,8 @@ function getFiltered(){
   var q = document.getElementById('f-search').value.trim().toUpperCase();
   return ALL_RECORDS.filter(function(r){
     var est = estadoDe(r).label;
-    if(est !== 'En proceso' && est !== 'Por confirmar') return false;
+    // Nov-2026 (Carlos): también las Pendientes (todavía sin iniciar); las Completadas no.
+    if(est !== 'En proceso' && est !== 'Por confirmar' && est !== 'Pendiente') return false;
     if(q){
       var haystack = [r.Orden, r.Unidad, r.CodigoUnidad, r.Huerta].join(' ').toUpperCase();
       if(haystack.indexOf(q) === -1) return false;
@@ -1640,19 +1641,24 @@ function rnGuardar(orden){
 
 function renderList(){
   var listEl = document.getElementById('order-list');
+  // Orden: en proceso, luego pendientes, y al final las que esperan confirmación.
+  var PRIORIDAD = { 'En proceso': 0, 'Pendiente': 1, 'Por confirmar': 2 };
   var records = getFiltered().slice().sort(function(a,b){
-    var pa = a.TerminadaEn ? 1 : 0, pb = b.TerminadaEn ? 1 : 0; // las que esperan confirmación, al final
+    var pa = PRIORIDAD[estadoDe(a).label], pb = PRIORIDAD[estadoDe(b).label];
     return pa - pb || new Date(b.Fecha) - new Date(a.Fecha);
   });
-  var nConfirmar = records.filter(function(r){ return !!r.TerminadaEn; }).length;
-  document.getElementById('filter-summary').textContent = (records.length - nConfirmar) + ' orden(es) en proceso' + (nConfirmar ? ' · ' + nConfirmar + ' esperando confirmación' : '');
+  var cuenta = { 'En proceso': 0, 'Pendiente': 0, 'Por confirmar': 0 };
+  records.forEach(function(r){ cuenta[estadoDe(r).label]++; });
+  document.getElementById('filter-summary').textContent = cuenta['En proceso'] + ' en proceso'
+    + ' · ' + cuenta['Pendiente'] + ' pendiente(s)'
+    + (cuenta['Por confirmar'] ? ' · ' + cuenta['Por confirmar'] + ' esperando confirmación' : '');
 
   listEl.innerHTML = '';
 
   if(records.length === 0){
     var empty = document.createElement('div');
     empty.className = 'empty';
-    empty.innerHTML = '<span class="icon">(vacio)</span>No hay ordenes en proceso por ahora.';
+    empty.innerHTML = '<span class="icon">(vacio)</span>No hay ordenes abiertas por ahora.';
     listEl.appendChild(empty);
     return;
   }

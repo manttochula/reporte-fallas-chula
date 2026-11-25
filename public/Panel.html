@@ -976,6 +976,17 @@
   .seg-badge.cancelada, .seg-badge.futura, .seg-badge.pendiente{ background:rgba(154,157,158,0.15); color:var(--text-dim); }
   .seg-sub{ font-size:11.5px; color:var(--text-dim); }
   .seg-status{ font-size:13px; color:var(--text-dim); margin:6px 0; }
+  /* GPS de PosiTrace (nov-2026) */
+  .gps-estado{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 14px; margin:4px 0 12px; font-size:13px; }
+  .gps-estado .ok{ color:var(--ok); } .gps-estado .mal{ color:var(--danger); } .gps-estado .dim{ color:var(--text-dim); }
+  .gps-estado button{ margin-left:auto; }
+  .gps-subtabs{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+  .gps-subtab{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:7px 14px; cursor:pointer; font-size:13px; }
+  .gps-subtab.active{ background:var(--amber); color:#1c1c1c; border-color:var(--amber); font-weight:700; }
+  #gps-mapa{ height:420px; border:1px solid var(--line); border-radius:6px; margin:0 0 10px; display:none; }
+  .gps-sosp{ color:var(--text-dim); font-style:italic; }
+  .gps-cero td{ color:var(--text-dim); }
+  .gps-aviso{ background:var(--panel); border:1px dashed var(--line); border-radius:6px; padding:18px; font-size:13.5px; color:var(--text-dim); line-height:1.5; }
   .seg-acc{ display:flex; gap:6px; flex-wrap:wrap; }
   #seg-pol-overlay .maq-modal, #seg-sin-overlay .maq-modal{ max-width:900px; }
   #seg-imp-overlay .maq-modal{ max-width:min(96vw, 1250px); }
@@ -1546,6 +1557,7 @@
       <div class="panel-tab" id="ptab-insumos">Insumos</div>
       <div class="panel-tab" id="ptab-seguros">Seguros</div>
       <div class="panel-tab" id="ptab-verificaciones">Verificaciones</div>
+      <div class="panel-tab" id="ptab-gps">GPS</div>
       <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
       <div class="panel-tab" id="ptab-indicadores">Indicadores</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
@@ -4660,6 +4672,54 @@
       </div>
     </div>
 
+    <!-- GPS de PosiTrace (nov-2026, Carlos). Ver server/positrace.js y getGps* en handlers.js. -->
+    <div id="pview-gps" style="display:none;">
+      <div class="gps-estado" id="gps-estado"><span class="dim">Cargando...</span></div>
+      <div class="gps-subtabs">
+        <button type="button" class="gps-subtab active" data-vista="finde">Fin de semana</button>
+        <button type="button" class="gps-subtab" data-vista="rec">Recorridos</button>
+        <button type="button" class="gps-subtab" data-vista="salidas">Salidas de huerta</button>
+        <button type="button" class="gps-subtab" data-vista="equipos">Unidades GPS</button>
+      </div>
+      <div id="gps-v-finde">
+        <div class="seg-tarjetas" id="gps-tarjetas"></div>
+        <div class="toolbar">
+          <select id="gps-sabado"></select>
+          <input type="text" id="gps-finde-buscar" placeholder="Buscar unidad...">
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;"><input type="checkbox" id="gps-finde-solo" checked> Solo las que se movieron</label>
+          <button class="export-btn" id="gps-finde-excel">Exportar a Excel</button>
+        </div>
+        <div class="seg-status" id="gps-finde-status"></div>
+        <div class="table-wrap"><table id="gps-finde-tabla"><thead><tr><th>Unidad (PosiTrace)</th><th>Unidad en sistema</th><th>Sábado km</th><th>Domingo km</th><th>Total km</th><th>En movimiento</th><th>Viajes</th><th>Primer / último movimiento</th><th>Lugares</th><th></th></tr></thead><tbody id="gps-finde-tbody"></tbody></table></div>
+      </div>
+      <div id="gps-v-rec" style="display:none;">
+        <div class="toolbar">
+          <label style="font-size:12px;">Del <input type="date" id="gps-rec-desde"></label>
+          <label style="font-size:12px;">al <input type="date" id="gps-rec-hasta"></label>
+          <select id="gps-rec-equipo"><option value="">Todas las unidades</option></select>
+          <input type="text" id="gps-rec-buscar" placeholder="Buscar unidad o lugar...">
+          <button class="export-btn" id="gps-rec-ver">Ver</button>
+          <button class="export-btn" id="gps-rec-excel">Exportar a Excel</button>
+        </div>
+        <div class="seg-status" id="gps-rec-status"></div>
+        <div id="gps-mapa"></div>
+        <div class="table-wrap"><table id="gps-rec-tabla"><thead><tr><th>Unidad (PosiTrace)</th><th>Salida</th><th>Llegada</th><th>Duración</th><th>Km</th><th>Llegó a</th><th>Se quedó</th><th>Odómetro</th></tr></thead><tbody id="gps-rec-tbody"></tbody></table></div>
+      </div>
+      <div id="gps-v-salidas" style="display:none;">
+        <div class="gps-aviso">Las salidas de huerta se van a llenar con el <b>Reporte de geocercas</b> de PosiTrace (cuándo sale y entra cada unidad de cada huerta).<br>
+          Para activarlo: en PosiTrace → Reportes → <b>Reporte de geocercas</b> → Programar informe, que llegue a <b>chulareportesmtto@gmail.com</b> en Excel. Ya llegado, el sistema lo guarda y esta vista se arma con ese formato.</div>
+      </div>
+      <div id="gps-v-equipos" style="display:none;">
+        <div class="toolbar">
+          <input type="text" id="gps-eq-buscar" placeholder="Buscar unidad...">
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;"><input type="checkbox" id="gps-eq-sin"> Solo sin ligar</label>
+        </div>
+        <div class="seg-status" id="gps-eq-status">Cada unidad de PosiTrace se liga sola con Maquinaria por su número AF. Si no coincide o falta, elígela aquí.</div>
+        <datalist id="gps-eq-codigos"></datalist>
+        <div class="table-wrap"><table><thead><tr><th>Unidad en PosiTrace</th><th>Unidad en sistema</th><th>Liga</th><th>Último viaje</th></tr></thead><tbody id="gps-eq-tbody"></tbody></table></div>
+      </div>
+    </div>
+
     <!-- Verificaciones vehiculares (nov-2026, Carlos). Ver getVerificaciones en handlers.js. -->
     <div id="pview-verificaciones" style="display:none;">
       <div class="seg-tarjetas" id="ver-tarjetas"></div>
@@ -4950,6 +5010,7 @@
             <div class="usr-permiso-row"><label>Insumos</label><select id="usr-perm-insumos" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Seguros</label><select id="usr-perm-seguros" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Verificaciones</label><select id="usr-perm-verificaciones" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
+            <div class="usr-permiso-row"><label>GPS (PosiTrace)</label><select id="usr-perm-gps" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
             <div class="usr-permiso-row"><label>Indicadores</label><select id="usr-perm-indicadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (catálogo de semanas)</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
@@ -5358,7 +5419,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'verificaciones', 'avance_huerta', 'indicadores', 'usuarios', 'costo_refacciones'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'verificaciones', 'gps', 'avance_huerta', 'indicadores', 'usuarios', 'costo_refacciones'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -5470,6 +5531,7 @@ function aplicarPermisosPanelUI(){
     ['insumos', ptabInsumos, pviewInsumos],
     ['seguros', ptabSeguros, pviewSeguros],
     ['verificaciones', ptabVerificaciones, pviewVerificaciones],
+    ['gps', ptabGps, pviewGps],
     ['avance_huerta', ptabAvanceHuerta, pviewAvanceHuerta],
     ['indicadores', ptabIndicadores, pviewIndicadores],
     ['usuarios', ptabUsuarios, pviewUsuarios],
@@ -7812,6 +7874,7 @@ const ptabRefacciones = document.getElementById('ptab-refacciones');
 const ptabInsumos = document.getElementById('ptab-insumos');
 const ptabSeguros = document.getElementById('ptab-seguros');
 const ptabVerificaciones = document.getElementById('ptab-verificaciones');
+const ptabGps = document.getElementById('ptab-gps');
 const ptabAvanceHuerta = document.getElementById('ptab-avancehuerta');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
 const ptabIndicadores = document.getElementById('ptab-indicadores');
@@ -7828,6 +7891,7 @@ const pviewRefacciones = document.getElementById('pview-refacciones');
 const pviewInsumos = document.getElementById('pview-insumos');
 const pviewSeguros = document.getElementById('pview-seguros');
 const pviewVerificaciones = document.getElementById('pview-verificaciones');
+const pviewGps = document.getElementById('pview-gps');
 const pviewAvanceHuerta = document.getElementById('pview-avancehuerta');
 const pviewUsuarios = document.getElementById('pview-usuarios');
 const pviewIndicadores = document.getElementById('pview-indicadores');
@@ -7844,8 +7908,8 @@ let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
 let AVANCE_HUERTA_HUERTAS_CARGADAS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabVerificaciones, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewVerificaciones, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabVerificaciones, ptabGps, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewVerificaciones, pviewGps, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -7945,6 +8009,10 @@ ptabSeguros.addEventListener('click', function(){
 ptabVerificaciones.addEventListener('click', function(){
   activarPanelTab(ptabVerificaciones, pviewVerificaciones);
   if(!VER_DATOS){ cargarVerificaciones_(); } else { renderVerificaciones_(); }
+});
+ptabGps.addEventListener('click', function(){
+  activarPanelTab(ptabGps, pviewGps);
+  gpsAbrir_();
 });
 ptabAvanceHuerta.addEventListener('click', function(){
   activarPanelTab(ptabAvanceHuerta, pviewAvanceHuerta);
@@ -26832,6 +26900,294 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('controllerchange', function(){ panelAsegurarCopiaSinInternet_(); });
 }
 
+
+// ------------------------------------------------------------------
+// GPS de PosiTrace (nov-2026, Carlos). Los informes que PosiTrace manda
+// por correo los lee el servidor (server/positrace.js). Aquí: estado de la
+// lectura, Fin de semana, Recorridos (con mapa), Salidas de huerta (llega
+// con el Reporte de geocercas) y la liga de unidades con Maquinaria.
+// ------------------------------------------------------------------
+var GPS_VISTA = 'finde';
+var GPS_ESTADO = null;
+var GPS_FINDE = null;
+var GPS_REC = null;
+var GPS_EQUIPOS = null;
+var GPS_MAPA = null;
+var GPS_MAPA_CAPAS = [];
+
+function gpsPuede_(){ return puedeCapturarPestana('gps'); }
+function gpsLlamar_(fn, args, ok, mal){
+  var r = google.script.run.withSuccessHandler(ok).withFailureHandler(function(e){ (mal || function(m){ alert(m); })((e && e.message) || 'No se pudo conectar con el servidor.'); });
+  r[fn].apply(r, [ACCESS_CODE, PANEL_USUARIO].concat(args || []));
+}
+function gpsHoras_(seg){
+  seg = Number(seg) || 0;
+  var h = Math.floor(seg / 3600), m = Math.round((seg % 3600) / 60);
+  if(m === 60){ h++; m = 0; }
+  return h ? h + ' h ' + (m < 10 ? '0' : '') + m + ' min' : m + ' min';
+}
+function gpsKm_(n){ return (Number(n) || 0).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
+function gpsFechaHora_(s){
+  if(!s) return '';
+  var d = s.slice(8, 10) + '/' + s.slice(5, 7);
+  return d + ' ' + s.slice(11, 16);
+}
+function gpsFechaIso_(d){ return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function gpsNombreDia_(iso){ return ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][new Date(iso + 'T12:00:00').getDay()]; }
+
+function gpsAbrir_(){
+  if(!document.getElementById('gps-sabado').options.length){
+    // Los últimos 10 sábados (el más reciente primero)
+    var sel = document.getElementById('gps-sabado');
+    var d = new Date(); d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - ((d.getDay() + 1) % 7));
+    for(var i = 0; i < 10; i++){
+      var sab = gpsFechaIso_(d), dom = new Date(d); dom.setDate(dom.getDate() + 1);
+      var o = document.createElement('option');
+      o.value = sab; o.textContent = 'Fin de semana ' + sab.slice(8, 10) + '/' + sab.slice(5, 7) + ' – ' + gpsFechaIso_(dom).slice(8, 10) + '/' + gpsFechaIso_(dom).slice(5, 7) + '/' + sab.slice(0, 4);
+      sel.appendChild(o);
+      d.setDate(d.getDate() - 7);
+    }
+    var ayer = new Date(); ayer.setDate(ayer.getDate() - 1);
+    document.getElementById('gps-rec-desde').value = gpsFechaIso_(ayer);
+    document.getElementById('gps-rec-hasta').value = gpsFechaIso_(ayer);
+  }
+  gpsCargarEstado_();
+  gpsCargarEquipos_();
+  gpsMostrarVista_();
+}
+
+function gpsCargarEstado_(){
+  gpsLlamar_('getGpsEstado', [], function(r){
+    if(!r || !r.success){ document.getElementById('gps-estado').innerHTML = '<span class="mal">' + escapeHtml((r && r.error) || 'No se pudo leer el estado.') + '</span>'; return; }
+    GPS_ESTADO = r;
+    gpsPintarEstado_();
+  }, function(m){ document.getElementById('gps-estado').innerHTML = '<span class="mal">' + escapeHtml(m) + '</span>'; });
+}
+function gpsPintarEstado_(){
+  var r = GPS_ESTADO; if(!r) return;
+  var partes = [];
+  if(!r.configurado) partes.push('<span class="mal">Falta configurar el correo en Render (GPS_CORREO_USUARIO y GPS_CORREO_PASSWORD).</span>');
+  else if(r.ultimoError) partes.push('<span class="mal">⚠ ' + escapeHtml(r.ultimoError) + '</span>');
+  else partes.push('<span class="ok">● Leyendo el correo de PosiTrace</span>');
+  if(r.ultimaRevision) partes.push('<span class="dim">Última revisión: ' + escapeHtml(new Date(r.ultimaRevision).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' })) + '</span>');
+  partes.push('<span>' + (r.viajes || 0).toLocaleString('es-MX') + ' viajes' + (r.desde ? ' · del ' + escapeHtml(gpsFechaHora_(r.desde).slice(0, 5)) + ' al ' + escapeHtml(gpsFechaHora_(r.hasta).slice(0, 5)) : '') + '</span>');
+  if(r.archivos && r.archivos.length){
+    var a = r.archivos[0];
+    partes.push('<span class="dim" title="' + escapeHtml(r.archivos.map(function(x){ return x.recibido + ' · ' + x.nombre + ' · ' + (x.tipo || '?') + ' · ' + x.filas + ' filas' + (x.error ? ' · ERROR: ' + x.error : ''); }).join('\n')) + '">Último informe: ' + escapeHtml(gpsFechaHora_(a.recibido)) + ' (' + escapeHtml(a.tipo || '?') + ')</span>');
+  }
+  if(r.equiposSinLigar) partes.push('<a href="#" id="gps-ir-sinliga" class="mal">' + r.equiposSinLigar + ' unidad(es) sin ligar</a>');
+  partes.push('<button class="export-btn" id="gps-revisar">Revisar correo ahora</button>');
+  document.getElementById('gps-estado').innerHTML = partes.join('');
+  document.getElementById('gps-revisar').addEventListener('click', gpsRevisarAhora_);
+  var ir = document.getElementById('gps-ir-sinliga');
+  if(ir) ir.addEventListener('click', function(e){ e.preventDefault(); GPS_VISTA = 'equipos'; document.getElementById('gps-eq-sin').checked = true; gpsMostrarVista_(); });
+}
+function gpsRevisarAhora_(){
+  var b = document.getElementById('gps-revisar');
+  b.disabled = true; b.textContent = 'Revisando...';
+  gpsLlamar_('revisarCorreoGpsAhora', [], function(r){
+    b.disabled = false; b.textContent = 'Revisar correo ahora';
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo revisar el correo.'); gpsCargarEstado_(); return; }
+    if(r.ocupado){ alert('Ya se está revisando el correo; intenta en un momento.'); return; }
+    if(r.archivos){ GPS_FINDE = null; GPS_REC = null; gpsCargarEquipos_(); gpsMostrarVista_(); }
+    gpsCargarEstado_();
+    alert(r.archivos ? ('Listo: ' + r.archivos + ' informe(s) nuevo(s), ' + r.viajesNuevos + ' viaje(s) nuevos.') : 'No hay informes nuevos en el correo.');
+  }, function(m){ b.disabled = false; b.textContent = 'Revisar correo ahora'; alert(m); });
+}
+
+function gpsMostrarVista_(){
+  document.querySelectorAll('.gps-subtab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-vista') === GPS_VISTA); });
+  ['finde', 'rec', 'salidas', 'equipos'].forEach(function(v){ document.getElementById('gps-v-' + v).style.display = v === GPS_VISTA ? '' : 'none'; });
+  if(GPS_VISTA === 'finde'){ if(!GPS_FINDE || GPS_FINDE.sabado !== document.getElementById('gps-sabado').value) gpsCargarFinde_(); else gpsPintarFinde_(); }
+  if(GPS_VISTA === 'rec'){ if(!GPS_REC) gpsCargarRec_(); else gpsPintarRec_(); }
+  if(GPS_VISTA === 'equipos') gpsPintarEquipos_();
+}
+
+// ---------- Fin de semana ----------
+function gpsCargarFinde_(){
+  var sab = document.getElementById('gps-sabado').value;
+  document.getElementById('gps-finde-status').textContent = 'Cargando...';
+  gpsLlamar_('getGpsFinDeSemana', [sab], function(r){
+    if(!r || !r.success){ document.getElementById('gps-finde-status').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+    GPS_FINDE = r; gpsPintarFinde_();
+  }, function(m){ document.getElementById('gps-finde-status').textContent = m; });
+}
+function gpsFiltrarFinde_(){
+  if(!GPS_FINDE) return [];
+  var q = document.getElementById('gps-finde-buscar').value.trim().toLowerCase();
+  var solo = document.getElementById('gps-finde-solo').checked;
+  return GPS_FINDE.equipos.filter(function(x){
+    if(solo && !x.viajes) return false;
+    if(q && (x.equipoGps + ' ' + x.codigoUnidad + ' ' + x.unidad).toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+}
+function gpsPintarFinde_(){
+  var r = GPS_FINDE; if(!r) return;
+  var lista = gpsFiltrarFinde_();
+  var movidas = r.equipos.filter(function(x){ return x.viajes; });
+  var kmTot = movidas.reduce(function(a, x){ return a + x.kmTotal; }, 0);
+  var mas = movidas.filter(function(x){ return x.kmTotal >= 50; }).length;
+  var t = function(n, txt, cls){ return '<div class="seg-tarjeta ' + cls + '"><div class="n">' + n + '</div><div class="t">' + txt + '</div></div>'; };
+  document.getElementById('gps-tarjetas').innerHTML = r.hayDatos
+    ? t(movidas.length, 'Se movieron', movidas.length ? 'ambar' : 'verde') + t(r.equipos.length - movidas.length, 'No se movieron', 'verde') + t(gpsKm_(kmTot), 'Km en total', '') + t(mas, 'Más de 50 km', mas ? 'rojo' : 'verde')
+    : '';
+  document.getElementById('gps-finde-status').textContent = r.hayDatos ? '' : 'Todavía no hay informes de PosiTrace de ese fin de semana. Llegan con el informe diario de Viajes.';
+  var tb = document.getElementById('gps-finde-tbody');
+  if(!r.hayDatos){ tb.innerHTML = ''; return; }
+  tb.innerHTML = lista.map(function(x){
+    return '<tr class="' + (x.viajes ? '' : 'gps-cero') + '"><td>' + escapeHtml(x.equipoGps) + '</td><td>' + escapeHtml(x.codigoUnidad ? x.codigoUnidad + (x.unidad && x.unidad !== x.codigoUnidad ? ' · ' + x.unidad : '') : '—') + '</td>'
+      + '<td>' + gpsKm_(x.kmSab) + '</td><td>' + gpsKm_(x.kmDom) + '</td><td><b>' + gpsKm_(x.kmTotal) + '</b></td><td>' + (x.viajes ? gpsHoras_(x.segMov) : '—') + '</td><td>' + x.viajes + '</td>'
+      + '<td>' + (x.primero ? gpsNombreDia_(x.primero.slice(0, 10)) + ' ' + escapeHtml(x.primero.slice(11, 16)) + ' → ' + gpsNombreDia_(x.ultimo.slice(0, 10)) + ' ' + escapeHtml(x.ultimo.slice(11, 16)) : '—') + '</td>'
+      + '<td style="font-size:12px;">' + escapeHtml(x.lugares.join(' · ')) + (x.sospechosos ? ' <span class="gps-sosp" title="Viajes de más de 20 h o con días sin señal: no se suman">(' + x.sospechosos + ' sin señal)</span>' : '') + '</td>'
+      + '<td>' + (x.viajes ? '<button class="export-btn gps-ver-rec" data-eq="' + escapeHtml(x.equipoGps) + '">Ver recorrido</button>' : '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="10" style="text-align:center;color:var(--text-dim);">Ninguna unidad con ese filtro.</td></tr>';
+  tb.querySelectorAll('.gps-ver-rec').forEach(function(b){
+    b.addEventListener('click', function(){
+      var sab = r.sabado, dom = new Date(sab + 'T12:00:00'); dom.setDate(dom.getDate() + 1);
+      gpsIrARecorrido_(b.getAttribute('data-eq'), sab, gpsFechaIso_(dom));
+    });
+  });
+}
+function gpsExcelFinde_(){
+  if(!GPS_FINDE || !GPS_FINDE.hayDatos){ alert('No hay datos de ese fin de semana.'); return; }
+  var filas = gpsFiltrarFinde_().map(function(x){
+    return { equipo: x.equipoGps, unidad: x.codigoUnidad || '', sab: x.kmSab, dom: x.kmDom, total: x.kmTotal, mov: x.viajes ? gpsHoras_(x.segMov) : '', viajes: x.viajes,
+      primero: x.primero || '', ultimo: x.ultimo || '', lugares: x.lugares.join(' · ') };
+  });
+  var cols = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Sábado km', key:'sab', width:11}, {header:'Domingo km', key:'dom', width:11},
+    {header:'Total km', key:'total', width:10}, {header:'En movimiento', key:'mov', width:14}, {header:'Viajes', key:'viajes', width:8}, {header:'Primer movimiento', key:'primero', width:19}, {header:'Último movimiento', key:'ultimo', width:19}, {header:'Lugares', key:'lugares', width:60}];
+  descargarComoExcel_('GPS - Fin de semana ' + GPS_FINDE.sabado, 'Movimiento de unidades (PosiTrace) sábado y domingo', [{ titulo: 'Fin de semana', columnas: cols, filas: filas, autoFiltro: true }], 'gps_fin_de_semana_' + GPS_FINDE.sabado);
+}
+
+// ---------- Recorridos ----------
+function gpsIrARecorrido_(equipo, desde, hasta){
+  document.getElementById('gps-rec-equipo').value = equipo;
+  document.getElementById('gps-rec-desde').value = desde;
+  document.getElementById('gps-rec-hasta').value = hasta;
+  GPS_VISTA = 'rec'; GPS_REC = null;
+  gpsMostrarVista_();
+}
+function gpsCargarRec_(){
+  var f = { desde: document.getElementById('gps-rec-desde').value, hasta: document.getElementById('gps-rec-hasta').value, equipo: document.getElementById('gps-rec-equipo').value };
+  if(!f.desde){ document.getElementById('gps-rec-status').textContent = 'Elige la fecha.'; return; }
+  if(!f.hasta || f.hasta < f.desde) f.hasta = f.desde;
+  document.getElementById('gps-rec-status').textContent = 'Cargando...';
+  gpsLlamar_('getGpsViajes', [f], function(r){
+    if(!r || !r.success){ document.getElementById('gps-rec-status').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+    r.filtro = f; GPS_REC = r; gpsPintarRec_();
+  }, function(m){ document.getElementById('gps-rec-status').textContent = m; });
+}
+function gpsFiltrarRec_(){
+  if(!GPS_REC) return [];
+  var q = document.getElementById('gps-rec-buscar').value.trim().toLowerCase();
+  return GPS_REC.viajes.filter(function(v){ return !q || (v.equipoGps + ' ' + v.codigoUnidad + ' ' + v.llegada).toLowerCase().indexOf(q) !== -1; });
+}
+function gpsPintarRec_(){
+  var r = GPS_REC; if(!r) return;
+  var lista = gpsFiltrarRec_();
+  var reales = lista.filter(function(v){ return !v.sospechoso; });
+  var km = reales.reduce(function(a, v){ return a + (v.km || 0); }, 0);
+  var seg = reales.reduce(function(a, v){ return a + (v.duracionSeg || 0); }, 0);
+  document.getElementById('gps-rec-status').textContent = lista.length
+    ? lista.length + ' viaje(s) · ' + gpsKm_(km) + ' km · ' + gpsHoras_(seg) + ' en movimiento' + (r.filtro.equipo ? '' : ' · Elige una unidad para ver su recorrido en el mapa.')
+    : 'No hay viajes con ese filtro.';
+  document.getElementById('gps-rec-tbody').innerHTML = lista.map(function(v){
+    return '<tr' + (v.sospechoso ? ' class="gps-sosp" title="Viaje de más de 20 h o con días sin señal (no se suma)"' : '') + '><td>' + escapeHtml(v.equipoGps) + '</td><td>' + escapeHtml(gpsNombreDia_(v.inicio.slice(0, 10)) + ' ' + gpsFechaHora_(v.inicio)) + '</td><td>' + escapeHtml(gpsFechaHora_(v.fin)) + '</td>'
+      + '<td>' + gpsHoras_(v.duracionSeg) + '</td><td>' + gpsKm_(v.km) + '</td><td style="font-size:12px;">' + escapeHtml(v.llegada.replace(/^[,\s]+/, ''))
+      + (v.lat !== null ? ' <a href="https://www.google.com/maps?q=' + v.lat + ',' + v.lng + '" target="_blank" rel="noopener" title="Abrir en Google Maps">📍</a>' : '') + '</td>'
+      + '<td>' + (v.paradaSeg ? gpsHoras_(v.paradaSeg) : '') + '</td><td>' + (v.odometro !== null ? Math.round(v.odometro).toLocaleString('es-MX') : '') + '</td></tr>';
+  }).join('');
+  gpsPintarMapa_(r.filtro.equipo ? lista : [], r.puntoInicial);
+}
+function gpsPintarMapa_(viajes, inicial){
+  var div = document.getElementById('gps-mapa');
+  var puntos = viajes.filter(function(v){ return v.lat !== null && !v.sospechoso; });
+  if(!puntos.length || typeof ahCargarGoogleMapsSiHaceFalta_ !== 'function'){ div.style.display = 'none'; return; }
+  div.style.display = 'block';
+  ahCargarGoogleMapsSiHaceFalta_(function(){
+    if(!GPS_MAPA) GPS_MAPA = new google.maps.Map(div, { mapTypeId: 'hybrid', streetViewControl: false });
+    GPS_MAPA_CAPAS.forEach(function(c){ c.setMap(null); }); GPS_MAPA_CAPAS = [];
+    var ruta = (inicial ? [inicial] : []).concat(puntos.map(function(v){ return { lat: v.lat, lng: v.lng }; }));
+    var bounds = new google.maps.LatLngBounds();
+    ruta.forEach(function(p){ bounds.extend(p); });
+    GPS_MAPA_CAPAS.push(new google.maps.Polyline({ map: GPS_MAPA, path: ruta, strokeColor: '#E8871E', strokeOpacity: 0.9, strokeWeight: 3,
+      icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 2.5 }, offset: '50%' }] }));
+    var info = new google.maps.InfoWindow();
+    puntos.forEach(function(v, i){
+      var m = new google.maps.Marker({ map: GPS_MAPA, position: { lat: v.lat, lng: v.lng }, label: { text: String(i + 1), color: '#fff', fontSize: '11px' }, title: gpsFechaHora_(v.fin) + ' · ' + v.llegada });
+      m.addListener('click', function(){
+        info.setContent('<div style="color:#222;font-size:12.5px;"><b>' + escapeHtml(gpsFechaHora_(v.inicio)) + ' → ' + escapeHtml(gpsFechaHora_(v.fin)) + '</b><br>' + escapeHtml(v.llegada) + '<br>' + gpsKm_(v.km) + ' km' + (v.paradaSeg ? ' · se quedó ' + gpsHoras_(v.paradaSeg) : '') + '</div>');
+        info.open(GPS_MAPA, m);
+      });
+      GPS_MAPA_CAPAS.push(m);
+    });
+    if(ruta.length === 1){ GPS_MAPA.setCenter(ruta[0]); GPS_MAPA.setZoom(15); } else GPS_MAPA.fitBounds(bounds);
+  });
+}
+function gpsExcelRec_(){
+  var lista = gpsFiltrarRec_();
+  if(!lista.length){ alert('No hay viajes para exportar.'); return; }
+  var filas = lista.map(function(v){ return { equipo: v.equipoGps, unidad: v.codigoUnidad, salida: v.inicio, llegadaH: v.fin || '', dur: gpsHoras_(v.duracionSeg), km: v.km, lugar: v.llegada.replace(/^[,\s]+/, ''), parada: v.paradaSeg ? gpsHoras_(v.paradaSeg) : '', odo: v.odometro, coords: v.lat !== null ? v.lat + ', ' + v.lng : '', nota: v.sospechoso ? 'Sin señal / no se suma' : '' }; });
+  var cols = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Salida', key:'salida', width:19}, {header:'Llegada', key:'llegadaH', width:19}, {header:'Duración', key:'dur', width:12},
+    {header:'Km', key:'km', width:8}, {header:'Llegó a', key:'lugar', width:50}, {header:'Se quedó', key:'parada', width:12}, {header:'Odómetro', key:'odo', width:12}, {header:'Coordenadas', key:'coords', width:24}, {header:'Nota', key:'nota', width:20}];
+  var f = GPS_REC.filtro;
+  descargarComoExcel_('GPS - Recorridos ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), f.equipo || 'Todas las unidades', [{ titulo: 'Recorridos', columnas: cols, filas: filas, autoFiltro: true }], 'gps_recorridos_' + f.desde);
+}
+
+// ---------- Unidades GPS (liga con Maquinaria) ----------
+function gpsCargarEquipos_(){
+  gpsLlamar_('getGpsEquipos', [], function(r){
+    if(!r || !r.success) return;
+    GPS_EQUIPOS = r.equipos;
+    document.getElementById('gps-eq-codigos').innerHTML = (r.unidades || []).map(function(u){ return '<option value="' + escapeHtml(u.codigo) + '">' + escapeHtml(u.unidad) + '</option>'; }).join('');
+    var sel = document.getElementById('gps-rec-equipo'), antes = sel.value;
+    sel.innerHTML = '<option value="">Todas las unidades</option>' + r.equipos.map(function(e){ return '<option value="' + escapeHtml(e.equipoGps) + '">' + escapeHtml(e.equipoGps + (e.codigoUnidad ? ' (' + e.codigoUnidad + ')' : '')) + '</option>'; }).join('');
+    sel.value = antes;
+    if(GPS_VISTA === 'equipos') gpsPintarEquipos_();
+  }, function(){});
+}
+function gpsPintarEquipos_(){
+  var tb = document.getElementById('gps-eq-tbody');
+  if(!GPS_EQUIPOS){ tb.innerHTML = '<tr><td colspan="4">Cargando...</td></tr>'; return; }
+  var q = document.getElementById('gps-eq-buscar').value.trim().toLowerCase();
+  var sin = document.getElementById('gps-eq-sin').checked;
+  var puede = gpsPuede_();
+  var lista = GPS_EQUIPOS.filter(function(e){ return (!sin || !e.codigoUnidad) && (!q || (e.equipoGps + ' ' + (e.codigoUnidad || '') + ' ' + e.unidad).toLowerCase().indexOf(q) !== -1); });
+  tb.innerHTML = lista.map(function(e, i){
+    var liga = e.ligado === 'manual' ? 'A mano' : (e.ligado === 'auto' && e.codigoUnidad ? 'Automática (AF)' : 'Sin ligar');
+    return '<tr><td>' + escapeHtml(e.equipoGps) + '</td><td>'
+      + (puede ? '<input type="text" list="gps-eq-codigos" class="gps-eq-input" data-eq="' + escapeHtml(e.equipoGps) + '" value="' + escapeHtml(e.codigoUnidad || '') + '" placeholder="Código de la unidad" style="width:150px;"> <span style="font-size:12px;color:var(--text-dim);">' + escapeHtml(e.unidad) + '</span>'
+               : escapeHtml((e.codigoUnidad || '—') + (e.unidad ? ' · ' + e.unidad : '')))
+      + '</td><td' + (e.codigoUnidad ? '' : ' style="color:var(--danger);"') + '>' + liga + '</td><td>' + escapeHtml(gpsFechaHora_(e.ultimoViaje)) + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-dim);">' + (GPS_EQUIPOS.length ? 'Ninguna con ese filtro.' : 'Todavía no llegan informes de PosiTrace.') + '</td></tr>';
+  tb.querySelectorAll('.gps-eq-input').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var eq = inp.getAttribute('data-eq');
+      gpsLlamar_('guardarLigaGps', [eq, inp.value.trim()], function(r){
+        if(!r || !r.success){ alert((r && r.error) || 'No se pudo guardar.'); return; }
+        GPS_FINDE = null; GPS_REC = null;
+        gpsCargarEquipos_(); gpsCargarEstado_();
+      });
+    });
+  });
+}
+
+// ---------- Eventos ----------
+document.querySelectorAll('.gps-subtab').forEach(function(b){
+  b.addEventListener('click', function(){ GPS_VISTA = b.getAttribute('data-vista'); gpsMostrarVista_(); });
+});
+document.getElementById('gps-sabado').addEventListener('change', gpsCargarFinde_);
+document.getElementById('gps-finde-buscar').addEventListener('input', gpsPintarFinde_);
+document.getElementById('gps-finde-solo').addEventListener('change', gpsPintarFinde_);
+document.getElementById('gps-finde-excel').addEventListener('click', gpsExcelFinde_);
+document.getElementById('gps-rec-ver').addEventListener('click', gpsCargarRec_);
+['gps-rec-desde', 'gps-rec-hasta', 'gps-rec-equipo'].forEach(function(id){ document.getElementById(id).addEventListener('change', gpsCargarRec_); });
+document.getElementById('gps-rec-buscar').addEventListener('input', gpsPintarRec_);
+document.getElementById('gps-rec-excel').addEventListener('click', gpsExcelRec_);
+document.getElementById('gps-eq-buscar').addEventListener('input', gpsPintarEquipos_);
+document.getElementById('gps-eq-sin').addEventListener('change', gpsPintarEquipos_);
 </script>
 </body>
 </html>

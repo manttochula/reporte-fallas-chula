@@ -61,6 +61,8 @@ if (NUBE_ARCHIVOS_ACTIVA) {
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Alias amigables, equivalentes a las rutas ?vista=... del doGet original.
+// Para el despertador de GitHub Actions (plan gratis de Render): responde rápido.
+app.get('/salud', (req, res) => res.json({ ok: true }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Index.html')));
 app.get('/historial', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Historial.html')));
 app.get('/taller', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Taller.html')));
@@ -299,4 +301,15 @@ app.listen(PORT, () => {
   // Una sola vez (nov-2026): OC ya generadas → nota con 2 firmas (Solicita / Autoriza).
   setTimeout(() => handlers.migrarDosFirmasOc_().catch((err) => console.error('[oc] Falló el cambio a 2 firmas:', err.message)), 20 * 1000);
   setInterval(revisarSeguros, INTERVALO_REVISION_PREVENTIVOS_MS);
+
+  // GPS de PosiTrace (nov-2026): lee los informes que llegan al Gmail
+  // exclusivo (GPS_CORREO_USUARIO / GPS_CORREO_PASSWORD). Al arrancar y cada
+  // 15 min. En el plan gratis de Render el servidor se duerme: el
+  // "despertador" de GitHub Actions lo visita cada 15 min para que siga
+  // revisando aunque nadie tenga abierto el Panel.
+  const revisarGps = () => handlers.revisarCorreoGps_()
+    .then((r) => { if (r && r.archivos) console.log('[gps] ' + r.archivos + ' archivo(s), ' + r.viajesNuevos + ' viaje(s) nuevos'); if (r && r.error) console.error('[gps] ' + r.error); })
+    .catch((err) => console.error('[gps] Falló la revisión del correo:', err.message));
+  setTimeout(revisarGps, 45 * 1000);
+  setInterval(revisarGps, 15 * 60 * 1000);
 });

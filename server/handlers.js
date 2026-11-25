@@ -49,7 +49,7 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // Carlos le dé este permiso.
 // 'costo_refacciones' (nov-2026) no es pestaña: es el permiso para ver la columna
 // "Costo refacciones" en Órdenes (lo ya registrado como gasto en Comercial).
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'verificaciones', 'costo_refacciones'];
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'verificaciones', 'costo_refacciones', 'gps'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -13900,3 +13900,139 @@ module.exports = {
   getOrdPendAtencionDias,
   guardarOrdPendAtencionDias,
 };
+
+
+// ------------------------------------------------------------------
+// GPS de PosiTrace (nov-2026, Carlos): ver server/positrace.js. Permiso 'gps'.
+// Las horas se guardan y se regresan como texto en hora local de México
+// ("AAAA-MM-DD HH:MM:SS"), como vienen en el informe de PosiTrace.
+// ------------------------------------------------------------------
+const positrace = require('./positrace');
+const GPS_FMT_ = "'%Y-%m-%d %H:%i:%s'";
+const fechaGpsValida_ = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
+
+async function getGpsEstado(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  const [cfg] = await pool.query("SELECT clave, valor FROM configuracion WHERE clave IN ('gps_ultima_revision', 'gps_ultimo_error')");
+  const c = {}; cfg.forEach((r) => { c[r.clave] = r.valor; });
+  const [archivos] = await pool.query(
+    `SELECT id, asunto, DATE_FORMAT(recibido, ${GPS_FMT_}) recibido, nombre, tipo, informe_fechas, filas, procesado, error
+     FROM gps_archivos ORDER BY recibido DESC, id DESC LIMIT 15`);
+  const [[tot]] = await pool.query(`SELECT COUNT(*) viajes, DATE_FORMAT(MIN(inicio), ${GPS_FMT_}) desde, DATE_FORMAT(MAX(inicio), ${GPS_FMT_}) hasta FROM gps_viajes`);
+  const [[sinLiga]] = await pool.query('SELECT COUNT(*) n FROM gps_equipos WHERE codigo_unidad IS NULL');
+  return {
+    success: true,
+    configurado: !!positrace.credenciales_(),
+    ultimaRevision: c.gps_ultima_revision || null,
+    ultimoError: c.gps_ultimo_error || '',
+    archivos, viajes: tot.viajes, desde: tot.desde, hasta: tot.hasta, equiposSinLigar: sinLiga.n,
+  };
+}
+
+async function revisarCorreoGpsAhora(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  const r = await positrace.revisarCorreoGps();
+  if (!r.configurado) return { success: false, error: 'Falta configurar el correo (GPS_CORREO_USUARIO y GPS_CORREO_PASSWORD en Render).' };
+  if (r.ocupado) return { success: true, ocupado: true };
+  if (r.error) return { success: false, error: r.error };
+  return Object.assign({ success: true }, r);
+}
+
+// Equipos de PosiTrace con su liga a Maquinaria.
+async function getGpsEquipos(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  const [rows] = await pool.query(
+    `SELECT e.equipo_gps, e.codigo_unidad, e.ligado, DATE_FORMAT(e.ultimo_viaje, ${GPS_FMT_}) ultimo_viaje, m.unidad, m.tipo_unidad
+     FROM gps_equipos e LEFT JOIN maquinaria m ON m.codigo_unidad = e.codigo_unidad ORDER BY e.equipo_gps`);
+  const [unidades] = await pool.query('SELECT codigo_unidad, unidad FROM maquinaria WHERE baja_fecha IS NULL ORDER BY codigo_unidad');
+  return {
+    success: true,
+    unidades: unidades.map((u) => ({ codigo: u.codigo_unidad, unidad: u.unidad || '' })),
+    equipos: rows.map((r) => ({ equipoGps: r.equipo_gps, codigoUnidad: r.codigo_unidad, ligado: r.ligado, ultimoViaje: r.ultimo_viaje, unidad: r.unidad || '', tipo: r.tipo_unidad || '', numeroAf: positrace.numeroAf_(r.equipo_gps) })),
+  };
+}
+
+async function guardarLigaGps(code, nombreUsuario, equipoGps, codigoUnidad) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  const eq = String(equipoGps || '').trim();
+  const cod = String(codigoUnidad || '').trim() || null;
+  const [[e]] = await pool.query('SELECT equipo_gps FROM gps_equipos WHERE equipo_gps = ?', [eq]);
+  if (!e) return { success: false, error: 'No existe ese equipo de PosiTrace.' };
+  if (cod) {
+    const [[m]] = await pool.query('SELECT codigo_unidad FROM maquinaria WHERE codigo_unidad = ?', [cod]);
+    if (!m) return { success: false, error: 'No existe la unidad ' + cod + ' en Maquinaria.' };
+  }
+  await pool.query("UPDATE gps_equipos SET codigo_unidad = ?, ligado = 'manual' WHERE equipo_gps = ?", [cod, eq]);
+  await registrarAuditoria_('gps_equipos', eq, 'ligar', nombreUsuario, cod ? 'Ligado a ' + cod : 'Sin liga');
+  return { success: true };
+}
+
+function filaViajeGps_(r) {
+  return {
+    equipoGps: r.equipo_gps, codigoUnidad: r.codigo_unidad || '', unidad: r.unidad || '',
+    inicio: r.inicio, fin: r.fin, km: r.km === null ? null : Number(r.km), duracionSeg: r.duracion_seg, paradaSeg: r.parada_seg,
+    llegada: r.llegada || '', lat: r.lat === null ? null : Number(r.lat), lng: r.lng === null ? null : Number(r.lng),
+    odometro: r.odometro === null ? null : Number(r.odometro), horasMotorSeg: r.horas_motor_seg, sospechoso: !!r.sospechoso,
+  };
+}
+
+// Viajes entre dos fechas (máx. 31 días), opcionalmente de un equipo.
+async function getGpsViajes(code, nombreUsuario, filtros) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  filtros = filtros || {};
+  const desde = fechaGpsValida_(filtros.desde) ? filtros.desde : null;
+  const hasta = fechaGpsValida_(filtros.hasta) ? filtros.hasta : desde;
+  if (!desde) return { success: false, error: 'Elige la fecha.' };
+  if ((new Date(hasta) - new Date(desde)) / 86400000 > 31) return { success: false, error: 'Elige un rango de 31 días o menos.' };
+  const cond = ['v.inicio >= ?', 'v.inicio < DATE_ADD(?, INTERVAL 1 DAY)'];
+  const params = [desde, hasta];
+  if (filtros.equipo) { cond.push('v.equipo_gps = ?'); params.push(String(filtros.equipo)); }
+  const [rows] = await pool.query(
+    `SELECT v.equipo_gps, e.codigo_unidad, m.unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin,
+            v.km, v.duracion_seg, v.parada_seg, v.llegada, v.lat, v.lng, v.odometro, v.horas_motor_seg, v.sospechoso
+     FROM gps_viajes v LEFT JOIN gps_equipos e ON e.equipo_gps = v.equipo_gps LEFT JOIN maquinaria m ON m.codigo_unidad = e.codigo_unidad
+     WHERE ${cond.join(' AND ')} ORDER BY v.equipo_gps, v.inicio LIMIT 20000`, params);
+  // Para dibujar el recorrido: el punto de donde salió el primer viaje = donde terminó el viaje anterior.
+  let anterior = null;
+  if (filtros.equipo && rows.length) {
+    const [[a]] = await pool.query('SELECT lat, lng FROM gps_viajes WHERE equipo_gps = ? AND inicio < ? ORDER BY inicio DESC LIMIT 1', [String(filtros.equipo), desde]);
+    if (a && a.lat !== null) anterior = { lat: Number(a.lat), lng: Number(a.lng) };
+  }
+  return { success: true, viajes: rows.map(filaViajeGps_), puntoInicial: anterior };
+}
+
+// Resumen de un fin de semana (sábado y domingo) por equipo.
+async function getGpsFinDeSemana(code, nombreUsuario, sabado) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  if (!fechaGpsValida_(sabado) || new Date(sabado + 'T12:00:00Z').getUTCDay() !== 6) return { success: false, error: 'Elige un sábado.' };
+  const [rows] = await pool.query(
+    `SELECT v.equipo_gps, e.codigo_unidad, m.unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin,
+            v.km, v.duracion_seg, v.parada_seg, v.llegada, v.lat, v.lng, v.odometro, v.horas_motor_seg, v.sospechoso
+     FROM gps_viajes v LEFT JOIN gps_equipos e ON e.equipo_gps = v.equipo_gps LEFT JOIN maquinaria m ON m.codigo_unidad = e.codigo_unidad
+     WHERE v.inicio >= ? AND v.inicio < DATE_ADD(?, INTERVAL 2 DAY) ORDER BY v.equipo_gps, v.inicio`, [sabado, sabado]);
+  const [equipos] = await pool.query('SELECT e.equipo_gps, e.codigo_unidad, m.unidad FROM gps_equipos e LEFT JOIN maquinaria m ON m.codigo_unidad = e.codigo_unidad');
+  const [[cubre]] = await pool.query('SELECT COUNT(*) n FROM gps_viajes WHERE inicio >= ? AND inicio < DATE_ADD(?, INTERVAL 2 DAY)', [sabado, sabado]);
+  const por = {};
+  equipos.forEach((e) => { por[e.equipo_gps] = { equipoGps: e.equipo_gps, codigoUnidad: e.codigo_unidad || '', unidad: e.unidad || '', kmSab: 0, kmDom: 0, segMov: 0, viajes: 0, primero: null, ultimo: null, lugares: {}, sospechosos: 0 }; });
+  rows.forEach((r) => {
+    const x = por[r.equipo_gps] || (por[r.equipo_gps] = { equipoGps: r.equipo_gps, codigoUnidad: r.codigo_unidad || '', unidad: r.unidad || '', kmSab: 0, kmDom: 0, segMov: 0, viajes: 0, primero: null, ultimo: null, lugares: {}, sospechosos: 0 });
+    if (r.sospechoso) { x.sospechosos++; return; }
+    const km = Number(r.km) || 0;
+    if (r.inicio.slice(0, 10) === sabado) x.kmSab += km; else x.kmDom += km;
+    x.segMov += Number(r.duracion_seg) || 0;
+    x.viajes++;
+    if (!x.primero || r.inicio < x.primero) x.primero = r.inicio;
+    if (!x.ultimo || (r.fin || r.inicio) > x.ultimo) x.ultimo = r.fin || r.inicio;
+    if (km >= 0.5 && r.llegada) { const l = r.llegada.replace(/^[,\s]+/, ''); x.lugares[l] = (x.lugares[l] || 0) + 1; }
+  });
+  const lista = Object.values(por).map((x) => {
+    const lugares = Object.keys(x.lugares).sort((a, b) => x.lugares[b] - x.lugares[a]).slice(0, 3);
+    return Object.assign(x, { kmSab: Math.round(x.kmSab * 10) / 10, kmDom: Math.round(x.kmDom * 10) / 10, kmTotal: Math.round((x.kmSab + x.kmDom) * 10) / 10, lugares });
+  }).sort((a, b) => b.kmTotal - a.kmTotal || a.equipoGps.localeCompare(b.equipoGps, 'es'));
+  return { success: true, sabado, hayDatos: cubre.n > 0, equipos: lista };
+}
+
+Object.assign(module.exports, {
+  getGpsEstado, revisarCorreoGpsAhora, getGpsEquipos, guardarLigaGps, getGpsViajes, getGpsFinDeSemana,
+  revisarCorreoGps_: () => positrace.revisarCorreoGps(),
+});

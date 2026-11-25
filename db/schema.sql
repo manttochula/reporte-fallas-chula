@@ -4001,3 +4001,56 @@ PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'seguros_poliza_unidades' AND column_name = 'baja_fecha');
 SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE seguros_poliza_unidades ADD COLUMN baja_fecha DATE DEFAULT NULL, ADD COLUMN devolucion_estimada DECIMAL(14,2) DEFAULT NULL', 'SELECT 1');
 PREPARE stmt_alter FROM @sql_alter; EXECUTE stmt_alter; DEALLOCATE PREPARE stmt_alter;
+
+-- ------------------------------------------------------------
+-- GPS de PosiTrace (nov-2026, Carlos). PosiTrace manda sus informes
+-- programados por correo a un Gmail exclusivo; el servidor lo lee
+-- (server/positrace.js) y guarda aquí cada adjunto y los viajes.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gps_archivos (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  message_id     VARCHAR(250) NOT NULL,
+  asunto         VARCHAR(250) DEFAULT NULL,
+  recibido       DATETIME NOT NULL,
+  nombre         VARCHAR(250) NOT NULL,
+  tipo           VARCHAR(30) DEFAULT NULL,
+  informe_fechas VARCHAR(60) DEFAULT NULL,
+  filas          INT NOT NULL DEFAULT 0,
+  procesado      TINYINT(1) NOT NULL DEFAULT 0,
+  error          VARCHAR(500) DEFAULT NULL,
+  contenido      LONGBLOB,
+  creado_en      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_gps_archivo (message_id, nombre),
+  INDEX idx_gps_archivo_recibido (recibido)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Cada nombre de equipo como viene en PosiTrace ("3005 Jesús AF-31"),
+-- ligado al código de Maquinaria (auto por número AF, o a mano en el Panel).
+CREATE TABLE IF NOT EXISTS gps_equipos (
+  equipo_gps    VARCHAR(150) NOT NULL PRIMARY KEY,
+  codigo_unidad VARCHAR(100) DEFAULT NULL,
+  ligado        VARCHAR(10) NOT NULL DEFAULT 'sin',
+  ultimo_viaje  DATETIME DEFAULT NULL,
+  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Un renglón por viaje del "Informe de Viajes" (hora local de México).
+CREATE TABLE IF NOT EXISTS gps_viajes (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  equipo_gps      VARCHAR(150) NOT NULL,
+  inicio          DATETIME NOT NULL,
+  fin             DATETIME DEFAULT NULL,
+  km              DECIMAL(10,2) DEFAULT NULL,
+  duracion_seg    INT DEFAULT NULL,
+  parada_seg      INT DEFAULT NULL,
+  llegada         VARCHAR(500) DEFAULT NULL,
+  lat             DECIMAL(10,6) DEFAULT NULL,
+  lng             DECIMAL(10,6) DEFAULT NULL,
+  odometro        DECIMAL(12,2) DEFAULT NULL,
+  horas_motor_seg INT DEFAULT NULL,
+  sospechoso      TINYINT(1) NOT NULL DEFAULT 0,
+  archivo_id      INT DEFAULT NULL,
+  creado_en       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_gps_viaje (equipo_gps, inicio),
+  INDEX idx_gps_viaje_inicio (inicio)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

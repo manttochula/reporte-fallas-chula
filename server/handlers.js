@@ -14269,7 +14269,7 @@ async function probarGpsJefe(code, nombreUsuario, id) {
   if (!j || !j.chatId) return { success: false, error: 'Ese jefe no tiene chat de Telegram.' };
   try {
     await avisos.enviarTelegram_(j.chatId, '🔔 <b>Prueba de avisos de GPS</b>\nHola ' + esc_(j.nombre) + ', aquí te van a llegar los avisos de tus ' + j.unidades.length + ' unidad(es):'
-      + (j.avisoFuera ? '\n• Salidas fuera de horario' : '') + (j.avisoDiario ? '\n• Resumen diario de salidas (' + GPS_HORA_DIARIO_ + ')' : '') + (j.avisoFinde ? '\n• Resumen del fin de semana (lunes ' + GPS_HORA_FINDE_ + ')' : ''));
+      + (j.avisoFuera ? '\n• Uso de tus unidades fuera de horario (en cuanto llega el informe)' : '') + (j.avisoDiario ? '\n• Resumen diario de salidas (' + GPS_HORA_DIARIO_ + ')' : '') + (j.avisoFinde ? '\n• Resumen del fin de semana (lunes ' + GPS_HORA_FINDE_ + ')' : ''));
   } catch (err) { return { success: false, error: 'Telegram respondió: ' + err.message }; }
   return { success: true };
 }
@@ -14300,16 +14300,39 @@ async function revisarAvisosGps_(opciones) {
   const hoy = ahora.slice(0, 10), ayer = sumarDias_(hoy, -1), hhmm = ahora.slice(11, 16);
   const deUnidad = (j) => new Set(j.unidades);
 
-  // 1) Salidas fuera de horario (de las últimas ~36 h)
+  // 1) Uso fuera de horario (nov-2026, Carlos: "cuando se usen las unidades
+  // después de una hora indicada, por ejemplo las 8"): CUALQUIER viaje de la
+  // unidad fuera del horario normal, salga o no de una huerta. Un aviso por
+  // unidad y noche; si llegan más viajes de esa misma noche, otro aviso con
+  // la lista completa. Solo viajes de las últimas 36 h y de 0.3 km o más.
   if (jefes.some((j) => j.avisoFuera && j.unidades.length)) {
-    const r = await calcularSalidasGps_({ desde: ayer, hasta: hoy });
+    const horario = await horarioGps_();
     const limite = new Date(new Date(ahora.replace(' ', 'T') + 'Z').getTime() - 36 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
-    for (const s of (r.salidas || []).filter((x) => x.fueraDeHorario && x.salida >= limite)) {
-      for (const j of jefes.filter((x) => x.avisoFuera && deUnidad(x).has(s.equipoGps))) {
-        const html = '🌙 <b>Salida fuera de horario</b>\nUnidad: <b>' + nombreUnidadGps_(s) + '</b>\nSalió de <b>' + esc_(s.zona) + '</b>: ' + diaCorto_(s.salida) + ' ' + s.salida.slice(11, 16)
-          + '\n' + (s.regreso ? 'Regresó: ' + diaCorto_(s.regreso) + ' ' + s.regreso.slice(11, 16) + (s.regresoMismaZona ? '' : ' (llegó a ' + esc_(s.llegoA) + ')') + ' · ' + horasMin_(s.minutosFuera) : 'Todavía no regresa (según el último informe)')
-          + '\nKm: ' + s.km + (s.lugares.length ? '\nA dónde fue: ' + esc_(s.lugares.join(' · ')) : '');
-        await enviarUnaVezGps_('fuera|' + j.id + '|' + s.equipoGps + '|' + s.salida, j.chatId, html, res);
+    const unidadesFuera = Array.from(new Set(jefes.filter((j) => j.avisoFuera).flatMap((j) => j.unidades)));
+    const [vs] = await pool.query(
+      `SELECT v.equipo_gps, e.codigo_unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin, v.km, v.llegada
+       FROM gps_viajes v LEFT JOIN gps_equipos e ON e.equipo_gps = v.equipo_gps
+       WHERE v.inicio >= ? AND v.sospechoso = 0 AND v.km >= 0.3 AND v.equipo_gps IN (?) ORDER BY v.equipo_gps, v.inicio`, [limite, unidadesFuera.length ? unidadesFuera : ['']]);
+    const iniMin = minutosDeHora_(horario.inicio);
+    // "Noche" a la que pertenece: lo de la madrugada (antes de la hora de inicio) cuenta para la noche anterior.
+    const noche = (t) => (Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16)) < iniMin ? sumarDias_(t.slice(0, 10), -1) : t.slice(0, 10));
+    const grupos = {};
+    vs.filter((v) => fueraDeHorario_(v.inicio, horario)).forEach((v) => {
+      const k = v.equipo_gps + '|' + noche(v.inicio);
+      (grupos[k] = grupos[k] || { equipoGps: v.equipo_gps, codigoUnidad: v.codigo_unidad || '', noche: noche(v.inicio), viajes: [] }).viajes.push(v);
+    });
+    for (const g of Object.values(grupos)) {
+      const km = Math.round(g.viajes.reduce((a, v) => a + (Number(v.km) || 0), 0) * 10) / 10;
+      for (const j of jefes.filter((x) => x.avisoFuera && deUnidad(x).has(g.equipoGps))) {
+        const clave = 'uso|' + j.id + '|' + g.equipoGps + '|' + g.noche;
+        const [[prev]] = await pool.query('SELECT COUNT(*) n FROM gps_avisos_enviados WHERE clave LIKE ?', [clave.replace(/[\\%_]/g, (c) => '\\' + c) + '|%']);
+        const yaAntes = prev.n > 0;
+        const html = '🌙 <b>Unidad en uso fuera de horario</b>' + (yaAntes ? ' (siguió en uso)' : '')
+          + '\nUnidad: <b>' + nombreUnidadGps_(g) + '</b>\nHorario normal: ' + horario.inicio + ' a ' + horario.fin
+          + '\n\n' + g.viajes.map((v) => '• ' + diaCorto_(v.inicio) + ' ' + v.inicio.slice(11, 16) + ' → ' + (v.fin ? v.fin.slice(11, 16) : '?') + ' · ' + (Math.round(Number(v.km) * 10) / 10) + ' km'
+            + (v.llegada ? '\n   llegó a ' + esc_(String(v.llegada).replace(/^[,\s]+/, '')) : '')).join('\n')
+          + '\n\nTotal: ' + g.viajes.length + ' viaje(s), ' + km + ' km';
+        await enviarUnaVezGps_(clave + '|' + g.viajes.length, j.chatId, html, res);
       }
     }
   }

@@ -4696,6 +4696,7 @@
         <button type="button" class="gps-subtab" data-vista="rec">Recorridos</button>
         <button type="button" class="gps-subtab" data-vista="salidas">Salidas de huerta</button>
         <button type="button" class="gps-subtab" data-vista="equipos">Unidades GPS</button>
+        <button type="button" class="gps-subtab" data-vista="uso">🌙 Uso fuera de horario</button>
         <button type="button" class="gps-subtab" data-vista="jefes">🔔 Avisos a jefes</button>
       </div>
       <div id="gps-v-finde">
@@ -4767,10 +4768,26 @@
           </div>
         </div>
         <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Huerta</th><th>Salió</th><th>Regresó</th><th>Tiempo fuera</th><th>Km</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-sal-tbody"></tbody></table></div>
-        <div id="gps-uso-wrap" style="margin-top:18px;">
-          <div style="font-weight:700;font-size:14px;margin:0 0 4px;">🌙 Uso fuera de horario <span id="gps-uso-sub" style="font-weight:400;font-size:12px;color:var(--text-dim);"></span></div>
-          <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Noche</th><th>Viajes</th><th>Km</th><th>Primer / último movimiento</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-uso-tbody"></tbody></table></div>
+      </div>
+      <div id="gps-v-uso" style="display:none;">
+        <div class="seg-tarjetas" id="gps-uso-tarjetas"></div>
+        <div class="gps-estado" style="margin-top:0;">
+          <b>Horario normal de las unidades:</b>
+          <label style="font-size:12px;">de <input type="time" id="gps-uso-hor-inicio"></label>
+          <label style="font-size:12px;">a <input type="time" id="gps-uso-hor-fin"></label>
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;"><input type="checkbox" id="gps-uso-hor-domingo"> El domingo todo cuenta</label>
+          <button class="export-btn" id="gps-uso-hor-guardar">Guardar horario</button>
+          <span class="dim" style="font-size:12px;">Es aparte del de las huertas. Con este horario se mandan los avisos 🌙 por Telegram.</span>
         </div>
+        <div class="toolbar">
+          <label style="font-size:12px;">Del <input type="date" id="gps-uso-desde"></label>
+          <label style="font-size:12px;">al <input type="date" id="gps-uso-hasta"></label>
+          <select id="gps-uso-equipo"><option value="">Todas las unidades</option></select>
+          <input type="text" id="gps-uso-buscar" placeholder="Buscar unidad o lugar...">
+          <button class="export-btn" id="gps-uso-excel">Exportar a Excel</button>
+        </div>
+        <div class="seg-status" id="gps-uso-status"></div>
+        <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Noche</th><th>Viajes</th><th>Km</th><th>Primer / último movimiento</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-uso-tbody"></tbody></table></div>
       </div>
       <div id="gps-v-jefes" style="display:none;">
         <div class="gps-aviso" id="gps-jefes-ayuda" style="margin-bottom:10px;"></div>
@@ -27043,6 +27060,8 @@ function gpsAbrir_(){
     var hace7 = new Date(); hace7.setDate(hace7.getDate() - 7);
     document.getElementById('gps-sal-desde').value = gpsFechaIso_(hace7);
     document.getElementById('gps-sal-hasta').value = gpsFechaIso_(new Date());
+    document.getElementById('gps-uso-desde').value = gpsFechaIso_(hace7);
+    document.getElementById('gps-uso-hasta').value = gpsFechaIso_(new Date());
   }
   gpsCargarEstado_();
   gpsCargarEquipos_();
@@ -27090,11 +27109,12 @@ function gpsRevisarAhora_(){
 
 function gpsMostrarVista_(){
   document.querySelectorAll('.gps-subtab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-vista') === GPS_VISTA); });
-  ['finde', 'rec', 'salidas', 'equipos', 'jefes'].forEach(function(v){ document.getElementById('gps-v-' + v).style.display = v === GPS_VISTA ? '' : 'none'; });
+  ['finde', 'rec', 'salidas', 'uso', 'equipos', 'jefes'].forEach(function(v){ document.getElementById('gps-v-' + v).style.display = v === GPS_VISTA ? '' : 'none'; });
   if(GPS_VISTA === 'finde'){ if(!GPS_FINDE || GPS_FINDE.sabado !== document.getElementById('gps-sabado').value) gpsCargarFinde_(); else gpsPintarFinde_(); }
   if(GPS_VISTA === 'rec'){ if(!GPS_REC) gpsCargarRec_(); else gpsPintarRec_(); }
   if(GPS_VISTA === 'equipos') gpsPintarEquipos_();
   if(GPS_VISTA === 'jefes') gpsCargarJefes_();
+  if(GPS_VISTA === 'uso'){ if(!GPS_USO) gpsCargarUso_(); else gpsPintarUso_(); }
   if(GPS_VISTA === 'salidas'){ if(!GPS_ZONAS) gpsCargarZonas_(); if(!GPS_SAL) gpsCargarSalidas_(); else gpsPintarSalidas_(); }
 }
 
@@ -27261,19 +27281,37 @@ function gpsFiltrarSalidas_(){
     return true;
   });
 }
-function gpsTarjetaUso_(){
-  var n = (GPS_SAL && GPS_SAL.usoFuera) ? GPS_SAL.usoFuera.length : 0;
-  return '<div class="seg-tarjeta ' + (n ? 'rojo' : 'verde') + '" data-acc="uso"><div class="n">' + n + '</div><div class="t">Uso fuera de horario</div></div>';
+// ---------- Uso fuera de horario (pestaña propia, con su horario) ----------
+var GPS_USO = null;
+function gpsCargarUso_(){
+  var f = { desde: document.getElementById('gps-uso-desde').value, hasta: document.getElementById('gps-uso-hasta').value, equipo: document.getElementById('gps-uso-equipo').value };
+  if(!f.desde){ document.getElementById('gps-uso-status').textContent = 'Elige la fecha.'; return; }
+  if(!f.hasta || f.hasta < f.desde) f.hasta = f.desde;
+  document.getElementById('gps-uso-status').textContent = 'Cargando...';
+  gpsLlamar_('getGpsUsoFuera', [f], function(r){
+    if(!r || !r.success){ document.getElementById('gps-uso-status').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+    r.filtro = f; GPS_USO = r;
+    document.getElementById('gps-uso-hor-inicio').value = r.horario.inicio;
+    document.getElementById('gps-uso-hor-fin').value = r.horario.fin;
+    document.getElementById('gps-uso-hor-domingo').checked = !!r.horario.domingo;
+    gpsPintarUso_();
+  }, function(m){ document.getElementById('gps-uso-status').textContent = m; });
 }
 function gpsFiltrarUso_(){
-  if(!GPS_SAL || !GPS_SAL.usoFuera) return [];
-  var q = document.getElementById('gps-sal-buscar').value.trim().toLowerCase();
-  return GPS_SAL.usoFuera.filter(function(g){ return !q || (g.equipoGps + ' ' + g.codigoUnidad + ' ' + g.viajes.map(function(v){ return v.llegada; }).join(' ')).toLowerCase().indexOf(q) !== -1; });
+  if(!GPS_USO) return [];
+  var q = document.getElementById('gps-uso-buscar').value.trim().toLowerCase();
+  return GPS_USO.usoFuera.filter(function(g){ return !q || (g.equipoGps + ' ' + g.codigoUnidad + ' ' + g.viajes.map(function(v){ return v.llegada; }).join(' ')).toLowerCase().indexOf(q) !== -1; });
 }
 function gpsPintarUso_(){
-  var r = GPS_SAL; if(!r) return;
+  var r = GPS_USO; if(!r) return;
+  document.getElementById('gps-uso-hor-guardar').style.display = gpsPuede_() ? '' : 'none';
   var lista = gpsFiltrarUso_();
-  document.getElementById('gps-uso-sub').textContent = '· cualquier viaje antes de las ' + r.horario.inicio + ' o desde las ' + r.horario.fin + (r.horario.domingo ? ' (y el domingo)' : '') + ', salga o no de una huerta';
+  var unidades = {}; var km = 0, viajes = 0;
+  r.usoFuera.forEach(function(g){ unidades[g.equipoGps] = true; km += g.km; viajes += g.viajes.length; });
+  var nU = Object.keys(unidades).length;
+  var t = function(n, txt, cls){ return '<div class="seg-tarjeta ' + cls + '"><div class="n">' + n + '</div><div class="t">' + txt + '</div></div>'; };
+  document.getElementById('gps-uso-tarjetas').innerHTML = t(nU, 'Unidades usadas fuera de horario', nU ? 'rojo' : 'verde') + t(r.usoFuera.length, 'Noches con uso', r.usoFuera.length ? 'ambar' : 'verde') + t(viajes, 'Viajes', '') + t(gpsKm_(km), 'Km fuera de horario', '');
+  document.getElementById('gps-uso-status').textContent = lista.length + ' registro(s) · cuenta cualquier viaje antes de las ' + r.horario.inicio + ' o desde las ' + r.horario.fin + (r.horario.domingo ? ' (y todo el domingo)' : '') + ', salga o no de una huerta (desde 0.3 km)';
   document.getElementById('gps-uso-tbody').innerHTML = lista.map(function(g, i){
     var lugares = [];
     g.viajes.forEach(function(v){ if(v.llegada && lugares.indexOf(v.llegada) === -1) lugares.push(v.llegada); });
@@ -27287,21 +27325,29 @@ function gpsPintarUso_(){
     b.addEventListener('click', function(){ var g = lista[Number(b.getAttribute('data-i'))]; gpsIrARecorrido_(g.equipoGps, g.primero.slice(0, 10), g.ultimo.slice(0, 10)); });
   });
 }
+function gpsExcelUso_(){
+  var lista = gpsFiltrarUso_();
+  if(!lista.length){ alert('No hay registros para exportar.'); return; }
+  var filas = [];
+  lista.forEach(function(g){ g.viajes.forEach(function(v){ filas.push({ equipo: g.equipoGps, unidad: g.codigoUnidad, noche: g.noche, salida: v.inicio, llegada: v.fin || '', km: v.km, lugar: v.llegada }); }); });
+  var cols = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Noche', key:'noche', width:12}, {header:'Salida', key:'salida', width:19}, {header:'Llegada', key:'llegada', width:19}, {header:'Km', key:'km', width:8}, {header:'Llegó a', key:'lugar', width:60}];
+  var f = GPS_USO.filtro;
+  descargarComoExcel_('GPS - Uso fuera de horario ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), 'Horario normal ' + GPS_USO.horario.inicio + ' a ' + GPS_USO.horario.fin, [{ titulo: 'Uso fuera de horario', columnas: cols, filas: filas, autoFiltro: true }], 'gps_uso_fuera_' + f.desde);
+}
 function gpsPintarSalidas_(){
   var r = GPS_SAL; if(!r) return;
   var st = document.getElementById('gps-sal-status');
-  gpsPintarUso_();
   if(r.sinZonas){
-    document.getElementById('gps-sal-tarjetas').innerHTML = gpsTarjetaUso_();
+    document.getElementById('gps-sal-tarjetas').innerHTML = '';
     document.getElementById('gps-sal-tbody').innerHTML = '';
-    st.innerHTML = 'Todavía no hay límites de huertas para ver las salidas. Da clic en <b>✏ Límites de huertas</b> para dibujarlos (o crearlos desde los cuadros de Avance Huerta). El uso fuera de horario (abajo) no los necesita.';
+    st.innerHTML = 'Todavía no hay límites de huertas para ver las salidas. Da clic en <b>✏ Límites de huertas</b> para dibujarlos (o crearlos desde los cuadros de Avance Huerta). El uso fuera de horario (su propia pestaña) no los necesita.';
     return;
   }
   var lista = gpsFiltrarSalidas_();
   var fuera = r.salidas.filter(function(s){ return s.fueraDeHorario; }).length;
   var sinReg = r.salidas.filter(function(s){ return !s.regreso; }).length;
   var t = function(n, txt, cls, acc){ return '<div class="seg-tarjeta ' + cls + '" data-acc="' + acc + '"><div class="n">' + n + '</div><div class="t">' + txt + '</div></div>'; };
-  document.getElementById('gps-sal-tarjetas').innerHTML = t(r.salidas.length, 'Salidas', '', 'todas') + t(fuera, 'Fuera de horario', fuera ? 'rojo' : 'verde', 'fuera') + t(sinReg, 'Sin regreso en el rango', sinReg ? 'ambar' : 'verde', 'todas') + gpsTarjetaUso_();
+  document.getElementById('gps-sal-tarjetas').innerHTML = t(r.salidas.length, 'Salidas', '', 'todas') + t(fuera, 'Fuera de horario', fuera ? 'rojo' : 'verde', 'fuera') + t(sinReg, 'Sin regreso en el rango', sinReg ? 'ambar' : 'verde', 'todas');
   st.textContent = lista.length + ' salida(s) · horario normal de ' + r.horario.inicio + ' a ' + r.horario.fin + (r.horario.domingo ? ' (domingo fuera de horario)' : '');
   document.getElementById('gps-sal-tbody').innerHTML = lista.map(function(s, i){
     var regreso = s.regreso ? gpsNombreDia_(s.regreso.slice(0, 10)) + ' ' + gpsFechaHora_(s.regreso) + (s.regresoMismaZona ? '' : '<br><span style="font-size:11.5px;color:var(--text-dim);">llegó a ' + escapeHtml(s.llegoA) + '</span>') : '<span style="color:var(--amber);">No ha regresado (en el rango)</span>';
@@ -27320,16 +27366,12 @@ function gpsPintarSalidas_(){
 }
 function gpsExcelSalidas_(){
   var lista = gpsFiltrarSalidas_();
-  if(!lista.length && !gpsFiltrarUso_().length){ alert('No hay salidas para exportar.'); return; }
+  if(!lista.length){ alert('No hay salidas para exportar.'); return; }
   var filas = lista.map(function(s){ return { equipo: s.equipoGps, unidad: s.codigoUnidad, zona: s.zona, salida: s.salida, regreso: s.regreso || 'No ha regresado', llego: s.regreso ? s.llegoA : '', tiempo: gpsMinutosTexto_(s.minutosFuera), km: s.km, lugares: s.lugares.join(' · '), fuera: s.fueraDeHorario ? 'Sí' : '' }; });
   var cols = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Huerta', key:'zona', width:20}, {header:'Salió', key:'salida', width:19}, {header:'Regresó', key:'regreso', width:19},
     {header:'Llegó a', key:'llego', width:20}, {header:'Tiempo fuera', key:'tiempo', width:13}, {header:'Km', key:'km', width:8}, {header:'A dónde fue', key:'lugares', width:60}, {header:'Fuera de horario', key:'fuera', width:12}];
   var f = GPS_SAL.filtro;
-  var uso = [];
-  gpsFiltrarUso_().forEach(function(g){ g.viajes.forEach(function(v){ uso.push({ equipo: g.equipoGps, unidad: g.codigoUnidad, noche: g.noche, salida: v.inicio, llegada: v.fin || '', km: v.km, lugar: v.llegada }); }); });
-  var colsUso = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Noche', key:'noche', width:12}, {header:'Salida', key:'salida', width:19}, {header:'Llegada', key:'llegada', width:19}, {header:'Km', key:'km', width:8}, {header:'Llegó a', key:'lugar', width:60}];
   var secciones = [{ titulo: 'Salidas', columnas: cols, filas: filas, autoFiltro: true }];
-  if(uso.length) secciones.push({ titulo: 'Uso fuera de horario', columnas: colsUso, filas: uso, autoFiltro: true });
   descargarComoExcel_('GPS - Salidas de huerta ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), 'Horario normal ' + GPS_SAL.horario.inicio + ' a ' + GPS_SAL.horario.fin, secciones, 'gps_salidas_' + f.desde);
 }
 
@@ -27546,6 +27588,8 @@ function gpsCargarEquipos_(){
     var sel = document.getElementById('gps-rec-equipo'), antes = sel.value;
     sel.innerHTML = '<option value="">Todas las unidades</option>' + r.equipos.map(function(e){ return '<option value="' + escapeHtml(e.equipoGps) + '">' + escapeHtml(e.equipoGps + (e.codigoUnidad ? ' (' + e.codigoUnidad + ')' : '')) + '</option>'; }).join('');
     sel.value = antes;
+    var selU = document.getElementById('gps-uso-equipo'), antesU = selU.value;
+    selU.innerHTML = sel.innerHTML; selU.value = antesU;
     if(GPS_VISTA === 'equipos') gpsPintarEquipos_();
   }, function(){});
 }
@@ -27595,11 +27639,19 @@ document.getElementById('gps-sal-buscar').addEventListener('input', gpsPintarSal
 document.getElementById('gps-sal-excel').addEventListener('click', gpsExcelSalidas_);
 document.getElementById('gps-sal-tarjetas').addEventListener('click', function(e){
   var t = e.target.closest('.seg-tarjeta'); if(!t) return;
-  if(t.getAttribute('data-acc') === 'uso'){ document.getElementById('gps-uso-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
   document.getElementById('gps-sal-fuera').checked = t.getAttribute('data-acc') === 'fuera';
   gpsPintarSalidas_();
 });
 document.getElementById('gps-sal-limites').addEventListener('click', gpsAbrirEditorZonas_);
+['gps-uso-desde', 'gps-uso-hasta', 'gps-uso-equipo'].forEach(function(id){ document.getElementById(id).addEventListener('change', gpsCargarUso_); });
+document.getElementById('gps-uso-buscar').addEventListener('input', gpsPintarUso_);
+document.getElementById('gps-uso-excel').addEventListener('click', gpsExcelUso_);
+document.getElementById('gps-uso-hor-guardar').addEventListener('click', function(){
+  gpsLlamar_('guardarHorarioGps', [{ inicio: document.getElementById('gps-uso-hor-inicio').value, fin: document.getElementById('gps-uso-hor-fin').value, domingo: document.getElementById('gps-uso-hor-domingo').checked }, 'uso'], function(r){
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo guardar.'); return; }
+    alert('Horario de uso guardado. Los avisos por Telegram ya usan este horario.'); gpsCargarUso_();
+  });
+});
 document.getElementById('gps-jefe-nuevo').addEventListener('click', function(){ gpsEditarJefe_(null); });
 document.getElementById('gps-jefe-cancelar').addEventListener('click', function(){ GPS_JEFE_EDIT = null; document.getElementById('gps-jefe-form').style.display = 'none'; });
 document.getElementById('gps-jefe-guardar').addEventListener('click', gpsGuardarJefe_);

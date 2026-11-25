@@ -14038,8 +14038,12 @@ async function calcularFindeGps_(sabado) {
 // ---------- Zonas (límites de huertas) y salidas ----------
 // Horario normal configurable (Carlos: "8 pm sería fuera de horario").
 const GPS_HORARIO_DEF_ = { inicio: '05:00', fin: '20:00', domingo: false };
-async function horarioGps_() {
-  const [rows] = await pool.query("SELECT valor FROM configuracion WHERE clave = 'gps_horario'");
+// Dos horarios aparte (nov-2026, Carlos): el de las salidas de huerta
+// ('gps_horario') y el del "Uso fuera de horario" + su aviso por Telegram
+// ('gps_horario_uso'), cada uno con su propia pestaña.
+async function horarioGps_(tipo) {
+  const clave = tipo === 'uso' ? 'gps_horario_uso' : 'gps_horario';
+  const [rows] = await pool.query('SELECT valor FROM configuracion WHERE clave = ?', [clave]);
   try { return Object.assign({}, GPS_HORARIO_DEF_, rows.length ? JSON.parse(rows[0].valor) : {}); } catch (e) { return Object.assign({}, GPS_HORARIO_DEF_); }
 }
 function minutosDeHora_(hhmm) { const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})/); return m ? Number(m[1]) * 60 + Number(m[2]) : null; }
@@ -14123,13 +14127,14 @@ async function eliminarZonaGps(code, nombreUsuario, id) {
   return { success: true };
 }
 
-async function guardarHorarioGps(code, nombreUsuario, h) {
+async function guardarHorarioGps(code, nombreUsuario, h, tipo) {
   await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
   h = h || {};
   const ini = minutosDeHora_(h.inicio), fin = minutosDeHora_(h.fin);
   if (ini === null || fin === null || ini >= fin) return { success: false, error: 'El horario no es válido (la hora de inicio debe ser antes que la de fin).' };
   const valor = { inicio: String(h.inicio).slice(0, 5), fin: String(h.fin).slice(0, 5), domingo: !!h.domingo };
-  await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('gps_horario', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [JSON.stringify(valor)]);
+  await pool.query('INSERT INTO configuracion (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)', [tipo === 'uso' ? 'gps_horario_uso' : 'gps_horario', JSON.stringify(valor)]);
+  await registrarAuditoria_('configuracion', tipo === 'uso' ? 'gps_horario_uso' : 'gps_horario', 'editar', nombreUsuario, valor.inicio + ' a ' + valor.fin + (valor.domingo ? ', domingo fuera' : ''));
   return { success: true, horario: valor };
 }
 
@@ -14143,7 +14148,7 @@ async function guardarHorarioGps(code, nombreUsuario, h) {
 // señal", agrupado por unidad y noche. Lo de la madrugada (antes de la hora
 // de inicio) cuenta para la noche anterior. desde/hasta = noches (AAAA-MM-DD).
 async function usoFueraDeHorarioGps_(desde, hasta, horario, equipos) {
-  horario = horario || await horarioGps_();
+  horario = horario || await horarioGps_('uso');
   const params = [desde, hasta];
   let extra = '';
   if (equipos) { if (!equipos.length) return []; extra = ' AND v.equipo_gps IN (?)'; params.push(equipos); }
@@ -14167,6 +14172,18 @@ async function usoFueraDeHorarioGps_(desde, hasta, horario, equipos) {
   })).sort((a, b) => (a.primero < b.primero ? 1 : -1));
 }
 
+// Pestaña "Uso fuera de horario" (con su propio horario).
+async function getGpsUsoFuera(code, nombreUsuario, filtros) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  filtros = filtros || {};
+  const desde = fechaGpsValida_(filtros.desde) ? filtros.desde : null;
+  const hasta = fechaGpsValida_(filtros.hasta) ? filtros.hasta : desde;
+  if (!desde) return { success: false, error: 'Elige la fecha.' };
+  if ((new Date(hasta) - new Date(desde)) / 86400000 > 31) return { success: false, error: 'Elige un rango de 31 días o menos.' };
+  const horario = await horarioGps_('uso');
+  return { success: true, horario, usoFuera: await usoFueraDeHorarioGps_(desde, hasta, horario, filtros.equipo ? [String(filtros.equipo)] : null) };
+}
+
 async function getGpsSalidas(code, nombreUsuario, filtros) {
   await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
   return calcularSalidasGps_(filtros);
@@ -14179,8 +14196,7 @@ async function calcularSalidasGps_(filtros) {
   if ((new Date(hasta) - new Date(desde)) / 86400000 > 31) return { success: false, error: 'Elige un rango de 31 días o menos.' };
   const zonas = await leerZonasGps_();
   const horario = await horarioGps_();
-  const usoFuera = await usoFueraDeHorarioGps_(desde, hasta, horario, filtros.equipo ? [String(filtros.equipo)] : null);
-  if (!zonas.length) return { success: true, salidas: [], sinZonas: true, horario, usoFuera };
+  if (!zonas.length) return { success: true, salidas: [], sinZonas: true, horario };
   const cond = ['v.inicio >= DATE_SUB(?, INTERVAL 2 DAY)', 'v.inicio < DATE_ADD(?, INTERVAL 1 DAY)'];
   const params = [desde, hasta];
   if (filtros.equipo) { cond.push('v.equipo_gps = ?'); params.push(String(filtros.equipo)); }
@@ -14226,7 +14242,7 @@ async function calcularSalidasGps_(filtros) {
       return Object.assign(s, { km: Math.round(s.km * 10) / 10, minutosFuera: minutos, fueraDeHorario: !!fuera, regresoMismaZona: !!s.regreso && s.llegoA === s.zona, lugares: s.lugares.slice(0, 6) });
     })
     .sort((a, b) => (a.salida < b.salida ? 1 : -1));
-  return { success: true, salidas: lista, horario, usoFuera };
+  return { success: true, salidas: lista, horario };
 }
 
 // ---------- Avisos por Telegram a los jefes (por unidad) ----------
@@ -14336,7 +14352,7 @@ async function revisarAvisosGps_(opciones) {
   // unidad y noche; si llegan más viajes de esa misma noche, otro aviso con
   // la lista completa. Solo viajes de las últimas 36 h y de 0.3 km o más.
   if (jefes.some((j) => j.avisoFuera && j.unidades.length)) {
-    const horario = await horarioGps_();
+    const horario = await horarioGps_('uso');
     const limite = new Date(new Date(ahora.replace(' ', 'T') + 'Z').getTime() - 36 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
     const unidadesFuera = Array.from(new Set(jefes.filter((j) => j.avisoFuera).flatMap((j) => j.unidades)));
     const grupos = (await usoFueraDeHorarioGps_(sumarDias_(limite.slice(0, 10), -1), hoy, horario, unidadesFuera))
@@ -14409,7 +14425,7 @@ async function revisarAvisosGps_(opciones) {
 
 Object.assign(module.exports, {
   getGpsJefes, guardarGpsJefe, eliminarGpsJefe, buscarChatsTelegramGps, probarGpsJefe, revisarAvisosGps_,
-  getGpsZonas, guardarZonaGps, eliminarZonaGps, guardarHorarioGps, getGpsSalidas,
+  getGpsUsoFuera, getGpsZonas, guardarZonaGps, eliminarZonaGps, guardarHorarioGps, getGpsSalidas,
   getGpsEstado, revisarCorreoGpsAhora, getGpsEquipos, guardarLigaGps, getGpsViajes, getGpsFinDeSemana,
   revisarCorreoGps_: () => positrace.revisarCorreoGps(),
 });

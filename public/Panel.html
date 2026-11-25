@@ -4767,6 +4767,10 @@
           </div>
         </div>
         <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Huerta</th><th>Salió</th><th>Regresó</th><th>Tiempo fuera</th><th>Km</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-sal-tbody"></tbody></table></div>
+        <div id="gps-uso-wrap" style="margin-top:18px;">
+          <div style="font-weight:700;font-size:14px;margin:0 0 4px;">🌙 Uso fuera de horario <span id="gps-uso-sub" style="font-weight:400;font-size:12px;color:var(--text-dim);"></span></div>
+          <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Noche</th><th>Viajes</th><th>Km</th><th>Primer / último movimiento</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-uso-tbody"></tbody></table></div>
+        </div>
       </div>
       <div id="gps-v-jefes" style="display:none;">
         <div class="gps-aviso" id="gps-jefes-ayuda" style="margin-bottom:10px;"></div>
@@ -27257,20 +27261,47 @@ function gpsFiltrarSalidas_(){
     return true;
   });
 }
+function gpsTarjetaUso_(){
+  var n = (GPS_SAL && GPS_SAL.usoFuera) ? GPS_SAL.usoFuera.length : 0;
+  return '<div class="seg-tarjeta ' + (n ? 'rojo' : 'verde') + '" data-acc="uso"><div class="n">' + n + '</div><div class="t">Uso fuera de horario</div></div>';
+}
+function gpsFiltrarUso_(){
+  if(!GPS_SAL || !GPS_SAL.usoFuera) return [];
+  var q = document.getElementById('gps-sal-buscar').value.trim().toLowerCase();
+  return GPS_SAL.usoFuera.filter(function(g){ return !q || (g.equipoGps + ' ' + g.codigoUnidad + ' ' + g.viajes.map(function(v){ return v.llegada; }).join(' ')).toLowerCase().indexOf(q) !== -1; });
+}
+function gpsPintarUso_(){
+  var r = GPS_SAL; if(!r) return;
+  var lista = gpsFiltrarUso_();
+  document.getElementById('gps-uso-sub').textContent = '· cualquier viaje antes de las ' + r.horario.inicio + ' o desde las ' + r.horario.fin + (r.horario.domingo ? ' (y el domingo)' : '') + ', salga o no de una huerta';
+  document.getElementById('gps-uso-tbody').innerHTML = lista.map(function(g, i){
+    var lugares = [];
+    g.viajes.forEach(function(v){ if(v.llegada && lugares.indexOf(v.llegada) === -1) lugares.push(v.llegada); });
+    return '<tr class="gps-fuera"><td>' + escapeHtml(g.equipoGps) + (g.codigoUnidad ? '<br><span style="font-size:11.5px;color:var(--text-dim);">' + escapeHtml(g.codigoUnidad) + '</span>' : '') + '</td>'
+      + '<td>' + escapeHtml(gpsNombreDia_(g.noche) + ' ' + g.noche.slice(8, 10) + '/' + g.noche.slice(5, 7)) + '</td><td>' + g.viajes.length + '</td><td>' + gpsKm_(g.km) + '</td>'
+      + '<td>' + escapeHtml(gpsNombreDia_(g.primero.slice(0, 10)) + ' ' + g.primero.slice(11, 16) + ' → ' + gpsNombreDia_(g.ultimo.slice(0, 10)) + ' ' + g.ultimo.slice(11, 16)) + '</td>'
+      + '<td style="font-size:12px;">' + escapeHtml(lugares.slice(0, 4).join(' · ')) + '</td>'
+      + '<td><button class="export-btn gps-uso-rec" data-i="' + i + '">Ver recorrido</button></td></tr>';
+  }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);">Ninguna unidad se usó fuera de horario en esas fechas.</td></tr>';
+  document.querySelectorAll('.gps-uso-rec').forEach(function(b){
+    b.addEventListener('click', function(){ var g = lista[Number(b.getAttribute('data-i'))]; gpsIrARecorrido_(g.equipoGps, g.primero.slice(0, 10), g.ultimo.slice(0, 10)); });
+  });
+}
 function gpsPintarSalidas_(){
   var r = GPS_SAL; if(!r) return;
   var st = document.getElementById('gps-sal-status');
+  gpsPintarUso_();
   if(r.sinZonas){
-    document.getElementById('gps-sal-tarjetas').innerHTML = '';
+    document.getElementById('gps-sal-tarjetas').innerHTML = gpsTarjetaUso_();
     document.getElementById('gps-sal-tbody').innerHTML = '';
-    st.innerHTML = 'Todavía no hay límites de huertas. Da clic en <b>✏ Límites de huertas</b> para dibujarlos (o crearlos desde los cuadros de Avance Huerta).';
+    st.innerHTML = 'Todavía no hay límites de huertas para ver las salidas. Da clic en <b>✏ Límites de huertas</b> para dibujarlos (o crearlos desde los cuadros de Avance Huerta). El uso fuera de horario (abajo) no los necesita.';
     return;
   }
   var lista = gpsFiltrarSalidas_();
   var fuera = r.salidas.filter(function(s){ return s.fueraDeHorario; }).length;
   var sinReg = r.salidas.filter(function(s){ return !s.regreso; }).length;
   var t = function(n, txt, cls, acc){ return '<div class="seg-tarjeta ' + cls + '" data-acc="' + acc + '"><div class="n">' + n + '</div><div class="t">' + txt + '</div></div>'; };
-  document.getElementById('gps-sal-tarjetas').innerHTML = t(r.salidas.length, 'Salidas', '', 'todas') + t(fuera, 'Fuera de horario', fuera ? 'rojo' : 'verde', 'fuera') + t(sinReg, 'Sin regreso en el rango', sinReg ? 'ambar' : 'verde', 'todas');
+  document.getElementById('gps-sal-tarjetas').innerHTML = t(r.salidas.length, 'Salidas', '', 'todas') + t(fuera, 'Fuera de horario', fuera ? 'rojo' : 'verde', 'fuera') + t(sinReg, 'Sin regreso en el rango', sinReg ? 'ambar' : 'verde', 'todas') + gpsTarjetaUso_();
   st.textContent = lista.length + ' salida(s) · horario normal de ' + r.horario.inicio + ' a ' + r.horario.fin + (r.horario.domingo ? ' (domingo fuera de horario)' : '');
   document.getElementById('gps-sal-tbody').innerHTML = lista.map(function(s, i){
     var regreso = s.regreso ? gpsNombreDia_(s.regreso.slice(0, 10)) + ' ' + gpsFechaHora_(s.regreso) + (s.regresoMismaZona ? '' : '<br><span style="font-size:11.5px;color:var(--text-dim);">llegó a ' + escapeHtml(s.llegoA) + '</span>') : '<span style="color:var(--amber);">No ha regresado (en el rango)</span>';
@@ -27289,12 +27320,17 @@ function gpsPintarSalidas_(){
 }
 function gpsExcelSalidas_(){
   var lista = gpsFiltrarSalidas_();
-  if(!lista.length){ alert('No hay salidas para exportar.'); return; }
+  if(!lista.length && !gpsFiltrarUso_().length){ alert('No hay salidas para exportar.'); return; }
   var filas = lista.map(function(s){ return { equipo: s.equipoGps, unidad: s.codigoUnidad, zona: s.zona, salida: s.salida, regreso: s.regreso || 'No ha regresado', llego: s.regreso ? s.llegoA : '', tiempo: gpsMinutosTexto_(s.minutosFuera), km: s.km, lugares: s.lugares.join(' · '), fuera: s.fueraDeHorario ? 'Sí' : '' }; });
   var cols = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Huerta', key:'zona', width:20}, {header:'Salió', key:'salida', width:19}, {header:'Regresó', key:'regreso', width:19},
     {header:'Llegó a', key:'llego', width:20}, {header:'Tiempo fuera', key:'tiempo', width:13}, {header:'Km', key:'km', width:8}, {header:'A dónde fue', key:'lugares', width:60}, {header:'Fuera de horario', key:'fuera', width:12}];
   var f = GPS_SAL.filtro;
-  descargarComoExcel_('GPS - Salidas de huerta ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), 'Horario normal ' + GPS_SAL.horario.inicio + ' a ' + GPS_SAL.horario.fin, [{ titulo: 'Salidas', columnas: cols, filas: filas, autoFiltro: true }], 'gps_salidas_' + f.desde);
+  var uso = [];
+  gpsFiltrarUso_().forEach(function(g){ g.viajes.forEach(function(v){ uso.push({ equipo: g.equipoGps, unidad: g.codigoUnidad, noche: g.noche, salida: v.inicio, llegada: v.fin || '', km: v.km, lugar: v.llegada }); }); });
+  var colsUso = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Noche', key:'noche', width:12}, {header:'Salida', key:'salida', width:19}, {header:'Llegada', key:'llegada', width:19}, {header:'Km', key:'km', width:8}, {header:'Llegó a', key:'lugar', width:60}];
+  var secciones = [{ titulo: 'Salidas', columnas: cols, filas: filas, autoFiltro: true }];
+  if(uso.length) secciones.push({ titulo: 'Uso fuera de horario', columnas: colsUso, filas: uso, autoFiltro: true });
+  descargarComoExcel_('GPS - Salidas de huerta ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), 'Horario normal ' + GPS_SAL.horario.inicio + ' a ' + GPS_SAL.horario.fin, secciones, 'gps_salidas_' + f.desde);
 }
 
 // ----- Editor de límites -----
@@ -27559,6 +27595,7 @@ document.getElementById('gps-sal-buscar').addEventListener('input', gpsPintarSal
 document.getElementById('gps-sal-excel').addEventListener('click', gpsExcelSalidas_);
 document.getElementById('gps-sal-tarjetas').addEventListener('click', function(e){
   var t = e.target.closest('.seg-tarjeta'); if(!t) return;
+  if(t.getAttribute('data-acc') === 'uso'){ document.getElementById('gps-uso-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
   document.getElementById('gps-sal-fuera').checked = t.getAttribute('data-acc') === 'fuera';
   gpsPintarSalidas_();
 });

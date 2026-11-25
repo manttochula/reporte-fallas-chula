@@ -14138,6 +14138,35 @@ async function guardarHorarioGps(code, nombreUsuario, h) {
 // acaba cuando un viaje termina dentro de una zona (la misma = regreso; otra
 // = llegó a otra huerta). El punto de arranque de un viaje es donde terminó
 // el anterior (PosiTrace no trae la ubicación inicial).
+// Uso fuera de horario (nov-2026, Carlos): CUALQUIER viaje fuera del horario
+// normal (salga o no de una huerta), de 0.3 km o más y que no sea "sin
+// señal", agrupado por unidad y noche. Lo de la madrugada (antes de la hora
+// de inicio) cuenta para la noche anterior. desde/hasta = noches (AAAA-MM-DD).
+async function usoFueraDeHorarioGps_(desde, hasta, horario, equipos) {
+  horario = horario || await horarioGps_();
+  const params = [desde, hasta];
+  let extra = '';
+  if (equipos) { if (!equipos.length) return []; extra = ' AND v.equipo_gps IN (?)'; params.push(equipos); }
+  const [vs] = await pool.query(
+    `SELECT v.equipo_gps, e.codigo_unidad, m.unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin, v.km, v.llegada, v.lat, v.lng
+     FROM gps_viajes v LEFT JOIN gps_equipos e ON e.equipo_gps = v.equipo_gps LEFT JOIN maquinaria m ON m.codigo_unidad = e.codigo_unidad
+     WHERE v.inicio >= ? AND v.inicio < DATE_ADD(?, INTERVAL 2 DAY) AND v.sospechoso = 0 AND v.km >= 0.3${extra} ORDER BY v.equipo_gps, v.inicio`, params);
+  const iniMin = minutosDeHora_(horario.inicio);
+  const noche = (t) => (Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16)) < iniMin ? sumarDias_(t.slice(0, 10), -1) : t.slice(0, 10));
+  const grupos = {};
+  vs.filter((v) => fueraDeHorario_(v.inicio, horario)).forEach((v) => {
+    const n = noche(v.inicio);
+    if (n < desde || n > hasta) return;
+    const k = v.equipo_gps + '|' + n;
+    (grupos[k] = grupos[k] || { equipoGps: v.equipo_gps, codigoUnidad: v.codigo_unidad || '', unidad: v.unidad || '', noche: n, viajes: [] }).viajes.push({
+      inicio: v.inicio, fin: v.fin, km: Math.round(Number(v.km) * 10) / 10, llegada: String(v.llegada || '').replace(/^[,\s]+/, ''), lat: v.lat === null ? null : Number(v.lat), lng: v.lng === null ? null : Number(v.lng) });
+  });
+  return Object.values(grupos).map((g) => Object.assign(g, {
+    km: Math.round(g.viajes.reduce((a, v) => a + v.km, 0) * 10) / 10,
+    primero: g.viajes[0].inicio, ultimo: g.viajes[g.viajes.length - 1].fin || g.viajes[g.viajes.length - 1].inicio,
+  })).sort((a, b) => (a.primero < b.primero ? 1 : -1));
+}
+
 async function getGpsSalidas(code, nombreUsuario, filtros) {
   await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
   return calcularSalidasGps_(filtros);
@@ -14150,7 +14179,8 @@ async function calcularSalidasGps_(filtros) {
   if ((new Date(hasta) - new Date(desde)) / 86400000 > 31) return { success: false, error: 'Elige un rango de 31 días o menos.' };
   const zonas = await leerZonasGps_();
   const horario = await horarioGps_();
-  if (!zonas.length) return { success: true, salidas: [], sinZonas: true, horario };
+  const usoFuera = await usoFueraDeHorarioGps_(desde, hasta, horario, filtros.equipo ? [String(filtros.equipo)] : null);
+  if (!zonas.length) return { success: true, salidas: [], sinZonas: true, horario, usoFuera };
   const cond = ['v.inicio >= DATE_SUB(?, INTERVAL 2 DAY)', 'v.inicio < DATE_ADD(?, INTERVAL 1 DAY)'];
   const params = [desde, hasta];
   if (filtros.equipo) { cond.push('v.equipo_gps = ?'); params.push(String(filtros.equipo)); }
@@ -14196,7 +14226,7 @@ async function calcularSalidasGps_(filtros) {
       return Object.assign(s, { km: Math.round(s.km * 10) / 10, minutosFuera: minutos, fueraDeHorario: !!fuera, regresoMismaZona: !!s.regreso && s.llegoA === s.zona, lugares: s.lugares.slice(0, 6) });
     })
     .sort((a, b) => (a.salida < b.salida ? 1 : -1));
-  return { success: true, salidas: lista, horario };
+  return { success: true, salidas: lista, horario, usoFuera };
 }
 
 // ---------- Avisos por Telegram a los jefes (por unidad) ----------
@@ -14309,19 +14339,9 @@ async function revisarAvisosGps_(opciones) {
     const horario = await horarioGps_();
     const limite = new Date(new Date(ahora.replace(' ', 'T') + 'Z').getTime() - 36 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
     const unidadesFuera = Array.from(new Set(jefes.filter((j) => j.avisoFuera).flatMap((j) => j.unidades)));
-    const [vs] = await pool.query(
-      `SELECT v.equipo_gps, e.codigo_unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin, v.km, v.llegada
-       FROM gps_viajes v LEFT JOIN gps_equipos e ON e.equipo_gps = v.equipo_gps
-       WHERE v.inicio >= ? AND v.sospechoso = 0 AND v.km >= 0.3 AND v.equipo_gps IN (?) ORDER BY v.equipo_gps, v.inicio`, [limite, unidadesFuera.length ? unidadesFuera : ['']]);
-    const iniMin = minutosDeHora_(horario.inicio);
-    // "Noche" a la que pertenece: lo de la madrugada (antes de la hora de inicio) cuenta para la noche anterior.
-    const noche = (t) => (Number(t.slice(11, 13)) * 60 + Number(t.slice(14, 16)) < iniMin ? sumarDias_(t.slice(0, 10), -1) : t.slice(0, 10));
-    const grupos = {};
-    vs.filter((v) => fueraDeHorario_(v.inicio, horario)).forEach((v) => {
-      const k = v.equipo_gps + '|' + noche(v.inicio);
-      (grupos[k] = grupos[k] || { equipoGps: v.equipo_gps, codigoUnidad: v.codigo_unidad || '', noche: noche(v.inicio), viajes: [] }).viajes.push(v);
-    });
-    for (const g of Object.values(grupos)) {
+    const grupos = (await usoFueraDeHorarioGps_(sumarDias_(limite.slice(0, 10), -1), hoy, horario, unidadesFuera))
+      .map((g) => Object.assign(g, { viajes: g.viajes.filter((v) => v.inicio >= limite) })).filter((g) => g.viajes.length);
+    for (const g of grupos) {
       const km = Math.round(g.viajes.reduce((a, v) => a + (Number(v.km) || 0), 0) * 10) / 10;
       for (const j of jefes.filter((x) => x.avisoFuera && deUnidad(x).has(g.equipoGps))) {
         const clave = 'uso|' + j.id + '|' + g.equipoGps + '|' + g.noche;

@@ -986,6 +986,18 @@
   #gps-mapa{ height:420px; border:1px solid var(--line); border-radius:6px; margin:0 0 10px; display:none; }
   .gps-sosp{ color:var(--text-dim); font-style:italic; }
   .gps-cero td{ color:var(--text-dim); }
+  .gps-zonas-wrap{ display:flex; gap:12px; flex-wrap:wrap; margin:0 0 12px; }
+  #gps-zonas-mapa{ flex:1 1 560px; height:480px; border:1px solid var(--line); border-radius:6px; }
+  .gps-zonas-lado{ flex:0 0 300px; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px; font-size:13px; max-height:480px; overflow:auto; }
+  .gps-zl{ display:block; font-size:12px; color:var(--text-dim); margin:4px 0; }
+  .gps-zl input, .gps-zl select{ width:100%; box-sizing:border-box; }
+  .gps-zona-ayuda{ font-size:12px; color:var(--text-dim); line-height:1.4; }
+  .gps-zona-item{ display:flex; align-items:center; gap:6px; padding:6px 0; border-bottom:1px solid var(--line); }
+  .gps-zona-item .nom{ flex:1; }
+  .gps-zona-item button{ padding:3px 8px; font-size:11.5px; }
+  .gps-horario{ margin-top:12px; padding-top:10px; border-top:1px dashed var(--line); }
+  .gps-fuera{ background:rgba(194,75,63,0.12); }
+  .gps-chip{ display:inline-block; font-size:11px; padding:1px 6px; border-radius:3px; background:rgba(194,75,63,0.2); color:var(--danger); margin-left:4px; white-space:nowrap; }
   .gps-aviso{ background:var(--panel); border:1px dashed var(--line); border-radius:6px; padding:18px; font-size:13.5px; color:var(--text-dim); line-height:1.5; }
   .seg-acc{ display:flex; gap:6px; flex-wrap:wrap; }
   #seg-pol-overlay .maq-modal, #seg-sin-overlay .maq-modal{ max-width:900px; }
@@ -4706,8 +4718,50 @@
         <div class="table-wrap"><table id="gps-rec-tabla"><thead><tr><th>Unidad (PosiTrace)</th><th>Salida</th><th>Llegada</th><th>Duración</th><th>Km</th><th>Llegó a</th><th>Se quedó</th><th>Odómetro</th></tr></thead><tbody id="gps-rec-tbody"></tbody></table></div>
       </div>
       <div id="gps-v-salidas" style="display:none;">
-        <div class="gps-aviso">Las salidas de huerta se van a llenar con el <b>Reporte de geocercas</b> de PosiTrace (cuándo sale y entra cada unidad de cada huerta).<br>
-          Para activarlo: en PosiTrace → Reportes → <b>Reporte de geocercas</b> → Programar informe, que llegue a <b>chulareportesmtto@gmail.com</b> en Excel. Ya llegado, el sistema lo guarda y esta vista se arma con ese formato.</div>
+        <div class="seg-tarjetas" id="gps-sal-tarjetas"></div>
+        <div class="toolbar">
+          <label style="font-size:12px;">Del <input type="date" id="gps-sal-desde"></label>
+          <label style="font-size:12px;">al <input type="date" id="gps-sal-hasta"></label>
+          <select id="gps-sal-zona"><option value="">Todas las huertas</option></select>
+          <input type="text" id="gps-sal-buscar" placeholder="Buscar unidad o lugar...">
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;"><input type="checkbox" id="gps-sal-fuera"> Solo fuera de horario</label>
+          <button class="export-btn" id="gps-sal-excel">Exportar a Excel</button>
+          <button class="export-btn" id="gps-sal-limites">✏ Límites de huertas</button>
+        </div>
+        <div class="seg-status" id="gps-sal-status"></div>
+        <div id="gps-zonas-editor" style="display:none;">
+          <div class="gps-zonas-wrap">
+            <div id="gps-zonas-mapa"></div>
+            <div class="gps-zonas-lado">
+              <div id="gps-zona-form" style="display:none;">
+                <div style="font-weight:700;margin-bottom:6px;" id="gps-zona-form-titulo">Nueva zona</div>
+                <label class="gps-zl">Nombre <input type="text" id="gps-zona-nombre" list="gps-zona-huertas" placeholder="Nombre de la huerta o lugar"></label>
+                <datalist id="gps-zona-huertas"></datalist>
+                <label class="gps-zl">Tipo <select id="gps-zona-tipo"><option value="huerta">Huerta</option><option value="taller">Taller</option><option value="oficina">Oficina</option><option value="otro">Otro</option></select></label>
+                <label class="gps-zl">Margen alrededor (m) <input type="number" id="gps-zona-margen" min="0" max="1000" step="10" value="50"></label>
+                <div class="gps-zona-ayuda" id="gps-zona-ayuda">Da clic en el mapa para marcar las esquinas del límite. Puedes arrastrar los puntos para ajustarlo.</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                  <button class="export-btn" id="gps-zona-deshacer">Quitar último punto</button>
+                  <button class="export-btn" id="gps-zona-guardar" style="background:var(--amber);color:#1c1c1c;">Guardar</button>
+                  <button class="export-btn" id="gps-zona-cancelar">Cancelar</button>
+                </div>
+              </div>
+              <div id="gps-zonas-lista-wrap">
+                <button class="export-btn" id="gps-zona-nueva" style="width:100%;margin-bottom:8px;">+ Dibujar nueva zona</button>
+                <div id="gps-zonas-lista"></div>
+                <div id="gps-zonas-sugeridas"></div>
+                <div class="gps-horario">
+                  <div style="font-weight:700;margin-bottom:4px;">Horario normal</div>
+                  <label class="gps-zl" style="display:inline-block;">De <input type="time" id="gps-hor-inicio"></label>
+                  <label class="gps-zl" style="display:inline-block;">a <input type="time" id="gps-hor-fin"></label>
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12px;margin:4px 0;"><input type="checkbox" id="gps-hor-domingo"> El domingo todo cuenta fuera de horario</label>
+                  <button class="export-btn" id="gps-hor-guardar">Guardar horario</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Huerta</th><th>Salió</th><th>Regresó</th><th>Tiempo fuera</th><th>Km</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-sal-tbody"></tbody></table></div>
       </div>
       <div id="gps-v-equipos" style="display:none;">
         <div class="toolbar">
@@ -26951,6 +27005,9 @@ function gpsAbrir_(){
     var ayer = new Date(); ayer.setDate(ayer.getDate() - 1);
     document.getElementById('gps-rec-desde').value = gpsFechaIso_(ayer);
     document.getElementById('gps-rec-hasta').value = gpsFechaIso_(ayer);
+    var hace7 = new Date(); hace7.setDate(hace7.getDate() - 7);
+    document.getElementById('gps-sal-desde').value = gpsFechaIso_(hace7);
+    document.getElementById('gps-sal-hasta').value = gpsFechaIso_(new Date());
   }
   gpsCargarEstado_();
   gpsCargarEquipos_();
@@ -27002,6 +27059,7 @@ function gpsMostrarVista_(){
   if(GPS_VISTA === 'finde'){ if(!GPS_FINDE || GPS_FINDE.sabado !== document.getElementById('gps-sabado').value) gpsCargarFinde_(); else gpsPintarFinde_(); }
   if(GPS_VISTA === 'rec'){ if(!GPS_REC) gpsCargarRec_(); else gpsPintarRec_(); }
   if(GPS_VISTA === 'equipos') gpsPintarEquipos_();
+  if(GPS_VISTA === 'salidas'){ if(!GPS_ZONAS) gpsCargarZonas_(); if(!GPS_SAL) gpsCargarSalidas_(); else gpsPintarSalidas_(); }
 }
 
 // ---------- Fin de semana ----------
@@ -27136,6 +27194,195 @@ function gpsExcelRec_(){
   descargarComoExcel_('GPS - Recorridos ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), f.equipo || 'Todas las unidades', [{ titulo: 'Recorridos', columnas: cols, filas: filas, autoFiltro: true }], 'gps_recorridos_' + f.desde);
 }
 
+
+// ---------- Salidas de huerta (límites dibujados en el Panel) ----------
+var GPS_SAL = null;
+var GPS_ZONAS = null;
+var GPS_ZMAPA = null;
+var GPS_ZCAPAS = [];
+var GPS_ZEDIT = null; // { id, poligono (google.maps.Polygon) }
+
+function gpsMinutosTexto_(m){ if(m === null || m === undefined) return '—'; return gpsHoras_(m * 60); }
+function gpsCargarSalidas_(){
+  var f = { desde: document.getElementById('gps-sal-desde').value, hasta: document.getElementById('gps-sal-hasta').value };
+  if(!f.desde){ document.getElementById('gps-sal-status').textContent = 'Elige la fecha.'; return; }
+  if(!f.hasta || f.hasta < f.desde) f.hasta = f.desde;
+  document.getElementById('gps-sal-status').textContent = 'Cargando...';
+  gpsLlamar_('getGpsSalidas', [f], function(r){
+    if(!r || !r.success){ document.getElementById('gps-sal-status').textContent = (r && r.error) || 'No se pudo cargar.'; return; }
+    r.filtro = f; GPS_SAL = r; gpsPintarSalidas_();
+  }, function(m){ document.getElementById('gps-sal-status').textContent = m; });
+}
+function gpsFiltrarSalidas_(){
+  if(!GPS_SAL) return [];
+  var z = document.getElementById('gps-sal-zona').value;
+  var q = document.getElementById('gps-sal-buscar').value.trim().toLowerCase();
+  var fuera = document.getElementById('gps-sal-fuera').checked;
+  return GPS_SAL.salidas.filter(function(s){
+    if(z && s.zona !== z) return false;
+    if(fuera && !s.fueraDeHorario) return false;
+    if(q && (s.equipoGps + ' ' + s.codigoUnidad + ' ' + s.lugares.join(' ') + ' ' + s.llegoA).toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+}
+function gpsPintarSalidas_(){
+  var r = GPS_SAL; if(!r) return;
+  var st = document.getElementById('gps-sal-status');
+  if(r.sinZonas){
+    document.getElementById('gps-sal-tarjetas').innerHTML = '';
+    document.getElementById('gps-sal-tbody').innerHTML = '';
+    st.innerHTML = 'Todavía no hay límites de huertas. Da clic en <b>✏ Límites de huertas</b> para dibujarlos (o crearlos desde los cuadros de Avance Huerta).';
+    return;
+  }
+  var lista = gpsFiltrarSalidas_();
+  var fuera = r.salidas.filter(function(s){ return s.fueraDeHorario; }).length;
+  var sinReg = r.salidas.filter(function(s){ return !s.regreso; }).length;
+  var t = function(n, txt, cls, acc){ return '<div class="seg-tarjeta ' + cls + '" data-acc="' + acc + '"><div class="n">' + n + '</div><div class="t">' + txt + '</div></div>'; };
+  document.getElementById('gps-sal-tarjetas').innerHTML = t(r.salidas.length, 'Salidas', '', 'todas') + t(fuera, 'Fuera de horario', fuera ? 'rojo' : 'verde', 'fuera') + t(sinReg, 'Sin regreso en el rango', sinReg ? 'ambar' : 'verde', 'todas');
+  st.textContent = lista.length + ' salida(s) · horario normal de ' + r.horario.inicio + ' a ' + r.horario.fin + (r.horario.domingo ? ' (domingo fuera de horario)' : '');
+  document.getElementById('gps-sal-tbody').innerHTML = lista.map(function(s, i){
+    var regreso = s.regreso ? gpsNombreDia_(s.regreso.slice(0, 10)) + ' ' + gpsFechaHora_(s.regreso) + (s.regresoMismaZona ? '' : '<br><span style="font-size:11.5px;color:var(--text-dim);">llegó a ' + escapeHtml(s.llegoA) + '</span>') : '<span style="color:var(--amber);">No ha regresado (en el rango)</span>';
+    return '<tr class="' + (s.fueraDeHorario ? 'gps-fuera' : '') + '"><td>' + escapeHtml(s.equipoGps) + (s.codigoUnidad ? '<br><span style="font-size:11.5px;color:var(--text-dim);">' + escapeHtml(s.codigoUnidad) + '</span>' : '') + '</td>'
+      + '<td>' + escapeHtml(s.zona) + '</td><td>' + escapeHtml(gpsNombreDia_(s.salida.slice(0, 10)) + ' ' + gpsFechaHora_(s.salida)) + (s.fueraDeHorario ? '<span class="gps-chip">Fuera de horario</span>' : '') + '</td>'
+      + '<td>' + regreso + '</td><td>' + gpsMinutosTexto_(s.minutosFuera) + '</td><td>' + gpsKm_(s.km) + (s.sinSenal ? ' <span class="gps-sosp" title="Hubo un tramo sin señal">(sin señal)</span>' : '') + '</td>'
+      + '<td style="font-size:12px;">' + escapeHtml(s.lugares.join(' · ')) + '</td>'
+      + '<td><button class="export-btn gps-sal-rec" data-i="' + i + '">Ver recorrido</button></td></tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-dim);">No hay salidas con ese filtro.</td></tr>';
+  document.querySelectorAll('.gps-sal-rec').forEach(function(b){
+    b.addEventListener('click', function(){
+      var s = lista[Number(b.getAttribute('data-i'))];
+      gpsIrARecorrido_(s.equipoGps, s.salida.slice(0, 10), (s.regreso || s.salida).slice(0, 10));
+    });
+  });
+}
+function gpsExcelSalidas_(){
+  var lista = gpsFiltrarSalidas_();
+  if(!lista.length){ alert('No hay salidas para exportar.'); return; }
+  var filas = lista.map(function(s){ return { equipo: s.equipoGps, unidad: s.codigoUnidad, zona: s.zona, salida: s.salida, regreso: s.regreso || 'No ha regresado', llego: s.regreso ? s.llegoA : '', tiempo: gpsMinutosTexto_(s.minutosFuera), km: s.km, lugares: s.lugares.join(' · '), fuera: s.fueraDeHorario ? 'Sí' : '' }; });
+  var cols = [{header:'Unidad (PosiTrace)', key:'equipo', width:30}, {header:'Unidad en sistema', key:'unidad', width:16}, {header:'Huerta', key:'zona', width:20}, {header:'Salió', key:'salida', width:19}, {header:'Regresó', key:'regreso', width:19},
+    {header:'Llegó a', key:'llego', width:20}, {header:'Tiempo fuera', key:'tiempo', width:13}, {header:'Km', key:'km', width:8}, {header:'A dónde fue', key:'lugares', width:60}, {header:'Fuera de horario', key:'fuera', width:12}];
+  var f = GPS_SAL.filtro;
+  descargarComoExcel_('GPS - Salidas de huerta ' + f.desde + (f.hasta !== f.desde ? ' a ' + f.hasta : ''), 'Horario normal ' + GPS_SAL.horario.inicio + ' a ' + GPS_SAL.horario.fin, [{ titulo: 'Salidas', columnas: cols, filas: filas, autoFiltro: true }], 'gps_salidas_' + f.desde);
+}
+
+// ----- Editor de límites -----
+function gpsCargarZonas_(cb){
+  gpsLlamar_('getGpsZonas', [], function(r){
+    if(!r || !r.success) return;
+    GPS_ZONAS = r;
+    var sel = document.getElementById('gps-sal-zona'), antes = sel.value;
+    sel.innerHTML = '<option value="">Todas las huertas</option>' + r.zonas.map(function(z){ return '<option value="' + escapeHtml(z.nombre) + '">' + escapeHtml(z.nombre) + '</option>'; }).join('');
+    sel.value = antes;
+    document.getElementById('gps-zona-huertas').innerHTML = r.huertas.map(function(h){ return '<option value="' + escapeHtml(h) + '">'; }).join('');
+    document.getElementById('gps-hor-inicio').value = r.horario.inicio;
+    document.getElementById('gps-hor-fin').value = r.horario.fin;
+    document.getElementById('gps-hor-domingo').checked = !!r.horario.domingo;
+    gpsPintarListaZonas_();
+    if(cb) cb();
+  });
+}
+function gpsPintarListaZonas_(){
+  var r = GPS_ZONAS; if(!r) return;
+  var puede = gpsPuede_();
+  document.getElementById('gps-zona-nueva').style.display = puede ? '' : 'none';
+  document.getElementById('gps-hor-guardar').style.display = puede ? '' : 'none';
+  document.getElementById('gps-zonas-lista').innerHTML = r.zonas.length ? r.zonas.map(function(z){
+    return '<div class="gps-zona-item"><span class="nom">' + escapeHtml(z.nombre) + ' <span style="font-size:11px;color:var(--text-dim);">' + escapeHtml(z.tipo) + ' · ' + z.margen + ' m</span></span>'
+      + '<button class="export-btn gps-z-ver" data-id="' + z.id + '">Ver</button>'
+      + (puede ? '<button class="export-btn gps-z-edit" data-id="' + z.id + '">Editar</button><button class="export-btn gps-z-del" data-id="' + z.id + '">✕</button>' : '') + '</div>';
+  }).join('') : '<div style="color:var(--text-dim);font-size:12.5px;">Todavía no hay límites.</div>';
+  document.getElementById('gps-zonas-sugeridas').innerHTML = (puede && r.sugeridas.length) ? '<div style="font-weight:700;margin:10px 0 4px;">Desde Avance Huerta</div><div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">Huertas con cuadros dibujados: crea su límite con el contorno de sus cuadros (luego lo puedes ajustar).</div>'
+    + r.sugeridas.map(function(z, i){ return '<div class="gps-zona-item"><span class="nom">' + escapeHtml(z.nombre) + '</span><button class="export-btn gps-z-sug" data-i="' + i + '">Crear</button></div>'; }).join('') : '';
+  var porId = function(id){ return r.zonas.filter(function(z){ return z.id === Number(id); })[0]; };
+  document.querySelectorAll('.gps-z-ver').forEach(function(b){ b.addEventListener('click', function(){ gpsEncuadrar_(porId(b.getAttribute('data-id')).poligono); }); });
+  document.querySelectorAll('.gps-z-edit').forEach(function(b){ b.addEventListener('click', function(){ gpsEditarZona_(porId(b.getAttribute('data-id'))); }); });
+  document.querySelectorAll('.gps-z-del').forEach(function(b){ b.addEventListener('click', function(){
+    var z = porId(b.getAttribute('data-id'));
+    if(!confirm('¿Borrar el límite de "' + z.nombre + '"?')) return;
+    gpsLlamar_('eliminarZonaGps', [z.id], function(x){ if(!x || !x.success){ alert((x && x.error) || 'No se pudo borrar.'); return; } GPS_SAL = null; gpsCargarZonas_(gpsPintarMapaZonas_); });
+  }); });
+  document.querySelectorAll('.gps-z-sug').forEach(function(b){ b.addEventListener('click', function(){
+    var z = r.sugeridas[Number(b.getAttribute('data-i'))];
+    gpsEditarZona_({ id: 0, nombre: z.nombre, tipo: 'huerta', margen: 100, poligono: z.poligono, origen: 'cuadros' });
+  }); });
+}
+function gpsAbrirEditorZonas_(){
+  var ed = document.getElementById('gps-zonas-editor');
+  var abrir = ed.style.display === 'none';
+  ed.style.display = abrir ? '' : 'none';
+  if(!abrir){ gpsCancelarZona_(); return; }
+  gpsCargarZonas_(function(){
+    if(typeof ahCargarGoogleMapsSiHaceFalta_ !== 'function') return;
+    ahCargarGoogleMapsSiHaceFalta_(function(){
+      if(!GPS_ZMAPA){
+        GPS_ZMAPA = new google.maps.Map(document.getElementById('gps-zonas-mapa'), { mapTypeId: 'hybrid', streetViewControl: false, center: { lat: 18.95, lng: -96.9 }, zoom: 10 });
+        GPS_ZMAPA.addListener('click', function(e){
+          if(!GPS_ZEDIT) return;
+          GPS_ZEDIT.poligono.getPath().push(e.latLng);
+        });
+      }
+      gpsPintarMapaZonas_();
+    });
+  });
+}
+function gpsEncuadrar_(pol){
+  if(!GPS_ZMAPA || !pol || !pol.length) return;
+  var b = new google.maps.LatLngBounds(); pol.forEach(function(p){ b.extend(p); }); GPS_ZMAPA.fitBounds(b);
+}
+function gpsPintarMapaZonas_(){
+  if(!GPS_ZMAPA || !GPS_ZONAS) return;
+  GPS_ZCAPAS.forEach(function(c){ c.setMap(null); }); GPS_ZCAPAS = [];
+  var bounds = new google.maps.LatLngBounds(), hay = false;
+  GPS_ZONAS.zonas.forEach(function(z){
+    if(GPS_ZEDIT && GPS_ZEDIT.id === z.id) return;
+    var pg = new google.maps.Polygon({ map: GPS_ZMAPA, paths: z.poligono, strokeColor: '#E8871E', strokeWeight: 2, fillColor: '#E8871E', fillOpacity: 0.15, clickable: false });
+    GPS_ZCAPAS.push(pg);
+    var c = z.poligono.reduce(function(a, p){ return { lat: a.lat + p.lat / z.poligono.length, lng: a.lng + p.lng / z.poligono.length }; }, { lat: 0, lng: 0 });
+    GPS_ZCAPAS.push(new google.maps.Marker({ map: GPS_ZMAPA, position: c, label: { text: z.nombre, color: '#fff', fontSize: '11px', fontWeight: '700' }, icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 } }));
+    z.poligono.forEach(function(p){ bounds.extend(p); hay = true; });
+  });
+  GPS_ZONAS.sugeridas.forEach(function(z){
+    GPS_ZCAPAS.push(new google.maps.Polygon({ map: GPS_ZMAPA, paths: z.poligono, strokeColor: '#9A9D9E', strokeWeight: 1, strokeOpacity: 0.8, fillOpacity: 0.03, clickable: false }));
+    if(!hay) z.poligono.forEach(function(p){ bounds.extend(p); });
+  });
+  if(!GPS_ZEDIT && !bounds.isEmpty()) GPS_ZMAPA.fitBounds(bounds);
+}
+function gpsEditarZona_(z){
+  gpsCancelarZona_();
+  z = z || { id: 0, nombre: '', tipo: 'huerta', margen: 50, poligono: [], origen: 'manual' };
+  document.getElementById('gps-zona-form').style.display = '';
+  document.getElementById('gps-zonas-lista-wrap').style.display = 'none';
+  document.getElementById('gps-zona-form-titulo').textContent = z.id ? 'Editar "' + z.nombre + '"' : (z.origen === 'cuadros' ? 'Límite desde Avance Huerta' : 'Nueva zona');
+  document.getElementById('gps-zona-nombre').value = z.nombre;
+  document.getElementById('gps-zona-tipo').value = z.tipo;
+  document.getElementById('gps-zona-margen').value = z.margen;
+  if(!GPS_ZMAPA) return;
+  GPS_ZEDIT = { id: z.id, origen: z.origen, poligono: new google.maps.Polygon({ map: GPS_ZMAPA, paths: z.poligono, editable: true, draggable: false, strokeColor: '#4C8DAE', strokeWeight: 3, fillColor: '#4C8DAE', fillOpacity: 0.2 }) };
+  gpsPintarMapaZonas_();
+  if(z.poligono.length) gpsEncuadrar_(z.poligono);
+  GPS_ZMAPA.setOptions({ draggableCursor: 'crosshair' });
+}
+function gpsCancelarZona_(){
+  if(GPS_ZEDIT){ GPS_ZEDIT.poligono.setMap(null); GPS_ZEDIT = null; }
+  if(GPS_ZMAPA) GPS_ZMAPA.setOptions({ draggableCursor: null });
+  document.getElementById('gps-zona-form').style.display = 'none';
+  document.getElementById('gps-zonas-lista-wrap').style.display = '';
+  gpsPintarMapaZonas_();
+}
+function gpsGuardarZona_(){
+  if(!GPS_ZEDIT) return;
+  var pts = GPS_ZEDIT.poligono.getPath().getArray().map(function(p){ return { lat: Math.round(p.lat() * 1e6) / 1e6, lng: Math.round(p.lng() * 1e6) / 1e6 }; });
+  var datos = { id: GPS_ZEDIT.id, nombre: document.getElementById('gps-zona-nombre').value.trim(), tipo: document.getElementById('gps-zona-tipo').value,
+    margen: Number(document.getElementById('gps-zona-margen').value) || 0, poligono: pts, origen: GPS_ZEDIT.origen };
+  gpsLlamar_('guardarZonaGps', [datos], function(r){
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo guardar.'); return; }
+    GPS_SAL = null;
+    gpsCancelarZona_();
+    gpsCargarZonas_(gpsPintarMapaZonas_);
+    gpsCargarSalidas_();
+  });
+}
+
 // ---------- Unidades GPS (liga con Maquinaria) ----------
 function gpsCargarEquipos_(){
   gpsLlamar_('getGpsEquipos', [], function(r){
@@ -27188,6 +27435,26 @@ document.getElementById('gps-rec-buscar').addEventListener('input', gpsPintarRec
 document.getElementById('gps-rec-excel').addEventListener('click', gpsExcelRec_);
 document.getElementById('gps-eq-buscar').addEventListener('input', gpsPintarEquipos_);
 document.getElementById('gps-eq-sin').addEventListener('change', gpsPintarEquipos_);
+['gps-sal-desde', 'gps-sal-hasta'].forEach(function(id){ document.getElementById(id).addEventListener('change', gpsCargarSalidas_); });
+['gps-sal-zona', 'gps-sal-fuera'].forEach(function(id){ document.getElementById(id).addEventListener('change', gpsPintarSalidas_); });
+document.getElementById('gps-sal-buscar').addEventListener('input', gpsPintarSalidas_);
+document.getElementById('gps-sal-excel').addEventListener('click', gpsExcelSalidas_);
+document.getElementById('gps-sal-tarjetas').addEventListener('click', function(e){
+  var t = e.target.closest('.seg-tarjeta'); if(!t) return;
+  document.getElementById('gps-sal-fuera').checked = t.getAttribute('data-acc') === 'fuera';
+  gpsPintarSalidas_();
+});
+document.getElementById('gps-sal-limites').addEventListener('click', gpsAbrirEditorZonas_);
+document.getElementById('gps-zona-nueva').addEventListener('click', function(){ gpsEditarZona_(null); });
+document.getElementById('gps-zona-deshacer').addEventListener('click', function(){ if(GPS_ZEDIT){ var p = GPS_ZEDIT.poligono.getPath(); if(p.getLength()) p.pop(); } });
+document.getElementById('gps-zona-guardar').addEventListener('click', gpsGuardarZona_);
+document.getElementById('gps-zona-cancelar').addEventListener('click', gpsCancelarZona_);
+document.getElementById('gps-hor-guardar').addEventListener('click', function(){
+  gpsLlamar_('guardarHorarioGps', [{ inicio: document.getElementById('gps-hor-inicio').value, fin: document.getElementById('gps-hor-fin').value, domingo: document.getElementById('gps-hor-domingo').checked }], function(r){
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo guardar.'); return; }
+    alert('Horario guardado.'); GPS_SAL = null; gpsCargarZonas_(); gpsCargarSalidas_();
+  });
+});
 </script>
 </body>
 </html>

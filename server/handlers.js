@@ -14032,7 +14032,169 @@ async function getGpsFinDeSemana(code, nombreUsuario, sabado) {
   return { success: true, sabado, hayDatos: cubre.n > 0, equipos: lista };
 }
 
+// ---------- Zonas (límites de huertas) y salidas ----------
+// Horario normal configurable (Carlos: "8 pm sería fuera de horario").
+const GPS_HORARIO_DEF_ = { inicio: '05:00', fin: '20:00', domingo: false };
+async function horarioGps_() {
+  const [rows] = await pool.query("SELECT valor FROM configuracion WHERE clave = 'gps_horario'");
+  try { return Object.assign({}, GPS_HORARIO_DEF_, rows.length ? JSON.parse(rows[0].valor) : {}); } catch (e) { return Object.assign({}, GPS_HORARIO_DEF_); }
+}
+function minutosDeHora_(hhmm) { const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})/); return m ? Number(m[1]) * 60 + Number(m[2]) : null; }
+// ¿Esta hora local ("AAAA-MM-DD HH:MM:SS") cae fuera del horario normal?
+function fueraDeHorario_(s, h) {
+  if (!s) return false;
+  const min = Number(s.slice(11, 13)) * 60 + Number(s.slice(14, 16));
+  const ini = minutosDeHora_(h.inicio), fin = minutosDeHora_(h.fin);
+  if (h.domingo && new Date(s.slice(0, 10) + 'T12:00:00Z').getUTCDay() === 0) return true;
+  return min < ini || min >= fin;
+}
+
+// Contorno sugerido de una huerta a partir de sus cuadros de Avance Huerta:
+// envolvente convexa de todos los vértices (el margen se aplica aparte).
+function envolventeConvexa_(puntos) {
+  const p = puntos.map((v) => ({ lat: Number(v.lat), lng: Number(v.lng) })).filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng))
+    .sort((a, b) => a.lng - b.lng || a.lat - b.lat);
+  if (p.length < 3) return p;
+  const cruz = (o, a, b) => (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+  const abajo = [], arriba = [];
+  p.forEach((v) => { while (abajo.length >= 2 && cruz(abajo[abajo.length - 2], abajo[abajo.length - 1], v) <= 0) abajo.pop(); abajo.push(v); });
+  p.slice().reverse().forEach((v) => { while (arriba.length >= 2 && cruz(arriba[arriba.length - 2], arriba[arriba.length - 1], v) <= 0) arriba.pop(); arriba.push(v); });
+  return abajo.slice(0, -1).concat(arriba.slice(0, -1)).map((v) => ({ lat: Math.round(v.lat * 1e6) / 1e6, lng: Math.round(v.lng * 1e6) / 1e6 }));
+}
+function zonaDePunto_(punto, zonas) {
+  if (!punto || punto.lat === null || punto.lat === undefined) return null;
+  for (const z of zonas) {
+    if (puntoDentroDePoligono_(punto, z.poligono) || distanciaPuntoAPoligonoMetros_(punto, z.poligono) <= z.margen) return z;
+  }
+  return null;
+}
+async function leerZonasGps_() {
+  const [rows] = await pool.query('SELECT id, nombre, tipo, poligono, margen_m, origen, actualizado_por FROM gps_zonas ORDER BY nombre');
+  return rows.map((r) => ({ id: r.id, nombre: r.nombre, tipo: r.tipo, poligono: parsearPoligono_(r.poligono), margen: r.margen_m, origen: r.origen, actualizadoPor: r.actualizado_por || '' }))
+    .filter((z) => z.poligono.length >= 3);
+}
+
+async function getGpsZonas(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  const zonas = await leerZonasGps_();
+  const [cuadros] = await pool.query('SELECT huerta, poligono FROM huerta_cuadros');
+  const porHuerta = {};
+  cuadros.forEach((c) => { (porHuerta[c.huerta] = porHuerta[c.huerta] || []).push(...parsearPoligono_(c.poligono)); });
+  const tienen = new Set(zonas.map((z) => z.nombre.toUpperCase()));
+  const sugeridas = Object.keys(porHuerta).filter((h) => !tienen.has(h.toUpperCase())).map((h) => ({ nombre: h, poligono: envolventeConvexa_(porHuerta[h]) }))
+    .filter((z) => z.poligono.length >= 3);
+  const [huertas] = await pool.query('SELECT nombre FROM huertas ORDER BY nombre');
+  return { success: true, zonas, sugeridas, huertas: huertas.map((x) => x.nombre), horario: await horarioGps_() };
+}
+
+async function guardarZonaGps(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  datos = datos || {};
+  const nombre = String(datos.nombre || '').trim().slice(0, 150);
+  const poligono = (Array.isArray(datos.poligono) ? datos.poligono : []).map((v) => ({ lat: Number(v.lat), lng: Number(v.lng) }))
+    .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng) && Math.abs(v.lat) <= 90 && Math.abs(v.lng) <= 180);
+  if (!nombre) return { success: false, error: 'Ponle nombre a la zona.' };
+  if (poligono.length < 3) return { success: false, error: 'Marca al menos 3 puntos en el mapa.' };
+  const margen = Math.max(0, Math.min(1000, Math.round(Number(datos.margen) || 0)));
+  const tipo = ['huerta', 'taller', 'oficina', 'otro'].includes(datos.tipo) ? datos.tipo : 'huerta';
+  const origen = datos.origen === 'cuadros' ? 'cuadros' : 'manual';
+  const [[dup]] = await pool.query('SELECT id FROM gps_zonas WHERE nombre = ? AND id <> ?', [nombre, Number(datos.id) || 0]);
+  if (dup) return { success: false, error: 'Ya hay una zona con ese nombre.' };
+  let id = Number(datos.id) || 0;
+  if (id) {
+    await pool.query('UPDATE gps_zonas SET nombre = ?, tipo = ?, poligono = ?, margen_m = ?, origen = ?, actualizado_por = ? WHERE id = ?', [nombre, tipo, JSON.stringify(poligono), margen, origen, nombreUsuario, id]);
+  } else {
+    const [r] = await pool.query('INSERT INTO gps_zonas (nombre, tipo, poligono, margen_m, origen, actualizado_por) VALUES (?, ?, ?, ?, ?, ?)', [nombre, tipo, JSON.stringify(poligono), margen, origen, nombreUsuario]);
+    id = r.insertId;
+  }
+  await registrarAuditoria_('gps_zonas', id, 'guardar', nombreUsuario, nombre + ' (' + poligono.length + ' puntos, margen ' + margen + ' m)');
+  return { success: true, id };
+}
+
+async function eliminarZonaGps(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  const [[z]] = await pool.query('SELECT nombre FROM gps_zonas WHERE id = ?', [Number(id)]);
+  if (!z) return { success: false, error: 'No existe esa zona.' };
+  await pool.query('DELETE FROM gps_zonas WHERE id = ?', [Number(id)]);
+  await registrarAuditoria_('gps_zonas', id, 'eliminar', nombreUsuario, z.nombre);
+  return { success: true };
+}
+
+async function guardarHorarioGps(code, nombreUsuario, h) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  h = h || {};
+  const ini = minutosDeHora_(h.inicio), fin = minutosDeHora_(h.fin);
+  if (ini === null || fin === null || ini >= fin) return { success: false, error: 'El horario no es válido (la hora de inicio debe ser antes que la de fin).' };
+  const valor = { inicio: String(h.inicio).slice(0, 5), fin: String(h.fin).slice(0, 5), domingo: !!h.domingo };
+  await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('gps_horario', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [JSON.stringify(valor)]);
+  return { success: true, horario: valor };
+}
+
+// Salidas: con los viajes de cada unidad (orden de hora), una salida empieza
+// cuando un viaje arranca dentro de una zona y termina fuera de ella, y
+// acaba cuando un viaje termina dentro de una zona (la misma = regreso; otra
+// = llegó a otra huerta). El punto de arranque de un viaje es donde terminó
+// el anterior (PosiTrace no trae la ubicación inicial).
+async function getGpsSalidas(code, nombreUsuario, filtros) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  filtros = filtros || {};
+  const desde = fechaGpsValida_(filtros.desde) ? filtros.desde : null;
+  const hasta = fechaGpsValida_(filtros.hasta) ? filtros.hasta : desde;
+  if (!desde) return { success: false, error: 'Elige la fecha.' };
+  if ((new Date(hasta) - new Date(desde)) / 86400000 > 31) return { success: false, error: 'Elige un rango de 31 días o menos.' };
+  const zonas = await leerZonasGps_();
+  const horario = await horarioGps_();
+  if (!zonas.length) return { success: true, salidas: [], sinZonas: true, horario };
+  const cond = ['v.inicio >= DATE_SUB(?, INTERVAL 2 DAY)', 'v.inicio < DATE_ADD(?, INTERVAL 1 DAY)'];
+  const params = [desde, hasta];
+  if (filtros.equipo) { cond.push('v.equipo_gps = ?'); params.push(String(filtros.equipo)); }
+  const [rows] = await pool.query(
+    `SELECT v.equipo_gps, e.codigo_unidad, m.unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin, v.km, v.llegada, v.lat, v.lng, v.sospechoso
+     FROM gps_viajes v LEFT JOIN gps_equipos e ON e.equipo_gps = v.equipo_gps LEFT JOIN maquinaria m ON m.codigo_unidad = e.codigo_unidad
+     WHERE ${cond.join(' AND ')} ORDER BY v.equipo_gps, v.inicio`, params);
+  const porEquipo = {};
+  rows.forEach((r) => { (porEquipo[r.equipo_gps] = porEquipo[r.equipo_gps] || []).push(r); });
+  const salidas = [];
+  Object.keys(porEquipo).forEach((eq) => {
+    const vs = porEquipo[eq];
+    let pos = null, abierta = null;
+    vs.forEach((v) => {
+      const zIni = zonaDePunto_(pos, zonas);
+      const fin = v.lat === null ? null : { lat: Number(v.lat), lng: Number(v.lng) };
+      const zFin = zonaDePunto_(fin, zonas);
+      if (!abierta && zIni && zFin !== zIni && fin) {
+        abierta = { equipoGps: eq, codigoUnidad: v.codigo_unidad || '', unidad: v.unidad || '', zona: zIni.nombre, salida: v.inicio, regreso: null, llegoA: '', km: 0, viajes: 0, lugares: [], sinSenal: false };
+      }
+      if (abierta) {
+        if (v.sospechoso) abierta.sinSenal = true; else abierta.km += Number(v.km) || 0;
+        abierta.viajes++;
+        if (zFin) {
+          abierta.regreso = v.fin || v.inicio;
+          abierta.llegoA = zFin === null ? '' : zFin.nombre;
+          salidas.push(abierta);
+          abierta = null;
+        } else if (v.llegada && (Number(v.km) || 0) >= 0.3) {
+          const l = String(v.llegada).replace(/^[,\s]+/, '');
+          if (!abierta.lugares.includes(l)) abierta.lugares.push(l);
+        }
+      }
+      if (fin) pos = fin;
+    });
+    if (abierta) salidas.push(abierta);
+  });
+  const lista = salidas.filter((s) => s.salida.slice(0, 10) >= desde && s.salida.slice(0, 10) <= hasta)
+    .filter((s) => !filtros.zona || s.zona === filtros.zona)
+    .map((s) => {
+      const fuera = fueraDeHorario_(s.salida, horario) || fueraDeHorario_(s.regreso, horario) || (s.regreso && s.regreso.slice(0, 10) !== s.salida.slice(0, 10));
+      const minutos = s.regreso ? Math.round((new Date(s.regreso.replace(' ', 'T') + 'Z') - new Date(s.salida.replace(' ', 'T') + 'Z')) / 60000) : null;
+      return Object.assign(s, { km: Math.round(s.km * 10) / 10, minutosFuera: minutos, fueraDeHorario: !!fuera, regresoMismaZona: !!s.regreso && s.llegoA === s.zona, lugares: s.lugares.slice(0, 6) });
+    })
+    .sort((a, b) => (a.salida < b.salida ? 1 : -1));
+  return { success: true, salidas: lista, horario };
+}
+
 Object.assign(module.exports, {
+  getGpsZonas, guardarZonaGps, eliminarZonaGps, guardarHorarioGps, getGpsSalidas,
   getGpsEstado, revisarCorreoGpsAhora, getGpsEquipos, guardarLigaGps, getGpsViajes, getGpsFinDeSemana,
   revisarCorreoGps_: () => positrace.revisarCorreoGps(),
 });

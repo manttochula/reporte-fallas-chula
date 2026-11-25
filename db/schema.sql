@@ -4054,3 +4054,18 @@ CREATE TABLE IF NOT EXISTS gps_viajes (
   UNIQUE KEY uq_gps_viaje (equipo_gps, inicio),
   INDEX idx_gps_viaje_inicio (inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- GPS (nov-2026, Carlos): límites de huertas y otros lugares dibujados en el
+-- Panel (GPS → Salidas de huerta), para saber cuándo sale y regresa cada
+-- unidad con los viajes de PosiTrace. margen_m: tolerancia alrededor del borde.
+CREATE TABLE IF NOT EXISTS gps_zonas (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  nombre        VARCHAR(150) NOT NULL,
+  tipo          VARCHAR(20) NOT NULL DEFAULT 'huerta',
+  poligono      JSON NOT NULL,
+  margen_m      INT NOT NULL DEFAULT 50,
+  origen        VARCHAR(20) NOT NULL DEFAULT 'manual',
+  actualizado_por VARCHAR(255) DEFAULT NULL,
+  actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_gps_zona_nombre (nombre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

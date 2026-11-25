@@ -196,10 +196,16 @@ async function procesarArchivo_(archivoId) {
 }
 
 // Guarda un adjunto (si no estaba ya) y lo procesa.
+// Fecha del correo en hora de México ("AAAA-MM-DD HH:MM:SS"), igual que los viajes.
+function horaMexico_(d) {
+  const f = d instanceof Date ? d : new Date(d || Date.now());
+  return f.toLocaleString('sv-SE', { timeZone: 'America/Mexico_City', hour12: false }).replace('T', ' ').slice(0, 19);
+}
+
 async function guardarAdjunto_(messageId, asunto, recibido, nombre, buffer) {
   const [r] = await pool.query(
     'INSERT IGNORE INTO gps_archivos (message_id, asunto, recibido, nombre, contenido) VALUES (?, ?, ?, ?, ?)',
-    [messageId.slice(0, 250), (asunto || '').slice(0, 250), recibido, nombre.slice(0, 250), buffer]
+    [messageId.slice(0, 250), (asunto || '').slice(0, 250), horaMexico_(recibido), nombre.slice(0, 250), buffer]
   );
   if (!r.insertId) return null; // ya estaba
   return procesarArchivo_(r.insertId);
@@ -239,7 +245,7 @@ async function revisarCorreoGps(opciones) {
       const desde = new Date(Date.now() - DIAS_ATRAS * 86400000);
       const uids = await cliente.search({ from: REMITENTE, since: desde }, { uid: true });
       if (uids && uids.length) {
-        const [ya] = await pool.query('SELECT DISTINCT message_id FROM gps_archivos WHERE recibido >= ?', [desde]);
+        const [ya] = await pool.query('SELECT DISTINCT message_id FROM gps_archivos WHERE recibido >= DATE_SUB(NOW(), INTERVAL ' + (DIAS_ATRAS + 2) + ' DAY)');
         const vistos = new Set(ya.map((x) => x.message_id));
         const mensajes = [];
         for await (const m of cliente.fetch(uids, { envelope: true, bodyStructure: true, internalDate: true }, { uid: true })) mensajes.push(m);
@@ -280,4 +286,4 @@ async function revisarCorreoGps(opciones) {
   }
 }
 
-module.exports = { revisarCorreoGps, leerArchivo_, viajesDeFilas_, guardarAdjunto_, procesarArchivo_, numeroAf_, fechaHora_, segundos_, credenciales_ };
+module.exports = { horaMexico_, revisarCorreoGps, leerArchivo_, viajesDeFilas_, guardarAdjunto_, procesarArchivo_, numeroAf_, fechaHora_, segundos_, credenciales_ };

@@ -14004,6 +14004,9 @@ async function getGpsViajes(code, nombreUsuario, filtros) {
 // Resumen de un fin de semana (sábado y domingo) por equipo.
 async function getGpsFinDeSemana(code, nombreUsuario, sabado) {
   await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  return calcularFindeGps_(sabado);
+}
+async function calcularFindeGps_(sabado) {
   if (!fechaGpsValida_(sabado) || new Date(sabado + 'T12:00:00Z').getUTCDay() !== 6) return { success: false, error: 'Elige un sábado.' };
   const [rows] = await pool.query(
     `SELECT v.equipo_gps, e.codigo_unidad, m.unidad, DATE_FORMAT(v.inicio, ${GPS_FMT_}) inicio, DATE_FORMAT(v.fin, ${GPS_FMT_}) fin,
@@ -14137,6 +14140,9 @@ async function guardarHorarioGps(code, nombreUsuario, h) {
 // el anterior (PosiTrace no trae la ubicación inicial).
 async function getGpsSalidas(code, nombreUsuario, filtros) {
   await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  return calcularSalidasGps_(filtros);
+}
+async function calcularSalidasGps_(filtros) {
   filtros = filtros || {};
   const desde = fechaGpsValida_(filtros.desde) ? filtros.desde : null;
   const hasta = fechaGpsValida_(filtros.hasta) ? filtros.hasta : desde;
@@ -14193,7 +14199,173 @@ async function getGpsSalidas(code, nombreUsuario, filtros) {
   return { success: true, salidas: lista, horario };
 }
 
+// ---------- Avisos por Telegram a los jefes (por unidad) ----------
+const GPS_HORA_DIARIO_ = '07:30';   // resumen de las salidas de ayer
+const GPS_HORA_FINDE_ = '08:00';    // lunes: resumen del fin de semana
+const GPS_HORA_SIN_DATOS_ = '12:00'; // si a esta hora no llegó el informe de ayer, se avisa igual
+function ahoraMexico_(d) { return positrace.horaMexico_(d || new Date()); }
+function sumarDias_(iso, n) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+const DIAS_GPS_ = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+function diaCorto_(s) { return DIAS_GPS_[new Date(s.slice(0, 10) + 'T12:00:00Z').getUTCDay()] + ' ' + s.slice(8, 10) + '/' + s.slice(5, 7); }
+function horasMin_(min) { if (min === null || min === undefined) return ''; const h = Math.floor(min / 60), m = min % 60; return h ? h + ' h ' + String(m).padStart(2, '0') + ' min' : m + ' min'; }
+const esc_ = (t) => avisos.escHtml_(t);
+function nombreUnidadGps_(s) { return esc_(s.equipoGps) + (s.codigoUnidad ? ' (' + esc_(s.codigoUnidad) + ')' : ''); }
+
+async function leerJefesGps_(soloActivos) {
+  const [jefes] = await pool.query('SELECT * FROM gps_jefes' + (soloActivos ? ' WHERE activo = 1 AND chat_id IS NOT NULL' : '') + ' ORDER BY nombre');
+  const [uni] = await pool.query('SELECT jefe_id, equipo_gps FROM gps_jefes_unidades');
+  return jefes.map((j) => ({
+    id: j.id, nombre: j.nombre, chatId: j.chat_id || '', chatNombre: j.chat_nombre || '', activo: !!j.activo,
+    avisoFuera: !!j.aviso_fuera, avisoDiario: !!j.aviso_diario, avisoFinde: !!j.aviso_finde,
+    unidades: uni.filter((u) => u.jefe_id === j.id).map((u) => u.equipo_gps).sort(),
+  }));
+}
+
+async function getGpsJefes(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'visualizar');
+  return { success: true, jefes: await leerJefesGps_(false), telegram: await avisos.botTelegram_(), horas: { diario: GPS_HORA_DIARIO_, finde: GPS_HORA_FINDE_ } };
+}
+async function guardarGpsJefe(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  datos = datos || {};
+  const nombre = String(datos.nombre || '').trim().slice(0, 150);
+  if (!nombre) return { success: false, error: 'Escribe el nombre del jefe.' };
+  const chatId = String(datos.chatId || '').trim();
+  if (chatId && !/^-?\d{1,20}$/.test(chatId)) return { success: false, error: 'Chat de Telegram inválido.' };
+  const [[dup]] = await pool.query('SELECT id FROM gps_jefes WHERE nombre = ? AND id <> ?', [nombre, Number(datos.id) || 0]);
+  if (dup) return { success: false, error: 'Ya hay un jefe con ese nombre.' };
+  const valores = [nombre, chatId || null, chatId ? String(datos.chatNombre || '').slice(0, 150) || chatId : null, datos.avisoFuera ? 1 : 0, datos.avisoDiario ? 1 : 0, datos.avisoFinde ? 1 : 0, datos.activo === false ? 0 : 1];
+  let id = Number(datos.id) || 0;
+  if (id) {
+    const [[ya]] = await pool.query('SELECT chat_id FROM gps_jefes WHERE id = ?', [id]);
+    if (!ya) return { success: false, error: 'No existe ese jefe.' };
+    await pool.query('UPDATE gps_jefes SET nombre = ?, chat_id = ?, chat_nombre = ?, aviso_fuera = ?, aviso_diario = ?, aviso_finde = ?, activo = ? WHERE id = ?', valores.concat([id]));
+  } else {
+    const [r] = await pool.query('INSERT INTO gps_jefes (nombre, chat_id, chat_nombre, aviso_fuera, aviso_diario, aviso_finde, activo) VALUES (?, ?, ?, ?, ?, ?, ?)', valores);
+    id = r.insertId;
+  }
+  const unidades = Array.from(new Set((Array.isArray(datos.unidades) ? datos.unidades : []).map((u) => String(u).trim()).filter(Boolean)));
+  await pool.query('DELETE FROM gps_jefes_unidades WHERE jefe_id = ?', [id]);
+  if (unidades.length) await pool.query('INSERT INTO gps_jefes_unidades (jefe_id, equipo_gps) VALUES ?', [unidades.map((u) => [id, u.slice(0, 150)])]);
+  await registrarAuditoria_('gps_jefes', id, 'guardar', nombreUsuario, nombre + ': ' + unidades.length + ' unidad(es)' + (chatId ? ', Telegram ' + (datos.chatNombre || chatId) : ', sin Telegram'));
+  return { success: true, id };
+}
+async function eliminarGpsJefe(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  const [[j]] = await pool.query('SELECT nombre FROM gps_jefes WHERE id = ?', [Number(id)]);
+  if (!j) return { success: false, error: 'No existe ese jefe.' };
+  await pool.query('DELETE FROM gps_jefes_unidades WHERE jefe_id = ?', [Number(id)]);
+  await pool.query('DELETE FROM gps_jefes WHERE id = ?', [Number(id)]);
+  await registrarAuditoria_('gps_jefes', id, 'eliminar', nombreUsuario, j.nombre);
+  return { success: true };
+}
+async function buscarChatsTelegramGps(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  return avisos.buscarChatsTelegram_();
+}
+async function probarGpsJefe(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'gps', 'capturar');
+  const j = (await leerJefesGps_(false)).find((x) => x.id === Number(id));
+  if (!j || !j.chatId) return { success: false, error: 'Ese jefe no tiene chat de Telegram.' };
+  try {
+    await avisos.enviarTelegram_(j.chatId, '🔔 <b>Prueba de avisos de GPS</b>\nHola ' + esc_(j.nombre) + ', aquí te van a llegar los avisos de tus ' + j.unidades.length + ' unidad(es):'
+      + (j.avisoFuera ? '\n• Salidas fuera de horario' : '') + (j.avisoDiario ? '\n• Resumen diario de salidas (' + GPS_HORA_DIARIO_ + ')' : '') + (j.avisoFinde ? '\n• Resumen del fin de semana (lunes ' + GPS_HORA_FINDE_ + ')' : ''));
+  } catch (err) { return { success: false, error: 'Telegram respondió: ' + err.message }; }
+  return { success: true };
+}
+
+async function yaEnviadoGps_(clave) { const [r] = await pool.query('SELECT 1 FROM gps_avisos_enviados WHERE clave = ?', [clave]); return r.length > 0; }
+async function marcarEnviadoGps_(clave) { await pool.query('INSERT IGNORE INTO gps_avisos_enviados (clave) VALUES (?)', [clave.slice(0, 255)]); }
+async function enviarUnaVezGps_(clave, chatId, html, res) {
+  if (await yaEnviadoGps_(clave)) return;
+  try { await avisos.enviarTelegram_(chatId, html); await marcarEnviadoGps_(clave); res.enviados++; }
+  catch (err) { res.errores.push(clave + ': ' + err.message); }
+}
+function lineaSalida_(s, conUnidad) {
+  const reg = s.regreso ? s.regreso.slice(11, 16) + (s.regreso.slice(0, 10) !== s.salida.slice(0, 10) ? ' (' + diaCorto_(s.regreso) + ')' : '') + (s.regresoMismaZona ? '' : ' a ' + esc_(s.llegoA)) : 'sin regreso';
+  return '• ' + (conUnidad ? '<b>' + nombreUnidadGps_(s) + '</b> ' : '') + esc_(s.zona) + ' ' + s.salida.slice(11, 16) + ' → ' + reg
+    + (s.minutosFuera !== null ? ' (' + horasMin_(s.minutosFuera) + ', ' + s.km + ' km)' : ' (' + s.km + ' km)') + (s.fueraDeHorario ? ' 🌙' : '')
+    + (s.lugares.length ? '\n   ' + esc_(s.lugares.slice(0, 3).join(' · ')) : '');
+}
+
+// Se corre después de leer el correo y cada 15 min. opciones.ahora: Date (pruebas).
+async function revisarAvisosGps_(opciones) {
+  opciones = opciones || {};
+  const res = { enviados: 0, errores: [] };
+  const tg = await avisos.botTelegram_();
+  if (!tg.tieneToken) return res;
+  const jefes = await leerJefesGps_(true);
+  if (!jefes.length) return res;
+  const ahora = ahoraMexico_(opciones.ahora);
+  const hoy = ahora.slice(0, 10), ayer = sumarDias_(hoy, -1), hhmm = ahora.slice(11, 16);
+  const deUnidad = (j) => new Set(j.unidades);
+
+  // 1) Salidas fuera de horario (de las últimas ~36 h)
+  if (jefes.some((j) => j.avisoFuera && j.unidades.length)) {
+    const r = await calcularSalidasGps_({ desde: ayer, hasta: hoy });
+    const limite = new Date(new Date(ahora.replace(' ', 'T') + 'Z').getTime() - 36 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
+    for (const s of (r.salidas || []).filter((x) => x.fueraDeHorario && x.salida >= limite)) {
+      for (const j of jefes.filter((x) => x.avisoFuera && deUnidad(x).has(s.equipoGps))) {
+        const html = '🌙 <b>Salida fuera de horario</b>\nUnidad: <b>' + nombreUnidadGps_(s) + '</b>\nSalió de <b>' + esc_(s.zona) + '</b>: ' + diaCorto_(s.salida) + ' ' + s.salida.slice(11, 16)
+          + '\n' + (s.regreso ? 'Regresó: ' + diaCorto_(s.regreso) + ' ' + s.regreso.slice(11, 16) + (s.regresoMismaZona ? '' : ' (llegó a ' + esc_(s.llegoA) + ')') + ' · ' + horasMin_(s.minutosFuera) : 'Todavía no regresa (según el último informe)')
+          + '\nKm: ' + s.km + (s.lugares.length ? '\nA dónde fue: ' + esc_(s.lugares.join(' · ')) : '');
+        await enviarUnaVezGps_('fuera|' + j.id + '|' + s.equipoGps + '|' + s.salida, j.chatId, html, res);
+      }
+    }
+  }
+
+  // 2) Resumen diario de ayer
+  const diarios = jefes.filter((j) => j.avisoDiario && j.unidades.length);
+  if (diarios.length && hhmm >= GPS_HORA_DIARIO_) {
+    const [[datosAyer]] = await pool.query('SELECT COUNT(*) n FROM gps_viajes WHERE inicio >= ? AND inicio < DATE_ADD(?, INTERVAL 1 DAY)', [ayer, ayer]);
+    const sinDatos = !datosAyer.n;
+    if (!sinDatos || hhmm >= GPS_HORA_SIN_DATOS_) {
+      const r = sinDatos ? { salidas: [] } : await calcularSalidasGps_({ desde: ayer, hasta: ayer });
+      for (const j of diarios) {
+        const clave = 'diario|' + j.id + '|' + ayer;
+        if (await yaEnviadoGps_(clave)) continue;
+        const mias = (r.salidas || []).filter((s) => deUnidad(j).has(s.equipoGps)).sort((a, b) => (a.equipoGps + a.salida < b.equipoGps + b.salida ? -1 : 1));
+        let html = '📋 <b>Salidas de ayer ' + diaCorto_(ayer) + '</b> · tus unidades';
+        if (sinDatos) html += '\nTodavía no llega el informe de PosiTrace de ayer; en cuanto llegue lo puedes ver en el Panel (GPS → Salidas de huerta).';
+        else if (r.sinZonas) html += '\nTodavía no hay límites de huertas en el Panel (GPS → Salidas de huerta → ✏ Límites de huertas).';
+        else if (!mias.length) html += '\nNinguna de tus ' + j.unidades.length + ' unidades salió de su huerta. ✅';
+        else {
+          const fuera = mias.filter((s) => s.fueraDeHorario).length;
+          html += '\n' + mias.length + ' salida(s)' + (fuera ? ', <b>' + fuera + ' fuera de horario 🌙</b>' : '') + '\n\n' + mias.map((s) => lineaSalida_(s, true)).join('\n');
+        }
+        await enviarUnaVezGps_(clave, j.chatId, html, res);
+      }
+    }
+  }
+
+  // 3) Lunes: resumen del fin de semana
+  const findes = jefes.filter((j) => j.avisoFinde && j.unidades.length);
+  if (findes.length && new Date(hoy + 'T12:00:00Z').getUTCDay() === 1 && hhmm >= GPS_HORA_FINDE_) {
+    const sabado = sumarDias_(hoy, -2);
+    const r = await calcularFindeGps_(sabado);
+    if (r.success && (r.hayDatos || hhmm >= GPS_HORA_SIN_DATOS_)) {
+      for (const j of findes) {
+        const mias = r.equipos.filter((x) => deUnidad(j).has(x.equipoGps));
+        const movidas = mias.filter((x) => x.viajes).sort((a, b) => b.kmTotal - a.kmTotal);
+        const quietas = mias.filter((x) => !x.viajes);
+        let html = '🗓 <b>Fin de semana ' + diaCorto_(sabado) + ' – ' + diaCorto_(sumarDias_(sabado, 1)) + '</b> · tus unidades';
+        if (!r.hayDatos) html += '\nTodavía no llegan los informes de PosiTrace del fin de semana.';
+        else {
+          html += '\nSe movieron <b>' + movidas.length + '</b> de ' + j.unidades.length + (movidas.length ? ' · ' + Math.round(movidas.reduce((a, x) => a + x.kmTotal, 0) * 10) / 10 + ' km en total' : ' ✅');
+          if (movidas.length) html += '\n\n' + movidas.map((x) => '• <b>' + esc_(x.equipoGps) + '</b>' + (x.codigoUnidad ? ' (' + esc_(x.codigoUnidad) + ')' : '') + ': ' + x.kmTotal + ' km (sáb ' + x.kmSab + ' · dom ' + x.kmDom + '), ' + x.viajes + ' viaje(s)'
+            + (x.lugares.length ? '\n   ' + esc_(x.lugares.join(' · ')) : '')).join('\n');
+          if (quietas.length) html += '\n\nNo se movieron: ' + quietas.map((x) => esc_(x.equipoGps)).join(', ');
+        }
+        await enviarUnaVezGps_('finde|' + j.id + '|' + sabado, j.chatId, html, res);
+      }
+    }
+  }
+  if (res.errores.length) console.error('[gps-avisos] ' + res.errores.join(' | '));
+  return res;
+}
+
 Object.assign(module.exports, {
+  getGpsJefes, guardarGpsJefe, eliminarGpsJefe, buscarChatsTelegramGps, probarGpsJefe, revisarAvisosGps_,
   getGpsZonas, guardarZonaGps, eliminarZonaGps, guardarHorarioGps, getGpsSalidas,
   getGpsEstado, revisarCorreoGpsAhora, getGpsEquipos, guardarLigaGps, getGpsViajes, getGpsFinDeSemana,
   revisarCorreoGps_: () => positrace.revisarCorreoGps(),

@@ -4069,3 +4069,29 @@ CREATE TABLE IF NOT EXISTS gps_zonas (
   actualizado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_gps_zona_nombre (nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- GPS (nov-2026, Carlos): avisos por Telegram a los jefes, por unidad.
+-- Cada jefe tiene su chat (le da "Iniciar" al bot) y las unidades de su
+-- gente; recibe: salidas fuera de horario, resumen diario y del fin de semana.
+CREATE TABLE IF NOT EXISTS gps_jefes (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  nombre        VARCHAR(150) NOT NULL,
+  chat_id       VARCHAR(30) DEFAULT NULL,
+  chat_nombre   VARCHAR(150) DEFAULT NULL,
+  aviso_fuera   TINYINT(1) NOT NULL DEFAULT 1,
+  aviso_diario  TINYINT(1) NOT NULL DEFAULT 1,
+  aviso_finde   TINYINT(1) NOT NULL DEFAULT 1,
+  activo        TINYINT(1) NOT NULL DEFAULT 1,
+  creado_en     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_gps_jefe_nombre (nombre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS gps_jefes_unidades (
+  jefe_id    INT NOT NULL,
+  equipo_gps VARCHAR(150) NOT NULL,
+  PRIMARY KEY (jefe_id, equipo_gps)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Cada aviso se manda una sola vez (clave = tipo|jefe|...).
+CREATE TABLE IF NOT EXISTS gps_avisos_enviados (
+  clave      VARCHAR(255) NOT NULL PRIMARY KEY,
+  enviado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

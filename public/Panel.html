@@ -998,6 +998,10 @@
   .gps-horario{ margin-top:12px; padding-top:10px; border-top:1px dashed var(--line); }
   .gps-fuera{ background:rgba(194,75,63,0.12); }
   .gps-chip{ display:inline-block; font-size:11px; padding:1px 6px; border-radius:3px; background:rgba(194,75,63,0.2); color:var(--danger); margin-left:4px; white-space:nowrap; }
+  .gps-jefe-form{ background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:12px; margin:0 0 12px; }
+  .gps-chk{ display:flex; align-items:center; gap:6px; font-size:12.5px; margin:3px 0; }
+  .gps-jefe-unidades{ max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:4px; padding:4px 8px; background:var(--panel-2); }
+  .gps-jefe-unidades label{ display:flex; align-items:center; gap:6px; font-size:12.5px; padding:2px 0; }
   .gps-aviso{ background:var(--panel); border:1px dashed var(--line); border-radius:6px; padding:18px; font-size:13.5px; color:var(--text-dim); line-height:1.5; }
   .seg-acc{ display:flex; gap:6px; flex-wrap:wrap; }
   #seg-pol-overlay .maq-modal, #seg-sin-overlay .maq-modal{ max-width:900px; }
@@ -4692,6 +4696,7 @@
         <button type="button" class="gps-subtab" data-vista="rec">Recorridos</button>
         <button type="button" class="gps-subtab" data-vista="salidas">Salidas de huerta</button>
         <button type="button" class="gps-subtab" data-vista="equipos">Unidades GPS</button>
+        <button type="button" class="gps-subtab" data-vista="jefes">🔔 Avisos a jefes</button>
       </div>
       <div id="gps-v-finde">
         <div class="seg-tarjetas" id="gps-tarjetas"></div>
@@ -4762,6 +4767,32 @@
           </div>
         </div>
         <div class="table-wrap"><table><thead><tr><th>Unidad (PosiTrace)</th><th>Huerta</th><th>Salió</th><th>Regresó</th><th>Tiempo fuera</th><th>Km</th><th>A dónde fue</th><th></th></tr></thead><tbody id="gps-sal-tbody"></tbody></table></div>
+      </div>
+      <div id="gps-v-jefes" style="display:none;">
+        <div class="gps-aviso" id="gps-jefes-ayuda" style="margin-bottom:10px;"></div>
+        <div class="toolbar"><button class="export-btn" id="gps-jefe-nuevo">+ Agregar jefe</button></div>
+        <div id="gps-jefe-form" class="gps-jefe-form" style="display:none;">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1 1 280px;">
+              <label class="gps-zl">Nombre del jefe <input type="text" id="gps-jefe-nombre" placeholder="Ej. Juan Pérez"></label>
+              <label class="gps-zl">Chat de Telegram
+                <span style="display:flex;gap:6px;"><select id="gps-jefe-chat" style="flex:1;"><option value="">Sin Telegram todavía</option></select><button type="button" class="export-btn" id="gps-jefe-buscar">Buscar chats</button></span></label>
+              <div class="gps-zona-ayuda" id="gps-jefe-chat-ayuda"></div>
+              <div style="font-weight:700;margin:10px 0 4px;font-size:13px;">Qué le llega</div>
+              <label class="gps-chk"><input type="checkbox" id="gps-jefe-fuera" checked> 🌙 Salidas fuera de horario (en cuanto llega el informe)</label>
+              <label class="gps-chk"><input type="checkbox" id="gps-jefe-diario" checked> 📋 Resumen diario de salidas (<span class="gps-h-diario">7:30</span>)</label>
+              <label class="gps-chk"><input type="checkbox" id="gps-jefe-finde" checked> 🗓 Resumen del fin de semana (lunes <span class="gps-h-finde">8:00</span>)</label>
+              <label class="gps-chk"><input type="checkbox" id="gps-jefe-activo" checked> Avisos activos</label>
+            </div>
+            <div style="flex:1 1 360px;">
+              <div style="font-weight:700;margin:4px 0;font-size:13px;">Unidades de su gente <span id="gps-jefe-cuenta" style="color:var(--text-dim);font-weight:400;"></span></div>
+              <input type="text" id="gps-jefe-uni-buscar" placeholder="Buscar unidad..." style="width:100%;box-sizing:border-box;margin-bottom:4px;">
+              <div id="gps-jefe-unidades" class="gps-jefe-unidades"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:10px;"><button class="export-btn" id="gps-jefe-guardar" style="background:var(--amber);color:#1c1c1c;">Guardar</button><button class="export-btn" id="gps-jefe-cancelar">Cancelar</button></div>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Jefe</th><th>Telegram</th><th>Avisos</th><th>Unidades</th><th></th></tr></thead><tbody id="gps-jefes-tbody"></tbody></table></div>
       </div>
       <div id="gps-v-equipos" style="display:none;">
         <div class="toolbar">
@@ -27055,10 +27086,11 @@ function gpsRevisarAhora_(){
 
 function gpsMostrarVista_(){
   document.querySelectorAll('.gps-subtab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-vista') === GPS_VISTA); });
-  ['finde', 'rec', 'salidas', 'equipos'].forEach(function(v){ document.getElementById('gps-v-' + v).style.display = v === GPS_VISTA ? '' : 'none'; });
+  ['finde', 'rec', 'salidas', 'equipos', 'jefes'].forEach(function(v){ document.getElementById('gps-v-' + v).style.display = v === GPS_VISTA ? '' : 'none'; });
   if(GPS_VISTA === 'finde'){ if(!GPS_FINDE || GPS_FINDE.sabado !== document.getElementById('gps-sabado').value) gpsCargarFinde_(); else gpsPintarFinde_(); }
   if(GPS_VISTA === 'rec'){ if(!GPS_REC) gpsCargarRec_(); else gpsPintarRec_(); }
   if(GPS_VISTA === 'equipos') gpsPintarEquipos_();
+  if(GPS_VISTA === 'jefes') gpsCargarJefes_();
   if(GPS_VISTA === 'salidas'){ if(!GPS_ZONAS) gpsCargarZonas_(); if(!GPS_SAL) gpsCargarSalidas_(); else gpsPintarSalidas_(); }
 }
 
@@ -27383,6 +27415,92 @@ function gpsGuardarZona_(){
   });
 }
 
+
+// ---------- Avisos por Telegram a los jefes (por unidad) ----------
+var GPS_JEFES = null;
+var GPS_JEFE_EDIT = null; // { id, unidades:Set }
+function gpsCargarJefes_(){
+  gpsLlamar_('getGpsJefes', [], function(r){
+    if(!r || !r.success) return;
+    GPS_JEFES = r;
+    document.querySelectorAll('.gps-h-diario').forEach(function(e){ e.textContent = r.horas.diario; });
+    document.querySelectorAll('.gps-h-finde').forEach(function(e){ e.textContent = r.horas.finde; });
+    var bot = r.telegram.bot ? '@' + r.telegram.bot : '';
+    document.getElementById('gps-jefes-ayuda').innerHTML = r.telegram.tieneToken
+      ? 'Los avisos se mandan por Telegram con el bot <b>' + escapeHtml(bot) + '</b>. Para dar de alta a un jefe:<br>1. Que el jefe abra Telegram, busque <b>' + escapeHtml(bot) + '</b> y le dé <b>Iniciar</b> (o le mande "hola").<br>2. Aquí: <b>+ Agregar jefe</b> → <b>Buscar chats</b> → elige su nombre, marca las unidades de su gente y <b>Guardar</b>. Con <b>Probar</b> le llega un mensaje de prueba.'
+      : '⚠ Primero hay que configurar el bot de Telegram en <b>Avance Huerta → 🔔 Avisos</b>.';
+    document.getElementById('gps-jefe-chat-ayuda').innerHTML = bot ? 'Si no aparece: que le dé <b>Iniciar</b> a ' + escapeHtml(bot) + ' en Telegram y vuelve a dar Buscar chats.' : '';
+    gpsPintarJefes_();
+  });
+}
+function gpsPintarJefes_(){
+  var r = GPS_JEFES; if(!r) return;
+  var puede = gpsPuede_();
+  document.getElementById('gps-jefe-nuevo').style.display = puede ? '' : 'none';
+  document.getElementById('gps-jefes-tbody').innerHTML = r.jefes.map(function(j){
+    var av = [j.avisoFuera ? '🌙 Fuera de horario' : '', j.avisoDiario ? '📋 Diario' : '', j.avisoFinde ? '🗓 Fin de semana' : ''].filter(Boolean).join('<br>');
+    return '<tr' + (j.activo ? '' : ' class="gps-cero"') + '><td>' + escapeHtml(j.nombre) + (j.activo ? '' : ' <span class="gps-sosp">(pausado)</span>') + '</td>'
+      + '<td>' + (j.chatId ? escapeHtml(j.chatNombre || j.chatId) : '<span style="color:var(--danger);">Sin Telegram</span>') + '</td><td style="font-size:12px;">' + (av || '—') + '</td>'
+      + '<td style="font-size:12px;">' + j.unidades.length + ' unidad(es)<br><span style="color:var(--text-dim);">' + escapeHtml(j.unidades.slice(0, 4).join(', ') + (j.unidades.length > 4 ? '…' : '')) + '</span></td>'
+      + '<td style="white-space:nowrap;">' + (puede ? '<button class="export-btn gps-j-edit" data-id="' + j.id + '">Editar</button> <button class="export-btn gps-j-probar" data-id="' + j.id + '">Probar</button> <button class="export-btn gps-j-del" data-id="' + j.id + '">✕</button>' : '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);">Todavía no hay jefes dados de alta.</td></tr>';
+  var porId = function(id){ return r.jefes.filter(function(j){ return j.id === Number(id); })[0]; };
+  document.querySelectorAll('.gps-j-edit').forEach(function(b){ b.addEventListener('click', function(){ gpsEditarJefe_(porId(b.getAttribute('data-id'))); }); });
+  document.querySelectorAll('.gps-j-probar').forEach(function(b){ b.addEventListener('click', function(){
+    b.disabled = true;
+    gpsLlamar_('probarGpsJefe', [Number(b.getAttribute('data-id'))], function(x){ b.disabled = false; alert(x && x.success ? 'Listo: le llegó el mensaje de prueba.' : ((x && x.error) || 'No se pudo enviar.')); }, function(m){ b.disabled = false; alert(m); });
+  }); });
+  document.querySelectorAll('.gps-j-del').forEach(function(b){ b.addEventListener('click', function(){
+    var j = porId(b.getAttribute('data-id'));
+    if(!confirm('¿Quitar a ' + j.nombre + ' de los avisos?')) return;
+    gpsLlamar_('eliminarGpsJefe', [j.id], function(x){ if(!x || !x.success){ alert((x && x.error) || 'No se pudo.'); return; } gpsCargarJefes_(); });
+  }); });
+}
+function gpsEditarJefe_(j){
+  j = j || { id: 0, nombre: '', chatId: '', chatNombre: '', avisoFuera: true, avisoDiario: true, avisoFinde: true, activo: true, unidades: [] };
+  GPS_JEFE_EDIT = { id: j.id, unidades: new Set(j.unidades) };
+  document.getElementById('gps-jefe-form').style.display = '';
+  document.getElementById('gps-jefe-nombre').value = j.nombre;
+  var sel = document.getElementById('gps-jefe-chat');
+  sel.innerHTML = '<option value="">Sin Telegram todavía</option>' + (j.chatId ? '<option value="' + escapeHtml(j.chatId) + '" data-nombre="' + escapeHtml(j.chatNombre) + '">' + escapeHtml(j.chatNombre || j.chatId) + '</option>' : '');
+  sel.value = j.chatId || '';
+  document.getElementById('gps-jefe-fuera').checked = j.avisoFuera;
+  document.getElementById('gps-jefe-diario').checked = j.avisoDiario;
+  document.getElementById('gps-jefe-finde').checked = j.avisoFinde;
+  document.getElementById('gps-jefe-activo').checked = j.activo;
+  document.getElementById('gps-jefe-uni-buscar').value = '';
+  gpsPintarUnidadesJefe_();
+  document.getElementById('gps-jefe-nombre').focus();
+}
+function gpsPintarUnidadesJefe_(){
+  if(!GPS_JEFE_EDIT) return;
+  var q = document.getElementById('gps-jefe-uni-buscar').value.trim().toLowerCase();
+  var lista = (GPS_EQUIPOS || []).filter(function(e){ return !q || (e.equipoGps + ' ' + (e.codigoUnidad || '') + ' ' + e.unidad).toLowerCase().indexOf(q) !== -1; });
+  lista.sort(function(a, b){ return (GPS_JEFE_EDIT.unidades.has(b.equipoGps) ? 1 : 0) - (GPS_JEFE_EDIT.unidades.has(a.equipoGps) ? 1 : 0) || a.equipoGps.localeCompare(b.equipoGps, 'es'); });
+  document.getElementById('gps-jefe-unidades').innerHTML = lista.map(function(e){
+    return '<label><input type="checkbox" class="gps-jefe-uni" value="' + escapeHtml(e.equipoGps) + '"' + (GPS_JEFE_EDIT.unidades.has(e.equipoGps) ? ' checked' : '') + '> ' + escapeHtml(e.equipoGps) + (e.codigoUnidad ? ' <span style="color:var(--text-dim);">(' + escapeHtml(e.codigoUnidad) + ')</span>' : '') + '</label>';
+  }).join('') || '<div style="color:var(--text-dim);font-size:12px;padding:6px 0;">' + (GPS_EQUIPOS && GPS_EQUIPOS.length ? 'Ninguna con esa búsqueda.' : 'Todavía no llegan unidades de PosiTrace.') + '</div>';
+  document.getElementById('gps-jefe-cuenta').textContent = '(' + GPS_JEFE_EDIT.unidades.size + ' elegida(s))';
+  document.querySelectorAll('.gps-jefe-uni').forEach(function(c){ c.addEventListener('change', function(){
+    if(c.checked) GPS_JEFE_EDIT.unidades.add(c.value); else GPS_JEFE_EDIT.unidades.delete(c.value);
+    document.getElementById('gps-jefe-cuenta').textContent = '(' + GPS_JEFE_EDIT.unidades.size + ' elegida(s))';
+  }); });
+}
+function gpsGuardarJefe_(){
+  if(!GPS_JEFE_EDIT) return;
+  var sel = document.getElementById('gps-jefe-chat');
+  var opt = sel.options[sel.selectedIndex];
+  var datos = { id: GPS_JEFE_EDIT.id, nombre: document.getElementById('gps-jefe-nombre').value.trim(), chatId: sel.value, chatNombre: opt && sel.value ? (opt.getAttribute('data-nombre') || opt.textContent) : '',
+    avisoFuera: document.getElementById('gps-jefe-fuera').checked, avisoDiario: document.getElementById('gps-jefe-diario').checked, avisoFinde: document.getElementById('gps-jefe-finde').checked,
+    activo: document.getElementById('gps-jefe-activo').checked, unidades: Array.from(GPS_JEFE_EDIT.unidades) };
+  if(!datos.unidades.length && !confirm('No elegiste unidades: no le va a llegar nada. ¿Guardar así?')) return;
+  gpsLlamar_('guardarGpsJefe', [datos], function(r){
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo guardar.'); return; }
+    GPS_JEFE_EDIT = null; document.getElementById('gps-jefe-form').style.display = 'none';
+    gpsCargarJefes_();
+  });
+}
+
 // ---------- Unidades GPS (liga con Maquinaria) ----------
 function gpsCargarEquipos_(){
   gpsLlamar_('getGpsEquipos', [], function(r){
@@ -27445,6 +27563,23 @@ document.getElementById('gps-sal-tarjetas').addEventListener('click', function(e
   gpsPintarSalidas_();
 });
 document.getElementById('gps-sal-limites').addEventListener('click', gpsAbrirEditorZonas_);
+document.getElementById('gps-jefe-nuevo').addEventListener('click', function(){ gpsEditarJefe_(null); });
+document.getElementById('gps-jefe-cancelar').addEventListener('click', function(){ GPS_JEFE_EDIT = null; document.getElementById('gps-jefe-form').style.display = 'none'; });
+document.getElementById('gps-jefe-guardar').addEventListener('click', gpsGuardarJefe_);
+document.getElementById('gps-jefe-uni-buscar').addEventListener('input', gpsPintarUnidadesJefe_);
+document.getElementById('gps-jefe-buscar').addEventListener('click', function(){
+  var b = this; b.disabled = true; b.textContent = 'Buscando...';
+  gpsLlamar_('buscarChatsTelegramGps', [], function(r){
+    b.disabled = false; b.textContent = 'Buscar chats';
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo consultar Telegram.'); return; }
+    var sel = document.getElementById('gps-jefe-chat'), antes = sel.value;
+    var vistos = {}; Array.from(sel.options).forEach(function(o){ vistos[o.value] = true; });
+    r.chats.forEach(function(c){ if(vistos[c.id]) return; var o = document.createElement('option'); o.value = c.id; o.textContent = c.nombre + (c.tipo === 'grupo' ? ' (grupo)' : ''); o.setAttribute('data-nombre', c.nombre); sel.appendChild(o); });
+    sel.value = antes;
+    if(!r.chats.length) alert('No hay mensajes nuevos al bot. Pide al jefe que le dé Iniciar (o le escriba "hola") y vuelve a buscar.');
+    else if(!antes && sel.options.length === 2) sel.selectedIndex = 1;
+  }, function(m){ b.disabled = false; b.textContent = 'Buscar chats'; alert(m); });
+});
 document.getElementById('gps-zona-nueva').addEventListener('click', function(){ gpsEditarZona_(null); });
 document.getElementById('gps-zona-deshacer').addEventListener('click', function(){ if(GPS_ZEDIT){ var p = GPS_ZEDIT.poligono.getPath(); if(p.getLength()) p.pop(); } });
 document.getElementById('gps-zona-guardar').addEventListener('click', gpsGuardarZona_);

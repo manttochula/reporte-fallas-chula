@@ -307,9 +307,14 @@ app.listen(PORT, () => {
   // 15 min. En el plan gratis de Render el servidor se duerme: el
   // "despertador" de GitHub Actions lo visita cada 15 min para que siga
   // revisando aunque nadie tenga abierto el Panel.
+  // Después de leer el correo, los avisos por Telegram a los jefes (fuera de
+  // horario, resumen diario 7:30 y del fin de semana el lunes 8:00).
   const revisarGps = () => handlers.revisarCorreoGps_()
     .then((r) => { if (r && r.archivos) console.log('[gps] ' + r.archivos + ' archivo(s), ' + r.viajesNuevos + ' viaje(s) nuevos'); if (r && r.error) console.error('[gps] ' + r.error); })
-    .catch((err) => console.error('[gps] Falló la revisión del correo:', err.message));
+    .catch((err) => console.error('[gps] Falló la revisión del correo:', err.message))
+    .then(() => handlers.revisarAvisosGps_())
+    .then((r) => { if (r && r.enviados) console.log('[gps-avisos] ' + r.enviados + ' aviso(s) enviados'); })
+    .catch((err) => console.error('[gps-avisos] Falló:', err.message));
   setTimeout(revisarGps, 45 * 1000);
   setInterval(revisarGps, 15 * 60 * 1000);
 });

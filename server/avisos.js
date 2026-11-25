@@ -426,7 +426,27 @@ async function quitarTelegram_() {
   return { success: true };
 }
 
+// Mensaje directo a un chat (avisos de GPS a cada jefe, nov-2026). Lanza error si falla.
+async function enviarTelegram_(chatId, html) {
+  const token = await leerConfig_('telegram_token');
+  if (!token) throw new Error('El bot de Telegram no está configurado (Avance Huerta → 🔔 Avisos).');
+  // Telegram acepta hasta 4096 caracteres por mensaje: se parte por renglones.
+  const partes = [];
+  let actual = '';
+  String(html || '').split('\n').forEach((l) => {
+    if ((actual + '\n' + l).length > 3900) { partes.push(actual); actual = l; } else actual = actual ? actual + '\n' + l : l;
+  });
+  if (actual) partes.push(actual);
+  for (const t of partes) await telegram_(token, 'sendMessage', { chat_id: String(chatId), text: t, parse_mode: 'HTML', disable_web_page_preview: true });
+}
+async function botTelegram_() {
+  return { tieneToken: !!(await leerConfig_('telegram_token')), bot: (await leerConfig_('telegram_bot')) || '' };
+}
+
 module.exports = {
+  enviarTelegram_,
+  botTelegram_,
+  escHtml_,
   avisarRecorrido_,
   avisarTexto_,
   esperarAvisos_,

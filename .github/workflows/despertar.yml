@@ -1,0 +1,10 @@
+name: Despertar servidor
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -s -m 90 https://reporte-fallas-chula.onrender.com/salud || true

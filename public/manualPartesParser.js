@@ -270,7 +270,9 @@
   //     "Remarks : SUB FOR DZ122513" (y avisos sueltos).
   // Se aceptan también los textos en español del mismo sitio.
   // ------------------------------------------------------------------
-  const JD_LISTA_ = /^(PARTS LIST|LISTA DE PIEZAS|LISTA DE PARTES|LISTA DE REPUESTOS)$/;
+  // Nov-2026: el sitio en español (México) dice "Lista de refacciones", "Refacción",
+  // "Número de parte", "Observaciones", "Cantidad requerida" y "Página".
+  const JD_LISTA_ = /^(PARTS LIST|LISTA DE PIEZAS|LISTA DE PARTES|LISTA DE REPUESTOS|LISTA DE REFACCIONES)$/;
   const JD_NUMERO_ = /^(PART NUMBER|NUMERO DE PIEZA|NUMERO DE PARTE|NO\.? DE PIEZA|NO\.? DE PARTE|N\.? ?º? DE PIEZA)\s*:\s*(.*)$/;
   const JD_NOTA_ = /^(REMARKS|OBSERVACIONES|COMENTARIOS|NOTAS?)\s*:\s*(.*)$/;
   const JD_CANTIDAD_ = /^(QUANTITY REQUIRED|CANTIDAD REQUERIDA|CANTIDAD NECESARIA|CANTIDAD)$/;
@@ -279,6 +281,12 @@
   function esJohnDeere_(paginas) {
     return (paginas || []).some(function (p) {
       return (p.items || []).some(function (i) { return JD_LISTA_.test(sinAcentos_(i.str)); });
+    });
+  }
+  // Solo los que vienen en inglés se mandan a traducir.
+  function esJdIngles_(paginas) {
+    return (paginas || []).some(function (p) {
+      return (p.items || []).some(function (i) { return sinAcentos_(i.str) === 'PARTS LIST'; });
     });
   }
 
@@ -400,5 +408,5 @@
     return leerCatalogo(paginas);
   }
 
-  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, encabezadoJd_: encabezadoJd_, esJohnDeere: esJohnDeere_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
+  return { leerPagina: leerPagina, leerCatalogo: leerCatalogoDetectando, leerCatalogoKubota: leerCatalogo, leerCatalogoJd: leerCatalogoJd_, encabezadoJd_: encabezadoJd_, esJohnDeere: esJohnDeere_, esJdIngles: esJdIngles_, partirTitulo_: partirTitulo_, partirTituloJd_: partirTituloJd_ };
 });

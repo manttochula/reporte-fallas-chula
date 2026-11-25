@@ -785,7 +785,7 @@
           throw new Error((files.length > 1 ? 'En "' + files[k].name + '" no' : 'No') + ' se encontró ninguna tabla de piezas en el PDF. Por ahora se leen catálogos de Kubota ' +
             '(No. | Código de pieza | Descripción | Cant ...) y de John Deere (PDF del diagrama de partscatalog.deere.com: "Parts List" con "Part Number"). Si es de otra marca o formato, mándaselo a Claude para agregarlo.');
         }
-        leidos.push({ doc: r.doc, secciones: secs, ingles: !!(parser.esJohnDeere && parser.esJohnDeere(r.paginas)) });
+        leidos.push({ doc: r.doc, secciones: secs, ingles: !!(parser.esJdIngles ? parser.esJdIngles(r.paginas) : (parser.esJohnDeere && parser.esJohnDeere(r.paginas))) });
         paginas += r.doc.numPages;
         total += secs.length;
         return leerUno(k + 1);

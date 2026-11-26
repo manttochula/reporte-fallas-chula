@@ -11429,6 +11429,48 @@ async function datosOcPorCompletar_(ag) {
   return out;
 }
 
+// ---- OC cargadas a Comercial con un código de proveedor que ya cambió (nov-2026) ----
+const CODIGO_VIEJO_MSG_ = 'Código de proveedor viejo:';
+async function ocCodigoProveedorViejo_() {
+  const [rows] = await pool.query(
+    `SELECT x.empresa_id, MAX(e.nombre) AS emp, x.serie, x.folio, MAX(x.codigo_proveedor) AS cod, MAX(p.nombre) AS prov,
+            COALESCE(NULLIF(TRIM(MAX(pce.codigo)), ''), MAX(p.codigo_comercial)) AS actual,
+            GROUP_CONCAT(DISTINCT x.orden ORDER BY x.orden) AS ordenes, MIN(x.agente_en) AS en,
+            SUM(o.gasto_estado = 'convertido') AS convertidas, MAX(CASE WHEN o.estado = 'facturada' THEN 1 ELSE 0 END) AS facturada
+       FROM oc_exportaciones x
+       JOIN empresas e ON e.id = x.empresa_id
+       JOIN proveedores p ON p.id = x.proveedor_id
+       LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = x.empresa_id
+       LEFT JOIN ordenes_compra_items i ON i.respuesta_item_id = x.respuesta_item_id
+       LEFT JOIN ordenes_compra o ON o.id = i.oc_id
+      WHERE x.tipo = 'oc' AND x.agente_estado = 'cargada' AND x.codigo_proveedor IS NOT NULL AND x.codigo_proveedor <> ''
+      GROUP BY x.empresa_id, x.serie, x.folio
+     HAVING actual IS NOT NULL AND actual <> '' AND UPPER(TRIM(cod)) <> UPPER(TRIM(actual)) AND COALESCE(convertidas, 0) = 0
+      ORDER BY MIN(x.agente_en) LIMIT 200`);
+  return rows.map((r) => ({ empresaId: r.empresa_id, empresa: (r.emp || '').split(',')[0].trim(), serie: r.serie, folio: Number(r.folio),
+    codigoCargado: r.cod, codigoActual: r.actual, proveedor: r.prov || '', ordenes: r.ordenes || '', facturada: !!Number(r.facturada), en: isoOrNull(r.en) }));
+}
+async function getOcCodigoProveedorViejo(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
+  return { success: true, ocs: await ocCodigoProveedorViejo_() };
+}
+// "Ya la corregí": la OC ya tiene en Comercial el proveedor nuevo.
+async function marcarOcCodigoCorregido(code, nombreUsuario, empresaId, serie, folio) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const lista = await ocCodigoProveedorViejo_();
+  const oc = lista.find((x) => x.empresaId === Number(empresaId) && String(x.serie) === String(serie) && x.folio === Number(folio));
+  if (!oc) return { success: false, error: 'Esa OC ya no está en la lista.' };
+  await pool.query(`UPDATE oc_exportaciones SET codigo_proveedor = ? WHERE tipo = 'oc' AND empresa_id = ? AND serie = ? AND folio = ?`, [oc.codigoActual, oc.empresaId, oc.serie, oc.folio]);
+  // Las facturas que se detuvieron por esto vuelven a quedar por convertir.
+  await pool.query(
+    `UPDATE ordenes_compra o SET o.gasto_estado = 'pendiente', o.gasto_mensaje = NULL
+      WHERE o.gasto_estado = 'error' AND o.gasto_mensaje LIKE ? AND o.id IN (
+        SELECT i.oc_id FROM ordenes_compra_items i JOIN oc_exportaciones x ON x.respuesta_item_id = i.respuesta_item_id
+         WHERE x.tipo = 'oc' AND x.empresa_id = ? AND x.serie = ? AND x.folio = ?)`, [CODIGO_VIEJO_MSG_ + '%', oc.empresaId, oc.serie, oc.folio]);
+  await registrarAuditoria_('oc_exportaciones', oc.serie + ' ' + oc.folio, 'codigo_proveedor_corregido', nombreUsuario, oc.codigoCargado + ' → ' + oc.codigoActual);
+  return { success: true };
+}
+
 async function gastosPorConvertir_(ag) {
   const [todas] = await pool.query(
     `SELECT o.*, e.nombre AS e_nombre, ${SQL_DUENO_OC_} AS dueno,
@@ -11470,6 +11512,15 @@ async function gastosPorConvertir_(ag) {
     const [[pc]] = await pool.query(
       `SELECT COALESCE(NULLIF(TRIM(pce.codigo), ''), p.codigo_comercial) AS codigo FROM proveedores p
          LEFT JOIN proveedores_codigos_empresa pce ON pce.proveedor_id = p.id AND pce.empresa_id = ? WHERE p.id = ?`, [r.empresa_id, r.proveedor_id]);
+    // Nov-2026 (Tierra Blanca): si la OC se cargó a Comercial con otro código de proveedor
+    // (el de antes), al convertirla la compra hereda ese código. No se convierte hasta
+    // que la corrijan en Comercial y le den "Ya la corregí" en el Panel.
+    const [[cv]] = await pool.query(
+      `SELECT MAX(codigo_proveedor) AS cod FROM oc_exportaciones WHERE tipo = 'oc' AND empresa_id = ? AND serie = ? AND folio = ? AND codigo_proveedor IS NOT NULL`, [r.empresa_id, serie, folio]);
+    if (pc && pc.codigo && cv && cv.cod && String(cv.cod).trim().toUpperCase() !== String(pc.codigo).trim().toUpperCase()) {
+      await falla(CODIGO_VIEJO_MSG_ + ' la OC ' + serie + ' ' + folio + ' se cargó a Comercial con el proveedor ' + cv.cod + ' y ahora es ' + pc.codigo + '. Cámbiale el proveedor en Comercial y dale "Ya la corregí" en Exportar OC → OC con código de proveedor viejo.');
+      continue;
+    }
     const extra = await datosAdicionalesGasto_(r);
     out.push({
       codigoProveedor: (pc && pc.codigo) || '',
@@ -13919,7 +13970,7 @@ module.exports = {
   eliminarTipoUnidad,
   getEmpresasCatalogo,
   guardarFoliosOc,
-  agenteOcTrabajo, agenteOcArchivos, pedirActualizarAgente,
+  agenteOcTrabajo, agenteOcArchivos, pedirActualizarAgente, getOcCodigoProveedorViejo, marcarOcCodigoCorregido,
   agenteOcPing,
   agenteOcResultado,
   getCargaComercial,

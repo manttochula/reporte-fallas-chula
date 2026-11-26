@@ -432,6 +432,15 @@ function polizaGasto_({ folio, proveedor, refacciones, equipo, max = 50 }) {
     lista = [lista[0].slice(0, Math.max(0, lista[0].length - sobra)).trim()];
     t = armar(lista.filter(Boolean));
   }
+  if (t.length > max) {
+    // Nov-2026: con proveedores de nombre largo ("DISTRIBUIDOR DE MAQUINARIA DEL SUR TB")
+    // se cortaba el equipo (AF306 → AF30). Se recorta el nombre del proveedor; el folio y
+    // el equipo nunca.
+    const fol = 'F-' + String(folio || '').trim();
+    const fin = eq ? ' ' + eq : '';
+    const cabe = Math.max(0, max - fol.length - 1 - fin.length);
+    t = (fol + ' ' + nombreCortoProveedor_(proveedor).slice(0, cabe).trim()).trim() + fin;
+  }
   return t.slice(0, max);
 }
 function dineroArchivo_(n) {

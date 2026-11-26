@@ -11329,8 +11329,13 @@ async function datosOcPorCompletar_(ag) {
     const [eq] = await pool.query(
       `SELECT rp.unidad, rp.codigo_unidad, m.referencia_comercial AS ref FROM reportes rp LEFT JOIN maquinaria m ON m.codigo_unidad = rp.codigo_unidad WHERE rp.orden = ? LIMIT 1`, [r.orden || '']);
     const u = eq[0] || {};
+    // Nov-2026 (Edith): también la Forma de pago del proveedor (vacía = BAJIO SPEI).
+    const [fpr] = await pool.query(
+      `SELECT p.forma_pago_comercial AS fp FROM oc_exportaciones x JOIN proveedores p ON p.id = x.proveedor_id
+        WHERE x.empresa_id = ? AND x.serie = ? AND x.folio = ? AND x.proveedor_id IS NOT NULL LIMIT 1`, [r.empresa_id, r.serie, r.folio]);
+    const formaPago = (fpr.length && String(fpr[0].fp || '').trim()) || FORMA_PAGO_COMERCIAL_DEFAULT_;
     out.push({
-      tipo: 'datosOc', id: 'D' + r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
+      tipo: 'datosOc', formaPago, id: 'D' + r.id, oc: r.serie + ' ' + r.folio, empresa: (r.e_nombre || '').split(',')[0].trim().toUpperCase(),
       ocSerie: r.serie, ocFolio: Number(r.folio), ocConcepto: (r.concepto || '').toUpperCase(),
       referencia: u.ref || '', observaciones: eq.length ? ocProv.observacionDeUnidad(u.unidad, u.codigo_unidad) : '', elaboro: r.dueno || '',
     });

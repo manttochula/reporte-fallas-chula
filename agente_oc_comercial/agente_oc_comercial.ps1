@@ -29,7 +29,7 @@ param(
   [switch]$SoloFunciones      # pruebas: solo carga las funciones, no corre nada
 )
 
-$AGENTE_VERSION = '2026.11.28'
+$AGENTE_VERSION = '2026.11.29'
 $SEP = [string][char]172      # separador de Inserta_Documento (kTokenSeparadorSACICOM)
 $TIPO_COMPRAS = '2'
 $DOCTO_ORDEN_COMPRA = '17'

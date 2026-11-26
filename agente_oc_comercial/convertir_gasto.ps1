@@ -523,16 +523,18 @@ function Confirmar-Probar([string]$texto) {
   if ($r -ne 6) { Espera 'Prueba' ('Detenido en la prueba (respuesta: ' + $r + ').') }
 }
 
-# Abre "Convertir a <destino>" desde la OC abierta. Prueba la tecla aprendida y
-# luego Ctrl+2, Ctrl+1, Ctrl+3 (las conversiones del menú Ordenar). Si se abre
-# otra conversión, la cierra sin aceptar (= Cancelar). Si una tecla abre otra
-# cosa o nada, se detiene.
-function Abrir-Conversion([IntPtr]$doc, [string]$dest, [int]$procId, [string]$paso) {
+# Abre "Convertir a <destino>" desde la OC abierta. Prueba la tecla aprendida
+# (por empresa: nov-2026, en CHULA BRAND DEL GOLFO las conversiones del menú
+# Ordenar no tienen las mismas teclas que en MEXICO) y luego Ctrl+1 … Ctrl+6.
+# Si se abre otra conversión, la cierra sin aceptar (= Cancelar). Si una tecla
+# no abre nada, sigue con la siguiente; si abre otra cosa, se detiene.
+function Abrir-Conversion([IntPtr]$doc, [string]$dest, [int]$procId, [string]$paso, [string]$empresa = '') {
   $ruta = Join-Path (Split-Path -Parent $Trabajo) 'conversion_teclas.json'
   $apr = @{}
   if (Test-Path $ruta) { try { (Get-Content $ruta -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $apr[$_.Name] = [string]$_.Value } } catch { } }
-  $teclas = @(); if ($apr.ContainsKey($dest)) { $teclas += $apr[$dest] }
-  foreach ($k in @('2', '1', '3')) { if ($teclas -notcontains $k) { $teclas += $k } }
+  $clave = $(if ($empresa) { (Get-NombreNormal $empresa) + '|' + $dest } else { $dest })
+  $teclas = @(); if ($apr.ContainsKey($clave)) { $teclas += $apr[$clave] } elseif ($apr.ContainsKey($dest)) { $teclas += $apr[$dest] }
+  foreach ($k in @('2', '1', '3', '4', '5', '6')) { if ($teclas -notcontains $k) { $teclas += $k } }
   $vistas = @()
   foreach ($k in $teclas) {
     if (-not [Cmx]::Activar($doc)) { Falla $paso 'No pude traer al frente la OC.' }
@@ -541,21 +543,25 @@ function Abrir-Conversion([IntPtr]$doc, [string]$dest, [int]$procId, [string]$pa
     $dlg = Esperar-Ventana $procId '' 'Convertir a *' 6
     if ($dlg -eq [IntPtr]::Zero) {
       $nuevas = @([Cmx]::Ventanas($procId) | Where-Object { $antes -notcontains $_ -and -not (Es-VentanaLibre ([Cmx]::Clase($_))) })
-      $av = Leer-Avisos $procId
-      [Cmx]::Cerrar($doc)
-      Falla $paso ('Ctrl+' + $k + ' no abrió una conversión' + $(if ($nuevas.Count) { ' (abrió "' + (($nuevas | ForEach-Object { [Cmx]::Titulo($_) }) -join '", "') + '")' } else { '' }) + '. ' + ($av -join ' ') + ' Dime qué tecla tiene "Convertir a ' + $dest + '" en el menú Ordenar.')
+      $av = @(Leer-Avisos $procId)
+      if ($nuevas.Count -or $av.Count) {
+        [Cmx]::Cerrar($doc)
+        Falla $paso ('Ctrl+' + $k + ' no abrió una conversión' + $(if ($nuevas.Count) { ' (abrió "' + (($nuevas | ForEach-Object { [Cmx]::Titulo($_) }) -join '", "') + '")' } else { '' }) + '. ' + ($av -join ' ') + ' Dime qué tecla tiene "Convertir a ' + $dest + '" en el menú Ordenar.')
+      }
+      $vistas += ('Ctrl+' + $k + ' = nada')
+      continue
     }
     $t = [Cmx]::Titulo($dlg)
     if ($t -like ('*' + $dest + '*')) {
-      if ($apr[$dest] -ne $k) { $apr[$dest] = $k; try { ($apr | ConvertTo-Json) | Set-Content -Path $ruta -Encoding UTF8 } catch { } }
-      Write-L ('"' + $t + '" con Ctrl+' + $k + '.')
+      if ($apr[$clave] -ne $k) { $apr[$clave] = $k; try { ($apr | ConvertTo-Json) | Set-Content -Path $ruta -Encoding UTF8 } catch { } }
+      Write-L ('"' + $t + '" con Ctrl+' + $k + $(if ($empresa) { ' (' + $empresa + ')' } else { '' }) + '.')
       return $dlg
     }
     $vistas += ('Ctrl+' + $k + ' = "' + $t + '"')
     [Cmx]::Cerrar($dlg); Start-Sleep -Seconds 1
   }
   [Cmx]::Cerrar($doc)
-  Falla $paso ('No encontré la tecla de "Convertir a ' + $dest + '" (' + ($vistas -join ', ') + ').')
+  Falla $paso ('No encontré la tecla de "Convertir a ' + $dest + '"' + $(if ($empresa) { ' en ' + $empresa } else { '' }) + ' (' + ($vistas -join ', ') + '). Dime qué tecla tiene en el menú Ordenar de la OC.')
 }
 
 # ------------------------------------------------------------------
@@ -660,7 +666,7 @@ function Convertir-Gasto($g, [int]$procId) {
 
   # 2) Convertir (Ctrl+2 = GASTOS EN PESOS en las OC GENERALES; en las VRZ se busca la tecla de COMPRA EN PESOS)
   $paso = 'Convertir a ' + $dest
-  $dlg = Abrir-Conversion $doc $dest $procId $paso
+  $dlg = Abrir-Conversion $doc $dest $procId $paso ([string]$g.empresa)
 
   # 3) Fechas: Fecha (izquierda), Vencimiento (derecha arriba), Recepción (derecha abajo).
   $paso = 'Fechas'

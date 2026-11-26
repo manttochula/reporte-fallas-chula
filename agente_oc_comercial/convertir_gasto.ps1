@@ -948,7 +948,7 @@ function Abrir-Empresa([int]$procId, [IntPtr]$menu, [string]$empresa) {
       if ($catAbierto) {
         $av = @(Leer-Avisos $procId)
         if ($av.Count) { Falla $paso ('Comercial avisó al abrir la empresa: ' + ($av -join ' ')) }
-        if (((Get-Date) - $inicio).TotalSeconds -gt 12) { Falla $paso ('Enter no abrió la empresa del renglón ' + $fila + ' (el catálogo sigue abierto).') }
+        if (((Get-Date) - $inicio).TotalSeconds -gt 45) { Falla $paso ('Enter no abrió la empresa del renglón ' + $fila + ' en 45 s (el catálogo sigue abierto). Revisa que este usuario de Comercial pueda abrir esa empresa a mano.') }
       }
     }
     if (Es-MismaEmpresa $titulo $empresa) {

@@ -13084,7 +13084,8 @@ async function getSeguros(code, nombreUsuario) {
   const tiposConSeguro = new Set(tiposSeg.map((t) => (t.nombre || '').trim().toUpperCase()));
   const [maq] = await pool.query(
     `SELECT m.codigo_unidad, m.unidad, m.tipo_unidad, m.placa, m.serie, m.anio, m.usa_gasolina, DATE_FORMAT(m.baja_fecha, '%Y-%m-%d') AS baja_fecha, m.baja_motivo,
-            COALESCE(mca.nombre, m.marca) AS marca, COALESCE(mdo.nombre, m.modelo) AS modelo, emp.nombre AS empresa
+            COALESCE(mca.nombre, m.marca) AS marca, COALESCE(mdo.nombre, m.modelo) AS modelo, emp.nombre AS empresa,
+            m.empresa_id, m.segmento, m.huerta_contable
      FROM maquinaria m
      LEFT JOIN marcas_refacciones mca ON mca.id = m.marca_id
      LEFT JOIN modelos_refacciones mdo ON mdo.id = m.modelo_id
@@ -13122,6 +13123,8 @@ async function getSeguros(code, nombreUsuario) {
     return {
       codigoUnidad: m.codigo_unidad, unidad: m.unidad, tipoUnidad: m.tipo_unidad || '', placa: m.placa || '', serie: m.serie || '', anio: m.anio || '',
       marca: m.marca || '', modelo: m.modelo || '', empresa: m.empresa || '', automotriz: !!m.usa_gasolina,
+      // Nov-2026: para filtrar Seguros por empresa y segmento (el de Maquinaria → nota contable).
+      empresaId: m.empresa_id || null, segmento: (m.segmento || '').trim(), huertaContable: (m.huerta_contable || '').trim(),
       // Nov-2026: lleva seguro si su tipo de unidad está marcado, o si ya tiene una póliza
       asegurable: !m.baja_fecha && (tiposConSeguro.has((m.tipo_unidad || '').trim().toUpperCase()) || suyas.length > 0),
       polizaId: actual ? actual.id : null, estado: m.baja_fecha ? 'baja' : (actual ? actual.estado : 'sin_seguro'), dias: actual ? actual.dias : null,

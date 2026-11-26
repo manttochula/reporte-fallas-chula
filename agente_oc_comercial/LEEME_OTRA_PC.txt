@@ -1,0 +1,49 @@
+﻿AGENTE DE COMERCIAL EN OTRA PC (nov-2026)
+==========================================
+
+Qué hace: en la PC de otro usuario, el agente carga a CONTPAQi Comercial las OC,
+guarda las facturas en el ALMACEN DIGITAL y convierte las OC de gastos a GASTOS
+EN PESOS, igual que en la PC principal, pero SOLO de las compras cuyos usuarios
+le asignes (los que hicieron la solicitud de cotización). Lo de los demás lo sigue
+haciendo la PC principal.
+
+Lo que necesita la otra PC
+--------------------------
+ - CONTPAQi Comercial instalado, que abra las empresas desde el servidor.
+ - HojaComercial.xls (con su complemento) funcionando en esa PC.
+ - El usuario y la clave de CONTPAQi con los que entra ese usuario.
+ - La unidad del ALMACEN DIGITAL (ej. Z:) conectada, si va a guardar facturas.
+ - Un usuario de Windows que sea ADMINISTRADOR de esa PC (Comercial corre como
+   administrador). Instálalo con el MISMO usuario de Windows que usa Comercial.
+
+Pasos
+-----
+ 1. En el Panel: Refacciones -> "Exportar OC para CONTPAQi" -> "PCs con agente"
+    -> "+ Agregar PC". Ponle nombre (ej. PC de Edith), palomea sus usuarios y
+    Guardar. COPIA LA CLAVE que aparece (no se vuelve a mostrar; si la pierdes,
+    "Nueva clave").
+ 2. En TU PC: corre empaquetar_para_otra_pc.bat. Deja en tu Escritorio
+    agente_oc_comercial_para_otra_pc.zip (sin tus claves ni tus registros).
+ 3. En la OTRA PC: descomprime el ZIP en una carpeta fija, ej.
+    C:\Users\<usuario>\Documents\agente_oc_comercial
+ 4. Corre instalar_agente_oc.bat (pide permiso de administrador: Sí). Te pide:
+    dirección del sistema (Enter), ruta de HojaComercial.xls, la CLAVE del paso 1,
+    y el usuario/clave de CONTPAQi de esa persona. Al probar la conexión debe
+    decir el nombre de esa PC y sus usuarios.
+ 5. configurar_almacen_digital.bat: la carpeta del ALMACEN DIGITAL en esa PC.
+ 6. probar_agente_oc.bat: una vuelta de prueba (en el Panel la PC sale "conectada").
+ 7. Conversión a gastos: primero probar_conversion_gasto.bat con una OC real;
+    si sale bien, activar_conversion_gasto.bat y escribe S.
+
+Si alguien cambia de PC o ya no debe cargar: en el Panel "Desactivar" (sus
+compras regresan a la PC principal) o "Editar" para cambiarle los usuarios.
+
+Actualizar el agente (nov-2026)
+-------------------------------
+Ya no hace falta volver a pasar el ZIP. En el Panel, "PCs con agente": cuando
+una PC tiene una versión vieja sale "Hay una versión nueva del agente" con el
+botón "Actualizar ahora". En su siguiente vuelta (unos 5 min, con la PC prendida)
+el agente baja los archivos nuevos del sistema, revisa que lleguen completos y
+los reemplaza (su clave y configuración no se tocan; los anteriores quedan en
+logs\respaldo_v...). A la vuelta siguiente el Panel ya muestra la versión nueva.
+Solo la primera vez (para tener esta función) se instala con el ZIP.

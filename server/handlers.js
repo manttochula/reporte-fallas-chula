@@ -10399,6 +10399,86 @@ async function agenteOcPing(token) {
   return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, usuarios: ag.usuarios, empresas: emp.map((e) => ({ id: e.id, nombre: e.nombre })) };
 }
 
+// ---- Actualizar el agente desde el Panel (nov-2026, Carlos) ----
+// Los archivos del agente viajan con el código (carpeta agente_oc_comercial en
+// GitHub/Render, sin agente_oc_config.json ni logs). En el Panel se pide
+// "Actualizar" para una PC; en su siguiente vuelta el agente baja los archivos
+// (agenteOcArchivos, con su clave), revisa el sha256 de cada uno, los reemplaza y
+// a la vuelta siguiente ya corre la versión nueva.
+const AGENTE_DIR_ = process.env.AGENTE_OC_DIR || require('path').join(__dirname, '..', 'agente_oc_comercial');
+const AGENTE_VERSION_AUTOACTUALIZA_ = '2026.11.27';
+const AGENTE_ARCHIVO_OK_ = /^[A-Za-z0-9_\-]+\.(ps1|bat|txt)$/i;
+function archivosAgenteServidor_() {
+  const fs = require('fs');
+  let nombres = [];
+  try { nombres = fs.readdirSync(AGENTE_DIR_); } catch (e) { return []; }
+  return nombres.filter((n) => AGENTE_ARCHIVO_OK_.test(n) && fs.statSync(require('path').join(AGENTE_DIR_, n)).isFile()).sort();
+}
+function versionAgenteServidor_() {
+  try {
+    const txt = require('fs').readFileSync(require('path').join(AGENTE_DIR_, 'agente_oc_comercial.ps1'), 'utf8');
+    const m = txt.match(/\$AGENTE_VERSION\s*=\s*'([^']+)'/);
+    return m ? m[1] : '';
+  } catch (e) { return ''; }
+}
+const claveActualizarAgente_ = (ag) => 'agente_oc_actualizar_' + (ag.principal || !ag.id ? 'principal' : String(ag.id));
+// ¿Le toca actualizarse a esta PC? Regresa { version } o null.
+async function actualizacionAgente_(ag, info) {
+  const clave = claveActualizarAgente_(ag);
+  const [r] = await pool.query('SELECT valor FROM configuracion WHERE clave = ?', [clave]);
+  if (!r.length) return null;
+  const nueva = versionAgenteServidor_();
+  const tiene = (info.version || '').toString();
+  const borrar = () => pool.query('DELETE FROM configuracion WHERE clave = ?', [clave]);
+  if (info.errorActualizar) {
+    await borrar();
+    await registrarAuditoria_('agentes_comercial', String(ag.id || 0), 'actualizar_error', ag.nombre, String(info.errorActualizar).slice(0, 300));
+    return null;
+  }
+  // Las versiones antes de la 2026.11.27 no saben actualizarse: si se les mandara
+  // { actualizar } se quedarían sin trabajo. Se les da trabajo normal (hay que
+  // instalarles el ZIP una vez).
+  if (tiene < AGENTE_VERSION_AUTOACTUALIZA_) return null;
+  if (!nueva || tiene >= nueva) {
+    await borrar();
+    if (nueva && tiene === nueva) await registrarAuditoria_('agentes_comercial', String(ag.id || 0), 'actualizado', ag.nombre, 'v' + nueva);
+    return null;
+  }
+  return { version: nueva };
+}
+// Lo llama el AGENTE: archivos para reemplazar los suyos.
+async function agenteOcArchivos(token) {
+  const ag = await agenteDeClave_(token);
+  if (!ag) return { success: false, error: 'Clave del agente no válida.' };
+  const fs = require('fs');
+  const archivos = archivosAgenteServidor_().map((n) => {
+    const buf = fs.readFileSync(require('path').join(AGENTE_DIR_, n));
+    return { nombre: n, base64: buf.toString('base64'), sha256: crypto.createHash('sha256').update(buf).digest('hex'), bytes: buf.length };
+  });
+  if (!archivos.some((a) => a.nombre === 'agente_oc_comercial.ps1')) return { success: false, error: 'El servidor no tiene los archivos del agente (falta subir la carpeta agente_oc_comercial).' };
+  return { success: true, version: versionAgenteServidor_(), archivos };
+}
+// Panel: pedir (o cancelar) la actualización de una PC. id 0 = PC principal.
+async function pedirActualizarAgente(code, nombreUsuario, id, cancelar) {
+  await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'capturar');
+  const n = Number(id) || 0;
+  if (n) {
+    const [a] = await pool.query('SELECT id FROM agentes_comercial WHERE id = ?', [n]);
+    if (!a.length) return { success: false, error: 'No existe esa PC.' };
+  }
+  const clave = claveActualizarAgente_({ id: n, principal: !n });
+  if (cancelar) {
+    await pool.query('DELETE FROM configuracion WHERE clave = ?', [clave]);
+  } else {
+    const version = versionAgenteServidor_();
+    if (!version) return { success: false, error: 'El servidor no tiene los archivos del agente: sube la carpeta agente_oc_comercial con subir_a_github.bat y haz Deploy en Render.' };
+    await pool.query('INSERT INTO configuracion (clave, valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)',
+      [clave, JSON.stringify({ en: new Date().toISOString(), por: (nombreUsuario || '').toString().slice(0, 100), version })]);
+  }
+  await registrarAuditoria_('agentes_comercial', String(n), cancelar ? 'cancelar_actualizar' : 'pedir_actualizar', nombreUsuario, '');
+  return { success: true };
+}
+
 // Lo llama el AGENTE (no el Panel). info: { version, equipo, hojaComercialEmpresas }.
 async function agenteOcTrabajo(token, info) {
   const ag = await agenteDeClave_(token);
@@ -10408,6 +10488,8 @@ async function agenteOcTrabajo(token, info) {
     empresasHoja: Array.isArray(info.hojaComercialEmpresas) ? info.hojaComercialEmpresas.slice(0, 30).map((x) => String(x).slice(0, 80)) : [], error: (info.error || '').toString().slice(0, 500) });
   if (ag.principal) await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('agente_oc_visto', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [visto]);
   else await pool.query('UPDATE agentes_comercial SET visto = ? WHERE id = ?', [visto, ag.id]);
+  const actualizar = await actualizacionAgente_(ag, info);
+  if (actualizar) return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, actualizar, empresas: [], facturas: [], gastos: [] };
   await encolarOcAutomaticas_();
   return { success: true, agente: ag.principal ? 'PC principal' : ag.nombre, empresas: await ocsPendientesAgente_(ag), facturas: await facturasPorArchivar_(ag), gastos: (await datosOcPorCompletar_(ag)).concat(await gastosPorConvertir_(ag)) };
 }
@@ -10496,6 +10578,7 @@ function agenteVisto_(v) {
   let a = null; try { a = v ? JSON.parse(v) : null; } catch (e) { a = null; }
   return a ? { en: a.en, version: a.version || '', equipo: a.equipo || '', error: a.error || '', conectado: Date.now() - new Date(a.en).getTime() < AGENTE_OC_FUERA_MS_ } : null;
 }
+function pedidoActualizar_(v) { try { return v ? JSON.parse(v) : null; } catch (e) { return null; } }
 async function getAgentesComercial(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'refacciones', 'visualizar');
   const [ags] = await pool.query('SELECT id, nombre, usuarios, activo, visto, creado_por, creado_en FROM agentes_comercial ORDER BY nombre');
@@ -10504,7 +10587,10 @@ async function getAgentesComercial(code, nombreUsuario) {
   return {
     success: true,
     principal: agenteVisto_(v.agente_oc_visto),
-    agentes: ags.map((a) => ({ id: a.id, nombre: a.nombre, usuarios: usuariosDeJson_(a.usuarios), activo: !!a.activo, visto: agenteVisto_(a.visto), creadoPor: a.creado_por || '', creadoEn: isoOrNull(a.creado_en) })),
+    principalActualizar: pedidoActualizar_(v.agente_oc_actualizar_principal),
+    versionServidor: versionAgenteServidor_(),
+    versionAutoactualiza: AGENTE_VERSION_AUTOACTUALIZA_,
+    agentes: ags.map((a) => ({ id: a.id, nombre: a.nombre, usuarios: usuariosDeJson_(a.usuarios), activo: !!a.activo, visto: agenteVisto_(a.visto), actualizar: pedidoActualizar_(v['agente_oc_actualizar_' + a.id]), creadoPor: a.creado_por || '', creadoEn: isoOrNull(a.creado_en) })),
     usuariosPanel: us.filter((u) => tieneAccesoModulo_(u.modulos, 'Panel')).map((u) => u.nombre),
   };
 }
@@ -13833,7 +13919,7 @@ module.exports = {
   eliminarTipoUnidad,
   getEmpresasCatalogo,
   guardarFoliosOc,
-  agenteOcTrabajo,
+  agenteOcTrabajo, agenteOcArchivos, pedirActualizarAgente,
   agenteOcPing,
   agenteOcResultado,
   getCargaComercial,

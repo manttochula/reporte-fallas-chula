@@ -1,0 +1,61 @@
+AGENTE DE CARGA AUTOMATICA DE OC A CONTPAQi COMERCIAL (oct-2026)
+==================================================================
+
+Que hace: cada 5 minutos pregunta al sistema si hay ordenes de compra
+autorizadas por cargar. Si hay, abre Excel en segundo plano con tu
+HojaComercial.xls, pone la empresa activa, crea cada OC en Comercial
+(igual que tu macro Enviar_Lote), confirma que si quedo y le avisa al
+Panel el resultado. Si no hay nada, no abre nada.
+
+INSTALAR (una sola vez, en la PC donde esta Comercial, con tu usuario):
+ 1. En Render agrega la variable OC_AGENTE_TOKEN con una clave larga que
+    inventes (minimo 16 caracteres, por ejemplo 32 letras y numeros) y
+    haz Deploy. No la compartas.
+ 2. Doble clic en instalar_agente_oc.bat. Te pide: la direccion del
+    sistema (Enter), la ruta de HojaComercial.xls (Enter si la encontro)
+    y la clave del paso 1 (no se ve al pegarla).
+ 3. Doble clic en probar_agente_oc.bat para correr una vuelta ya.
+ 4. En el Panel: Refacciones > Exportar OC para CONTPAQi > "Carga
+    automatica a Comercial": palomea la empresa para prenderla.
+
+IMPORTANTE
+ - Todas las empresas que quieras cargar deben estar en HojaComercial,
+   pestana Parametros (boton Insertar empresa), con el mismo nombre que
+   en el Panel (Catalogo > Empresa).
+ - La primera vez cada empresa necesita su folio inicial: exporta una vez
+   desde "Exportar OC" (refacciones y gastos) para que el sistema sepa el
+   siguiente folio.
+ - El agente corre solo mientras tu sesion de Windows este abierta (puede
+   estar bloqueada). Si la PC esta apagada, las OC esperan.
+ - No uses Excel con HojaComercial abierta al mismo tiempo que el agente
+   este cargando (tarda 1-2 minutos).
+ - Registro: carpeta logs\ (agente_AAAA-MM.log y dialogos.txt).
+ - CONTPAQi pide usuario y clave al abrir HojaComercial. El agente la
+   contesta solo con lo que guardes en guardar_clave_contpaqi.bat (queda
+   cifrada con tu usuario de Windows). Si cambias la clave en CONTPAQi,
+   vuelve a correrlo. Si no hay clave o no logra entrar en 60 segundos,
+   cierra ese Excel y el Panel muestra el motivo (logs\login.txt).
+ - Pausar una empresa en el Panel tambien detiene lo que ya estaba en la
+   cola: se queda "En pausa" hasta que la prendas o la quites de la cola.
+ - FACTURAS AL ALMACEN DIGITAL: cuando el proveedor sube su factura, el
+   agente guarda la factura con la nota contable en
+   Z:\ALMACEN DIGITAL\<EMPRESA>\CFDI RECIBIDOS\01 PDF CFDI\<AÑO>\<MM MES>
+   con el nombre "PROVEEDOR F-folio $total.pdf" (mes = fecha de la
+   factura). Si en esta PC la carpeta es otra, corre
+   configurar_almacen_digital.bat. Si la PC está apagada, se guarda en
+   cuanto se prenda.
+ - OC DE GASTOS A "GASTOS EN PESOS" (convertir_gasto.ps1): cuando llega la
+   factura de una OC de gastos, el agente abre la OC en Comercial, la
+   convierte (Ctrl+2) con Fecha = fecha de la factura y Recepción = fecha
+   de entrega cotizada, le pone Serie y Folio de la factura y la guarda.
+   Si Comercial está cerrado lo abre (acceso directo del escritorio) y entra
+   con el usuario/clave de guardar_clave_contpaqi.bat; Contabilidad →
+   Cancelar; abre la empresa y la lista ORDEN DE COMPRA GENERALES. Si
+   Comercial tenía documentos o avisos abiertos, lo cierra y lo vuelve a
+   abrir. Aceptar y Guardar = F8.
+   * Primero pruébalo con probar_conversion_gasto.bat (te pregunta antes de
+     Aceptar y antes de Guardar).
+   * Ya probado, préndelo con activar_conversion_gasto.bat: entonces lo
+     hace solo cuando nadie ha usado la PC en 10 minutos. Si alguien mueve
+     el mouse a media conversión, se detiene y avisa en el Panel/Telegram.
+ - Quitarlo: desinstalar_agente_oc.bat.

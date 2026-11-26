@@ -24690,6 +24690,19 @@ function estadoPcAgente_(v){
     ' <span class="mnt-subtext" style="display:inline;">' + escapeHtml((v.equipo ? v.equipo + ' · ' : '') + 'última vez ' + new Date(v.en).toLocaleString('es-MX') + (v.version ? ' · v' + v.version : '')) + '</span>' +
     (v.error ? '<div class="ocx-auto-aviso">' + escapeHtml(v.error) + '</div>' : '');
 }
+// Nov-2026: actualizar el agente de una PC desde aquí (lo baja solo en su siguiente vuelta).
+function AGENTE_DATOS_MIN_AUTO_(){ return AGC_DATOS && AGC_DATOS.versionAutoactualiza; }
+function actualizacionPcAgente_(v, pedido, id, puede){
+  const nueva = AGC_DATOS && AGC_DATOS.versionServidor;
+  if(pedido) return '<div class="ocx-auto-aviso" style="background:#eef6ff;border-color:#9cc3ef;color:#1d4f8a;">⏳ Actualización a v' + escapeHtml(pedido.version || nueva || '') +
+    ' pedida' + (pedido.por ? ' por ' + escapeHtml(pedido.por) : '') + '. Se instala sola en la siguiente vuelta del agente (unos 5 min; la PC debe estar prendida).' +
+    (puede ? ' <button type="button" class="row-view agc-act" data-id="' + id + '" data-cancelar="1">Cancelar</button>' : '') + '</div>';
+  if(!v || !nueva || !v.version || v.version >= nueva) return '';
+  if(v.version < (AGENTE_DATOS_MIN_AUTO_() || '')) return '<div class="ocx-auto-aviso">⬆ Hay una versión nueva del agente (v' + escapeHtml(nueva) + '; esta PC tiene v' + escapeHtml(v.version) +
+    '). Esta versión todavía no se actualiza sola: instálale una vez el ZIP (empaquetar_para_otra_pc.bat); después ya se actualiza desde aquí.</div>';
+  return '<div class="ocx-auto-aviso">⬆ Hay una versión nueva del agente (v' + escapeHtml(nueva) + '; esta PC tiene v' + escapeHtml(v.version) + ').' +
+    (puede ? ' <button type="button" class="row-view agc-act" data-id="' + id + '">Actualizar ahora</button>' : '') + '</div>';
+}
 function cargarAgentesComercial_(){
   const caja = document.getElementById('agc-lista');
   if(!caja) return;
@@ -24698,14 +24711,14 @@ function cargarAgentesComercial_(){
       if(!r || !r.success){ caja.innerHTML = ''; return; }
       AGC_DATOS = r;
       const puede = puedeCapturarPestana('refacciones');
-      const filas = ['<tr><td><b>PC principal</b></td><td><span class="mnt-subtext">todos los demás usuarios</span></td><td>' + estadoPcAgente_(r.principal) + '</td><td></td></tr>']
+      const filas = ['<tr><td><b>PC principal</b></td><td><span class="mnt-subtext">todos los demás usuarios</span></td><td>' + estadoPcAgente_(r.principal) + actualizacionPcAgente_(r.principal, r.principalActualizar, 0, puede) + '</td><td></td></tr>']
         .concat(r.agentes.map(function(a){
           const acc = !puede ? '' :
             '<button type="button" class="row-view agc-acc" data-acc="editar" data-id="' + a.id + '">Editar</button> ' +
             '<button type="button" class="row-view agc-acc" data-acc="clave" data-id="' + a.id + '" title="Genera una clave nueva; la anterior deja de servir">Nueva clave</button> ' +
             '<button type="button" class="row-view agc-acc" data-acc="' + (a.activo ? 'desactivar' : 'activar') + '" data-id="' + a.id + '">' + (a.activo ? 'Desactivar' : 'Activar') + '</button> ' +
             '<button type="button" class="row-view agc-acc" data-acc="eliminar" data-id="' + a.id + '">Eliminar</button>';
-          return '<tr' + (a.activo ? '' : ' style="opacity:.55;"') + '><td><b>' + escapeHtml(a.nombre) + '</b>' + (a.activo ? '' : ' <span class="mnt-subtext" style="display:inline;">(desactivada)</span>') + '</td><td>' + escapeHtml(a.usuarios.join(', ')) + '</td><td>' + estadoPcAgente_(a.visto) + '</td><td>' + acc + '</td></tr>';
+          return '<tr' + (a.activo ? '' : ' style="opacity:.55;"') + '><td><b>' + escapeHtml(a.nombre) + '</b>' + (a.activo ? '' : ' <span class="mnt-subtext" style="display:inline;">(desactivada)</span>') + '</td><td>' + escapeHtml(a.usuarios.join(', ')) + '</td><td>' + estadoPcAgente_(a.visto) + (a.activo ? actualizacionPcAgente_(a.visto, a.actualizar, a.id, puede) : '') + '</td><td>' + acc + '</td></tr>';
         }));
       caja.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><b>PCs con agente</b>' +
         (puede ? '<button type="button" class="row-view" id="agc-agregar">+ Agregar PC</button>' : '') + '</div>' +
@@ -24713,6 +24726,16 @@ function cargarAgentesComercial_(){
         '<div class="table-wrap"><table><thead><tr><th>PC</th><th>Usuarios</th><th>Estado</th><th></th></tr></thead><tbody>' + filas.join('') + '</tbody></table></div>';
       const ag = document.getElementById('agc-agregar');
       if(ag) ag.addEventListener('click', function(){ abrirModalAgente_(null); });
+      caja.querySelectorAll('.agc-act').forEach(function(b){
+        b.addEventListener('click', function(){
+          const cancelar = !!b.dataset.cancelar;
+          if(!cancelar && !confirm('¿Actualizar el agente de esta PC a la v' + AGC_DATOS.versionServidor + '? En su siguiente vuelta baja los archivos nuevos del sistema y los reemplaza (su clave y configuración se quedan igual).')) return;
+          b.disabled = true;
+          google.script.run.withSuccessHandler(function(x){ if(!x || !x.success) alert((x && x.error) || 'No se pudo.'); cargarAgentesComercial_(); })
+            .withFailureHandler(function(){ b.disabled = false; alert('No se pudo.'); })
+            .pedirActualizarAgente(ACCESS_CODE, PANEL_USUARIO, Number(b.dataset.id) || 0, cancelar);
+        });
+      });
       caja.querySelectorAll('.agc-acc').forEach(function(b){
         b.addEventListener('click', function(){
           const id = Number(b.dataset.id);

@@ -528,6 +528,16 @@ function Confirmar-Probar([string]$texto) {
 # Ordenar no tienen las mismas teclas que en MEXICO) y luego Ctrl+1 … Ctrl+6.
 # Si se abre otra conversión, la cierra sin aceptar (= Cancelar). Si una tecla
 # no abre nada, sigue con la siguiente; si abre otra cosa, se detiene.
+# Nov-2026: en CHULA BRAND DEL GOLFO el documento se llama "GASTO EN PESOS" (sin S)
+# y en MEXICO "GASTOS EN PESOS": se comparan las palabras sin la S final.
+function Get-DestinoNormal([string]$t) {
+  $t = (Get-NombreNormal $t) -replace '^.*CONVERTIR A\s*', ''
+  return ((($t -split '\s+') | Where-Object { $_ } | ForEach-Object { $_ -replace 'S$', '' }) -join ' ')
+}
+function Test-MismoDestino([string]$titulo, [string]$dest) {
+  $a = Get-DestinoNormal $titulo; $b = Get-DestinoNormal $dest
+  return ($b -and ($a -eq $b -or $a.EndsWith(' ' + $b)))
+}
 function Abrir-Conversion([IntPtr]$doc, [string]$dest, [int]$procId, [string]$paso, [string]$empresa = '') {
   $ruta = Join-Path (Split-Path -Parent $Trabajo) 'conversion_teclas.json'
   $apr = @{}
@@ -552,7 +562,7 @@ function Abrir-Conversion([IntPtr]$doc, [string]$dest, [int]$procId, [string]$pa
       continue
     }
     $t = [Cmx]::Titulo($dlg)
-    if ($t -like ('*' + $dest + '*')) {
+    if (Test-MismoDestino $t $dest) {
       if ($apr[$clave] -ne $k) { $apr[$clave] = $k; try { ($apr | ConvertTo-Json) | Set-Content -Path $ruta -Encoding UTF8 } catch { } }
       Write-L ('"' + $t + '" con Ctrl+' + $k + $(if ($empresa) { ' (' + $empresa + ')' } else { '' }) + '.')
       return $dlg
@@ -667,6 +677,9 @@ function Convertir-Gasto($g, [int]$procId) {
   # 2) Convertir (Ctrl+2 = GASTOS EN PESOS en las OC GENERALES; en las VRZ se busca la tecla de COMPRA EN PESOS)
   $paso = 'Convertir a ' + $dest
   $dlg = Abrir-Conversion $doc $dest $procId $paso ([string]$g.empresa)
+  # El nombre real del documento en esta empresa (ej. GASTO EN PESOS en GOLFO).
+  $real = (([Cmx]::Titulo($dlg)) -replace '(?i)^.*convertir a\s*', '').Trim().ToUpper()
+  if ($real -and $real -ne $dest) { Write-L ('En esta empresa el documento se llama "' + $real + '".'); $dest = $real }
 
   # 3) Fechas: Fecha (izquierda), Vencimiento (derecha arriba), Recepción (derecha abajo).
   $paso = 'Fechas'

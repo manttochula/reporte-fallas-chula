@@ -196,5 +196,65 @@
     return 'Otra';
   }
 
-  return { leerPolizas: leerPolizas, renglones_: renglones_, fecha_: fecha_, cobertura: cobertura };
+  // ---- Cotización de flotilla (Banorte, "Cotización Seguro de Automóviles") ----
+  // Nov-2026 (Carlos): para el comparativo contra las pólizas actuales.
+  // Regresa { aseguradora, folio, cliente, vigenciaInicio, vigenciaFin, vehiculosDeclarados,
+  //           primaNeta, derechos, iva, primaTotal, formaPago, agente,
+  //           vehiculos: [{ numero, clave, descripcion, modelo, uso, serie, equipoEspecial,
+  //                         primaNeta, primaTotal, formaPago, paquete, tipoCarga, valor, nivel }],
+  //           coberturas: [{ tipo, coberturas: [{ clave, nombre, suma, deducible }] }] }
+  // o null si no es una cotización.
+  function fechaNum_(s) { const m = /(\d{2})\/(\d{2})\/(\d{4})/.exec(s || ''); return m ? m[3] + '-' + m[2] + '-' + m[1] : null; }
+  function dinero_(s) { return s === undefined || s === null ? null : Number(String(s).replace(/[$,\s]/g, '')); }
+  const RENGLON_VEH_ = /^(\d{1,3}) ([A-Z0-9]{5}) (.+?) ((?:19|20)\d{2}) (.+?) ([A-HJ-NPR-Z0-9]{17}) \$ ?([\d,]+\.\d{2}) \$ ?([\d,]+\.\d{2}) \$ ?([\d,]+\.\d{2}) (\d{3}) (\S+) (\S+) (.+?) (\d{1,2})$/;
+  const RENGLON_COB_ = /^(A\d{3}) - (.+?) (AMPARADA|[\d,]+(?:\.\d{2})?(?: UMA)?) (\d{1,3} ?%|\d+ UMA|\d+) (AMP|EXC) (AMP|EXC) (AMP|EXC) (AMP|EXC)$/;
+  function leerCotizacion(paginas) {
+    const lineas = [];
+    (paginas || []).forEach(function (p) { renglones_(p.items).forEach(function (l) { lineas.push(l); }); });
+    const todo = mayus_(lineas.join('\n'));
+    if (!/COTIZACI.N/.test(todo) || !/N. SERIE|SERIE/.test(todo)) return null;
+    const cot = { aseguradora: /BANORTE/.test(todo) ? 'Seguros Banorte' : '', folio: '', cliente: '', vigenciaInicio: null, vigenciaFin: null, vehiculosDeclarados: null,
+      primaNeta: null, derechos: null, iva: null, primaTotal: null, formaPago: '', agente: '', vehiculos: [], coberturas: [] };
+    const vistos = {};
+    let tipo = null;
+    lineas.forEach(function (l0) {
+      const l = limpiar_(l0);
+      const L = mayus_(l);
+      let m;
+      if (!cot.folio && (m = /FOLIO COTIZACI.N (\d+)/.exec(L))) cot.folio = m[1];
+      if (!cot.folio && (m = /^FOLIO (\d+) VERSION/.exec(L))) cot.folio = m[1];
+      if (!cot.cliente && (m = /^CLIENTE (.+?)(?: VERSION .*)?$/.exec(L))) cot.cliente = limpiar_(m[1]);
+      if (!cot.vigenciaInicio && (m = /VIGENCIA (\d{2}\/\d{2}\/\d{4}) AL (\d{2}\/\d{2}\/\d{4})/.exec(L))) { cot.vigenciaInicio = fechaNum_(m[1]); cot.vigenciaFin = fechaNum_(m[2]); }
+      if (!cot.vigenciaInicio && (m = /INICIO (\d{2}\/\d{2}\/\d{4}) FIN (\d{2}\/\d{2}\/\d{4})/.exec(L))) { cot.vigenciaInicio = fechaNum_(m[1]); cot.vigenciaFin = fechaNum_(m[2]); }
+      if (!cot.agente && (m = /^AGENTE (?:\d+ - )?(.+?)(?: SUBCANAL.*)?$/.exec(L))) cot.agente = limpiar_(m[1]);
+      if (cot.primaNeta === null && (m = /^(\d{1,4}) \$ ?([\d,]+\.\d{2}) \$ ?([\d,]+\.\d{2}) (\d{1,2}) ?%/.exec(L))) {
+        cot.vehiculosDeclarados = Number(m[1]); cot.primaNeta = dinero_(m[2]); cot.derechos = dinero_(m[3]); cot.iva = Number(m[4]);
+      }
+      if (cot.primaTotal === null && (m = /^\d{3} - (PAGO [A-Z]+|[A-Z]+) \$ ?([\d,]+\.\d{2}) \$ ?([\d,]+\.\d{2}) \$ ?([\d,]+\.\d{2})$/.exec(L))) {
+        cot.formaPago = limpiar_(m[1].replace(/^PAGO /, '')); cot.primaTotal = dinero_(m[4]);
+      }
+      if ((m = RENGLON_VEH_.exec(L))) {
+        if (vistos['v' + m[1] + m[6]]) return;
+        vistos['v' + m[1] + m[6]] = true;
+        cot.vehiculos.push({ numero: Number(m[1]), clave: m[2], descripcion: limpiar_(m[3]), modelo: m[4], uso: limpiar_(m[5]), serie: m[6],
+          equipoEspecial: dinero_(m[7]), primaNeta: dinero_(m[8]), primaTotal: dinero_(m[9]), formaPago: m[10], paquete: m[11], tipoCarga: m[12], valor: limpiar_(m[13]), nivel: Number(m[14]) });
+        return;
+      }
+      if ((m = /^(\d{3}) - ([A-Z][A-Z .\/]+)$/.exec(L)) && !/PAGO/.test(L)) {
+        const nombre = limpiar_(m[2]);
+        tipo = cot.coberturas.find(function (t) { return t.tipo === nombre; }) || null;
+        if (!tipo) { tipo = { clave: m[1], tipo: nombre, coberturas: [] }; cot.coberturas.push(tipo); }
+        return;
+      }
+      if (tipo && (m = RENGLON_COB_.exec(L))) {
+        if (tipo.coberturas.some(function (c) { return c.clave === m[1]; })) return;
+        tipo.coberturas.push({ clave: m[1], nombre: limpiar_(m[2]), suma: limpiar_(m[3]), deducible: limpiar_(m[4]).replace(/ %/, '%'),
+          amplia: m[5] === 'AMP' });
+      }
+    });
+    if (!cot.vehiculos.length) return null;
+    return cot;
+  }
+
+  return { leerPolizas: leerPolizas, leerCotizacion: leerCotizacion, renglones_: renglones_, fecha_: fecha_, cobertura: cobertura };
 });

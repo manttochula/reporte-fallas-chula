@@ -966,6 +966,19 @@
   .seg-tarjeta .n{ font-family:'Oswald',sans-serif; font-size:24px; line-height:1.1; }
   .seg-tarjeta .t{ font-size:11.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.03em; }
   .seg-tarjeta.rojo .n{ color:var(--danger); } .seg-tarjeta.ambar .n{ color:var(--amber); } .seg-tarjeta.verde .n{ color:var(--ok); }
+  /* Seguros → Comparativo (nov-2026) */
+  .seg-cmp-barra{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:4px 0 12px; }
+  .seg-cmp-resumen{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+  .seg-cmp-resumen .seg-tarjeta{ cursor:default; }
+  .seg-cmp-resumen .seg-tarjeta .s{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+  .seg-cmp-sec{ margin:14px 0 6px; font-family:'Oswald',sans-serif; letter-spacing:0.03em; text-transform:uppercase; font-size:14px; }
+  .seg-cmp-tabla td.num, .seg-cmp-tabla th.num{ text-align:right; white-space:nowrap; font-family:'IBM Plex Mono',monospace; }
+  .seg-cmp-sube{ color:var(--danger); } .seg-cmp-baja{ color:var(--ok); }
+  .seg-cmp-tabla tr.total td{ font-weight:700; border-top:2px solid var(--line); }
+  .seg-cmp-chips{ display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+  .seg-cmp-chip{ border:1px solid var(--line); background:transparent; color:var(--text); border-radius:14px; padding:3px 10px; font-size:12px; cursor:pointer; }
+  .seg-cmp-chip.activo{ border-color:var(--amber); color:var(--amber); }
+  .seg-cmp-nota{ font-size:12px; color:var(--text-dim); margin:4px 0; }
   .seg-subtabs{ display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
   .seg-subtab{ background:var(--panel-2); color:var(--text); border:1px solid var(--line); border-radius:4px; padding:7px 14px; cursor:pointer; font-size:13px; }
   .seg-subtab.active{ background:var(--amber); color:#1c1c1c; border-color:var(--amber); font-weight:700; }
@@ -4572,6 +4585,7 @@
         <button type="button" class="seg-subtab" data-vista="unidades">Unidades</button>
         <button type="button" class="seg-subtab" data-vista="pagos">Pagos</button>
         <button type="button" class="seg-subtab" data-vista="siniestros">Siniestros</button>
+        <button type="button" class="seg-subtab" data-vista="comparativo" title="Cotización de renovación contra las pólizas actuales">Comparativo</button>
       </div>
       <div class="toolbar">
         <input type="text" id="seg-buscar" placeholder="Buscar por unidad, placa, aseguradora o póliza...">
@@ -4593,7 +4607,19 @@
         <button class="export-btn" id="seg-actualizar">Actualizar</button>
       </div>
       <div class="seg-status" id="seg-status"></div>
-      <div class="table-wrap"><table id="seg-tabla"><thead id="seg-thead"></thead><tbody id="seg-tbody"></tbody></table></div>
+      <div class="table-wrap" id="seg-tabla-wrap"><table id="seg-tabla"><thead id="seg-thead"></thead><tbody id="seg-tbody"></tbody></table></div>
+      <div id="seg-cmp" style="display:none;">
+        <div class="seg-cmp-barra">
+          <select id="seg-cmp-sel" style="min-width:280px;"></select>
+          <button class="export-btn" id="seg-cmp-cargar" title="Lee el PDF de la cotización de la aseguradora (Banorte)">📥 Cargar cotización (PDF)</button>
+          <input type="file" id="seg-cmp-archivo" accept="application/pdf,.pdf" style="display:none;">
+          <a class="export-btn" id="seg-cmp-pdf" target="_blank" rel="noopener" style="display:none;">PDF</a>
+          <button class="export-btn" id="seg-cmp-excel">Excel</button>
+          <button class="export-btn" id="seg-cmp-eliminar">Eliminar cotización</button>
+        </div>
+        <div class="seg-status" id="seg-cmp-status"></div>
+        <div id="seg-cmp-cuerpo"></div>
+      </div>
     </div>
 
     <div class="maq-modal-overlay" id="baja-overlay">
@@ -21291,7 +21317,7 @@ function cargarSeguros(){
   google.script.run
     .withSuccessHandler(function(r){
       if(!r || !r.success){ segStatus_((r && r.error) || 'No se pudieron leer los seguros.', true); return; }
-      SEG_DATOS = r; SEG_CARGADO = true; segStatus_('');
+      SEG_DATOS = r; SEG_CARGADO = true; segStatus_(''); SEG_CMP = null;
       segLlenarListas_();
       segLlenarFiltros_();
       renderSeguros();
@@ -21375,6 +21401,15 @@ function segTarjetas_(){
 function renderSeguros(){
   if(!SEG_DATOS) return;
   segTarjetas_();
+  const esCmp = SEG_VISTA === 'comparativo';
+  document.getElementById('seg-tabla-wrap').style.display = esCmp ? 'none' : '';
+  document.getElementById('seg-cmp').style.display = esCmp ? '' : 'none';
+  if(esCmp){
+    document.querySelectorAll('.seg-subtab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-vista') === SEG_VISTA); });
+    ['seg-solo-auto-wrap', 'seg-ver-pagados-wrap', 'seg-estado'].forEach(function(id){ document.getElementById(id).style.display = 'none'; });
+    if(!SEG_CMP) segCmpCargar_(null); else segCmpRender_();
+    return;
+  }
   document.querySelectorAll('.seg-subtab').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-vista') === SEG_VISTA); });
   document.getElementById('seg-solo-auto-wrap').style.display = SEG_VISTA === 'unidades' ? '' : 'none';
   document.getElementById('seg-ver-pagados-wrap').style.display = SEG_VISTA === 'pagos' ? '' : 'none';
@@ -21624,6 +21659,214 @@ function segAccionSimple_(fn, args, confirmar){
     .withFailureHandler(function(e){ segStatus_((e && e.message) || 'No se pudo.', true); });
   run[fn].apply(run, [ACCESS_CODE, PANEL_USUARIO].concat(args));
 }
+
+// ---------- Comparativo: cotización de renovación vs pólizas actuales (nov-2026) ----------
+let SEG_CMP = null, SEG_CMP_FILTRO = 'todos';
+function segCmpStatus_(t, err){ const el = document.getElementById('seg-cmp-status'); el.textContent = t || ''; el.style.color = err ? 'var(--danger)' : ''; }
+function segCmpCargar_(id){
+  segCmpStatus_('Cargando comparativo...');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ segCmpStatus_((r && r.error) || 'No se pudo leer el comparativo.', true); return; }
+      SEG_CMP = r; segCmpStatus_('');
+      segCmpRender_();
+    })
+    .withFailureHandler(function(e){ segCmpStatus_((e && e.message) || 'No se pudo leer el comparativo.', true); })
+    .getComparativoSeguro(ACCESS_CODE, PANEL_USUARIO, id || null);
+}
+function segCmpPct_(a, b){ return a ? ((b - a) / a * 100) : null; }
+function segCmpDif_(n, conSigno){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  const cls = n > 0.5 ? 'seg-cmp-sube' : n < -0.5 ? 'seg-cmp-baja' : '';
+  return '<span class="' + cls + '">' + (n > 0.5 ? '+' : n < -0.5 ? '−' : '') + segMoney_(Math.abs(n)) + '</span>';
+}
+function segCmpPctTxt_(p){
+  if(p === null || p === undefined || !isFinite(p)) return '—';
+  const cls = p > 0.05 ? 'seg-cmp-sube' : p < -0.05 ? 'seg-cmp-baja' : '';
+  return '<span class="' + cls + '">' + (p > 0 ? '+' : '') + p.toFixed(1) + '%</span>';
+}
+// Filas que pasan los filtros de arriba (empresa, segmento, buscar)
+function segCmpFilas_(){
+  if(!SEG_CMP || !SEG_CMP.comparativo) return [];
+  const fe = document.getElementById('seg-f-empresa').value, fs = document.getElementById('seg-f-segmento').value;
+  const q = document.getElementById('seg-buscar').value.trim().toLowerCase();
+  return SEG_CMP.comparativo.filas.filter(function(f){
+    if(fe && String(f.empresaId || '') !== fe) return false;
+    if(fs && (fs === '__sin__' ? !!f.segmento : f.segmento !== fs)) return false;
+    if(q && [f.codigoUnidad, f.unidad, f.serie, f.descripcion, f.numeroPoliza, f.empresa, f.polizaEmpresa, f.tipoUnidad].join(' ').toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+}
+function segCmpDifFila_(f){ return f.estado === 'sigue' && f.primaActualAnual !== null && f.primaNueva !== null ? f.primaNueva - f.primaActualAnual : f.estado === 'nuevo' ? f.primaNueva : f.estado === 'sale' ? -(f.primaActualAnual || 0) : null; }
+function segCmpResumen_(filas){
+  const sum = function(l, k){ return l.reduce(function(a, f){ return a + (f[k] || 0); }, 0); };
+  const sig = filas.filter(function(f){ return f.estado === 'sigue'; }), nue = filas.filter(function(f){ return f.estado === 'nuevo'; }), sal = filas.filter(function(f){ return f.estado === 'sale'; });
+  const act = sig.concat(sal), cot = sig.concat(nue);
+  const dSig = sig.map(function(f){ return { f: f, d: (f.primaNueva || 0) - (f.primaActualAnual || 0) }; });
+  const sube = dSig.filter(function(x){ return x.d > 0.5; }), baja = dSig.filter(function(x){ return x.d < -0.5; });
+  return {
+    nActual: act.length, nCot: cot.length, pagado: sum(act, 'primaActual'), anual: sum(act, 'primaActualAnual'), nueva: sum(cot, 'primaNueva'), netaNueva: sum(cot, 'netaNueva'),
+    sig: sig.length, sigAnual: sum(sig, 'primaActualAnual'), sigNueva: sum(sig, 'primaNueva'),
+    sube: sube.length, subeMonto: sube.reduce(function(a, x){ return a + x.d; }, 0), baja: baja.length, bajaMonto: baja.reduce(function(a, x){ return a + x.d; }, 0), igual: sig.length - sube.length - baja.length,
+    nue: nue.length, nueMonto: sum(nue, 'primaNueva'), sal: sal.length, salMonto: sum(sal, 'primaActualAnual'),
+    prorrateadas: act.filter(function(f){ return f.prorrateada; }).length, sinPrima: act.filter(function(f){ return f.primaActualAnual === null; }).length,
+    estimadas: act.filter(function(f){ return f.estimada; }).length,
+  };
+}
+function segCmpGrupos_(filas, clave){
+  const g = {};
+  filas.forEach(function(f){
+    const k = clave(f) || '—';
+    const x = g[k] = g[k] || { k: k, nAct: 0, nCot: 0, act: 0, cot: 0 };
+    if(f.estado !== 'nuevo'){ x.nAct++; x.act += f.primaActualAnual || 0; }
+    if(f.estado !== 'sale'){ x.nCot++; x.cot += f.primaNueva || 0; }
+  });
+  return Object.keys(g).map(function(k){ return g[k]; }).sort(function(a, b){ return Math.abs(b.cot - b.act) - Math.abs(a.cot - a.act); });
+}
+function segCmpTablaGrupos_(titulo, grupos){
+  const tot = grupos.reduce(function(a, x){ a.nAct += x.nAct; a.nCot += x.nCot; a.act += x.act; a.cot += x.cot; return a; }, { nAct: 0, nCot: 0, act: 0, cot: 0 });
+  const fila = function(x, cls){ return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + escapeHtml(x.k) + '</td><td class="num">' + x.nAct + '</td><td class="num">' + x.nCot + '</td><td class="num">' + segMoney_(x.act) + '</td><td class="num">' + segMoney_(x.cot) + '</td><td class="num">' + segCmpDif_(x.cot - x.act) + '</td><td class="num">' + segCmpPctTxt_(segCmpPct_(x.act, x.cot)) + '</td></tr>'; };
+  return '<div class="table-wrap"><table class="seg-cmp-tabla"><thead><tr><th>' + escapeHtml(titulo) + '</th><th class="num">Vehíc. actual</th><th class="num">Vehíc. cotizados</th><th class="num">Actual (anual)</th><th class="num">Cotización</th><th class="num">Diferencia</th><th class="num">%</th></tr></thead><tbody>'
+    + grupos.map(function(x){ return fila(x); }).join('') + fila(Object.assign({ k: 'Total' }, tot), 'total') + '</tbody></table></div>';
+}
+function segCmpRender_(){
+  const sel = document.getElementById('seg-cmp-sel');
+  const cuerpo = document.getElementById('seg-cmp-cuerpo');
+  const puede = segPuede_();
+  document.getElementById('seg-cmp-cargar').style.display = puede ? '' : 'none';
+  const lista = (SEG_CMP && SEG_CMP.cotizaciones) || [];
+  const c = SEG_CMP && SEG_CMP.comparativo;
+  sel.innerHTML = lista.length ? lista.map(function(x){ return '<option value="' + x.id + '">' + escapeHtml((x.aseguradora || 'Cotización') + (x.folio ? ' ' + x.folio : '') + ' · ' + (x.vigenciaInicio ? segFechaTxt_(x.vigenciaInicio) + ' – ' + segFechaTxt_(x.vigenciaFin) : '') + ' · ' + x.vehiculos + ' vehículos · ' + segMoney_(x.primaTotal)) + '</option>'; }).join('')
+    : '<option value="">Todavía no hay cotizaciones</option>';
+  if(c) sel.value = String(c.cotizacion.id);
+  sel.style.display = lista.length ? '' : 'none';
+  document.getElementById('seg-cmp-eliminar').style.display = puede && c ? '' : 'none';
+  document.getElementById('seg-cmp-excel').style.display = c ? '' : 'none';
+  const pdf = document.getElementById('seg-cmp-pdf');
+  pdf.style.display = c && c.cotizacion.pdfUrl ? '' : 'none'; if(c) pdf.href = c.cotizacion.pdfUrl || '#';
+  if(!c){ cuerpo.innerHTML = '<div class="seg-cmp-nota" style="padding:20px 0;">Carga el PDF de la cotización de renovación de la aseguradora (📥 Cargar cotización) para ver cuánto cambia contra tus pólizas actuales y en qué.</div>'; return; }
+  const filas = segCmpFilas_();
+  const r = segCmpResumen_(filas);
+  const filtrado = filas.length !== c.filas.length;
+  const dif = r.nueva - r.anual, difPag = r.nueva - r.pagado;
+  const pols = c.polizasActuales;
+  let h = '';
+  h += '<div class="seg-cmp-nota">Cotización <b>' + escapeHtml((c.cotizacion.aseguradora || '') + ' ' + c.cotizacion.folio) + '</b>' + (c.cotizacion.cliente ? ' · ' + escapeHtml(c.cotizacion.cliente) : '') + ' · vigencia ' + segFechaTxt_(c.cotizacion.vigenciaInicio) + ' – ' + segFechaTxt_(c.cotizacion.vigenciaFin)
+    + (c.cotizacion.formaPago ? ' · pago ' + escapeHtml(c.cotizacion.formaPago.toLowerCase()) : '') + (c.cotizacion.derechos ? ' · derechos de póliza ' + segMoney_(c.cotizacion.derechos) : '') + '<br>'
+    + 'Se compara contra las pólizas vigentes antes de esa fecha: ' + (pols.length ? pols.map(function(p){ return escapeHtml(p.numeroPoliza + (p.empresa ? ' (' + p.empresa + ')' : '')); }).join(', ') : '<b>ninguna</b> (registra o importa las pólizas actuales)') + '.'
+    + (filtrado ? ' <b>Con los filtros de arriba (' + filas.length + ' de ' + c.filas.length + ' vehículos).</b>' : '') + '</div>';
+  h += '<div class="seg-cmp-resumen">'
+    + '<div class="seg-tarjeta"><div class="n">' + segMoney_(r.anual) + '</div><div class="t">Actual (anual)</div><div class="s">' + r.nActual + ' vehículos' + (Math.abs(r.pagado - r.anual) > 1 ? ' · pagado ' + segMoney_(r.pagado) : '') + '</div></div>'
+    + '<div class="seg-tarjeta"><div class="n">' + segMoney_(r.nueva) + '</div><div class="t">Cotización</div><div class="s">' + r.nCot + ' vehículos' + (r.netaNueva ? ' · neta ' + segMoney_(r.netaNueva) : '') + '</div></div>'
+    + '<div class="seg-tarjeta ' + (dif > 0 ? 'rojo' : 'verde') + '"><div class="n">' + segCmpDif_(dif) + '</div><div class="t">Diferencia</div><div class="s">' + segCmpPctTxt_(segCmpPct_(r.anual, r.nueva)) + ' contra el costo anual' + (Math.abs(r.pagado - r.anual) > 1 ? '<br>' + segCmpDif_(difPag) + ' (' + segCmpPctTxt_(segCmpPct_(r.pagado, r.nueva)) + ') contra lo pagado' : '') + '</div></div>'
+    + '<div class="seg-tarjeta"><div class="n">' + segCmpPctTxt_(segCmpPct_(r.sigAnual, r.sigNueva)) + '</div><div class="t">Mismos vehículos</div><div class="s">' + r.sig + ' vehículos: ' + segCmpDif_(r.sigNueva - r.sigAnual) + '</div></div>'
+    + '</div>';
+  // ¿En qué aumentó?
+  const filaE = function(txt, monto, sub){ return '<tr><td>' + txt + (sub ? '<div class="seg-sub">' + sub + '</div>' : '') + '</td><td class="num">' + segCmpDif_(monto) + '</td><td class="num">' + (r.anual ? segCmpPctTxt_(monto / r.anual * 100) : '—') + '</td></tr>'; };
+  h += '<div class="seg-cmp-sec">¿En qué cambia?</div><div class="table-wrap"><table class="seg-cmp-tabla"><thead><tr><th>Concepto</th><th class="num">Monto</th><th class="num">% del costo actual</th></tr></thead><tbody>'
+    + '<tr><td>Costo actual (anual)</td><td class="num">' + segMoney_(r.anual) + '</td><td></td></tr>'
+    + filaE('Mismos vehículos que suben de precio (' + r.sube + ')', r.subeMonto)
+    + filaE('Mismos vehículos que bajan de precio (' + r.baja + ')', r.bajaMonto, r.igual ? r.igual + ' quedan igual' : '')
+    + filaE('Vehículos nuevos en la cotización (' + r.nue + ')', r.nueMonto, 'No están en las pólizas actuales')
+    + filaE('Vehículos que ya no vienen en la cotización (' + r.sal + ')', -r.salMonto, 'Están en las pólizas actuales')
+    + '<tr class="total"><td>Cotización</td><td class="num">' + segMoney_(r.nueva) + '</td><td class="num">' + segCmpPctTxt_(segCmpPct_(r.anual, r.nueva)) + '</td></tr>'
+    + '</tbody></table></div>';
+  if(r.prorrateadas) h += '<div class="seg-cmp-nota">* ' + r.prorrateadas + ' vehículo(s) se dieron de alta a medio año (endoso) y se pagaron por menos días. Para comparar parejo se anualiza su prima: "Actual (anual)". Lo que de verdad se pagó este año: ' + segMoney_(r.pagado) + '.</div>';
+  if(r.sinPrima) h += '<div class="seg-cmp-nota" style="color:var(--amber);">' + r.sinPrima + ' vehículo(s) actuales no tienen prima registrada: cuentan como $0. Captúrala en la póliza (o impórtala del PDF).</div>';
+  if(r.estimadas) h += '<div class="seg-cmp-nota">' + r.estimadas + ' vehículo(s) sin prima propia: se repartió la prima total de su póliza entre sus vehículos.</div>';
+  h += '<div class="seg-cmp-sec">Por tipo de unidad</div>' + segCmpTablaGrupos_('Tipo de unidad', segCmpGrupos_(filas, function(f){ return f.tipoUnidad || (f.codigoUnidad ? 'Sin tipo' : 'No está en Maquinaria'); }));
+  h += '<div class="seg-cmp-sec">Por empresa</div>' + segCmpTablaGrupos_('Empresa', segCmpGrupos_(filas, function(f){ return f.empresa || f.polizaEmpresa || 'Sin empresa'; }));
+  // Coberturas
+  if(c.cotizacion.coberturas && c.cotizacion.coberturas.length){
+    const ded = Array.from(new Set(pols.map(function(p){ return p.deducible; }).filter(Boolean)));
+    const busca = function(t, clave){ const x = t.coberturas.find(function(k){ return k.clave === clave; }); return x ? x : null; };
+    h += '<div class="seg-cmp-sec">Coberturas de la cotización</div><div class="seg-cmp-nota">Pólizas actuales: ' + (ded.length ? escapeHtml(ded.join(' · ')) : 'sin deducibles registrados') + '. Revisa que la cotización mantenga lo mismo.</div>'
+      + '<div class="table-wrap"><table class="seg-cmp-tabla"><thead><tr><th>Tipo de vehículo</th><th>Daños materiales</th><th>Robo total</th><th>RC terceros</th><th>Gastos médicos</th><th>Otras</th></tr></thead><tbody>'
+      + c.cotizacion.coberturas.map(function(t){
+        const dm = busca(t, 'A001'), rt = busca(t, 'A004'), rc = busca(t, 'A005'), gm = busca(t, 'A006');
+        const otras = t.coberturas.filter(function(k){ return ['A001', 'A004', 'A005', 'A006'].indexOf(k.clave) === -1; }).map(function(k){ return k.nombre.toLowerCase(); });
+        return '<tr><td>' + escapeHtml(t.tipo) + '</td><td>' + (dm ? 'ded. ' + escapeHtml(dm.deducible) : '—') + '</td><td>' + (rt ? 'ded. ' + escapeHtml(rt.deducible) : '—') + '</td><td>' + (rc ? '$' + escapeHtml(rc.suma) : '—') + '</td><td>' + (gm ? '$' + escapeHtml(gm.suma) : '—') + '</td><td class="seg-sub">' + escapeHtml(otras.join(', ')) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  // Detalle
+  const cuenta = { todos: filas.length, sube: 0, baja: 0, igual: 0, nuevo: 0, sale: 0 };
+  filas.forEach(function(f){ const d = segCmpDifFila_(f); if(f.estado === 'nuevo') cuenta.nuevo++; else if(f.estado === 'sale') cuenta.sale++; else if(d > 0.5) cuenta.sube++; else if(d < -0.5) cuenta.baja++; else cuenta.igual++; });
+  const chips = [['todos', 'Todos'], ['sube', 'Suben'], ['baja', 'Bajan'], ['igual', 'Igual'], ['nuevo', 'Nuevos'], ['sale', 'Ya no vienen']];
+  h += '<div class="seg-cmp-sec">Vehículo por vehículo</div><div class="seg-cmp-chips">' + chips.map(function(x){ return '<button type="button" class="seg-cmp-chip' + (SEG_CMP_FILTRO === x[0] ? ' activo' : '') + '" data-f="' + x[0] + '">' + x[1] + ' (' + cuenta[x[0]] + ')</button>'; }).join('') + '</div>';
+  const det = filas.filter(function(f){
+    if(SEG_CMP_FILTRO === 'todos') return true;
+    if(SEG_CMP_FILTRO === 'nuevo' || SEG_CMP_FILTRO === 'sale') return f.estado === SEG_CMP_FILTRO;
+    if(f.estado !== 'sigue') return false;
+    const d = segCmpDifFila_(f);
+    return SEG_CMP_FILTRO === 'sube' ? d > 0.5 : SEG_CMP_FILTRO === 'baja' ? d < -0.5 : Math.abs(d) <= 0.5;
+  }).sort(function(a, b){ return Math.abs(segCmpDifFila_(b) || 0) - Math.abs(segCmpDifFila_(a) || 0); });
+  const est = { sigue: '', nuevo: '<span class="seg-badge vigente">Nuevo</span> ', sale: '<span class="seg-badge vencida">Ya no viene</span> ' };
+  h += '<div class="table-wrap"><table class="seg-cmp-tabla"><thead><tr><th>Vehículo</th><th>Serie</th><th>Empresa / segmento</th><th>Póliza actual</th><th class="num">Actual (anual)</th><th class="num">Cotización</th><th class="num">Diferencia</th><th class="num">%</th><th class="num">Eq. especial</th></tr></thead><tbody>'
+    + (det.length ? det.map(function(f){
+      const d = segCmpDifFila_(f);
+      return '<tr><td>' + est[f.estado] + '<b>' + escapeHtml(f.codigoUnidad || '—') + '</b><div class="seg-sub">' + escapeHtml([f.descripcion, f.modelo].filter(Boolean).join(' ')) + '</div></td>'
+        + '<td class="seg-sub">' + escapeHtml(f.serie || '') + '</td>'
+        + '<td>' + escapeHtml(f.empresa || f.polizaEmpresa || '—') + (f.segmento ? '<div class="seg-sub">Segmento ' + escapeHtml(f.segmento) + '</div>' : '') + '</td>'
+        + '<td>' + (f.numeroPoliza ? escapeHtml(f.numeroPoliza) + (f.inciso ? ' <span class="seg-sub">inc. ' + escapeHtml(f.inciso) + '</span>' : '') : '—') + '</td>'
+        + '<td class="num">' + (f.estado === 'nuevo' ? '—' : segMoney_(f.primaActualAnual) + (f.prorrateada ? '<div class="seg-sub">pagó ' + segMoney_(f.primaActual) + ' desde ' + segFechaTxt_(f.altaActual) + '</div>' : '') + (f.estimada ? '<div class="seg-sub">estimada</div>' : '')) + '</td>'
+        + '<td class="num">' + (f.estado === 'sale' ? '—' : segMoney_(f.primaNueva)) + '</td>'
+        + '<td class="num">' + segCmpDif_(d) + '</td><td class="num">' + (f.estado === 'sigue' ? segCmpPctTxt_(segCmpPct_(f.primaActualAnual, f.primaNueva)) : '') + '</td>'
+        + '<td class="num">' + (f.equipoEspecial ? segMoney_(f.equipoEspecial) : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-dim);padding:16px;">Nada que mostrar con estos filtros.</td></tr>')
+    + '</tbody></table></div>';
+  cuerpo.innerHTML = h;
+  cuerpo.querySelectorAll('.seg-cmp-chip').forEach(function(b){ b.addEventListener('click', function(){ SEG_CMP_FILTRO = b.dataset.f; segCmpRender_(); }); });
+}
+document.getElementById('seg-cmp-sel').addEventListener('change', function(){ if(this.value) segCmpCargar_(Number(this.value)); });
+document.getElementById('seg-cmp-cargar').addEventListener('click', function(){ const i = document.getElementById('seg-cmp-archivo'); i.value = ''; i.click(); });
+document.getElementById('seg-cmp-archivo').addEventListener('change', async function(){
+  const file = this.files && this.files[0];
+  if(!file) return;
+  if(!window.CatalogoPartes || !window.PolizasParser){ segCmpStatus_('No se pudo cargar el lector de PDF. Recarga la página.', true); return; }
+  try {
+    const r = await window.CatalogoPartes.leerPdf(file, function(t){ segCmpStatus_('Leyendo ' + file.name + ': ' + t); });
+    const cot = window.PolizasParser.leerCotizacion(r.paginas);
+    if(!cot){ segCmpStatus_('No reconocí una cotización de flotilla en ese PDF (por ahora se lee la cotización de autos de Seguros Banorte).', true); return; }
+    const suma = cot.vehiculos.reduce(function(a, v){ return a + v.primaTotal; }, 0);
+    let aviso = '';
+    if(cot.vehiculosDeclarados && cot.vehiculosDeclarados !== cot.vehiculos.length) aviso += ' Ojo: la cotización dice ' + cot.vehiculosDeclarados + ' vehículos y se leyeron ' + cot.vehiculos.length + '.';
+    if(cot.primaTotal && Math.abs(cot.primaTotal - suma) > 5) aviso += ' Ojo: la suma por vehículo (' + segMoney_(suma) + ') no cuadra con el total (' + segMoney_(cot.primaTotal) + ').';
+    if(!confirm('Cotización ' + (cot.folio || '') + ': ' + cot.vehiculos.length + ' vehículos, prima total ' + segMoney_(cot.primaTotal || suma) + ', vigencia ' + segFechaTxt_(cot.vigenciaInicio) + ' – ' + segFechaTxt_(cot.vigenciaFin) + '.' + aviso + '\n\n¿Guardarla y compararla contra las pólizas actuales?')){ segCmpStatus_(''); return; }
+    segCmpStatus_('Guardando...');
+    const pdf = await segLeerDataUrl_(file);
+    const res = await new Promise(function(ok, mal){ google.script.run.withSuccessHandler(ok).withFailureHandler(mal).guardarCotizacionSeguro(ACCESS_CODE, PANEL_USUARIO, { cotizacion: cot, pdf: pdf, archivo: file.name }); });
+    if(!res || !res.success){ segCmpStatus_((res && res.error) || 'No se pudo guardar la cotización.', true); return; }
+    SEG_CMP_FILTRO = 'todos';
+    segCmpCargar_(res.id);
+  } catch(e){ segCmpStatus_('No se pudo leer el PDF: ' + (e && e.message ? e.message : e), true); }
+});
+document.getElementById('seg-cmp-eliminar').addEventListener('click', function(){
+  const c = SEG_CMP && SEG_CMP.comparativo; if(!c) return;
+  if(!confirm('¿Eliminar la cotización ' + c.cotizacion.folio + '?')) return;
+  google.script.run.withSuccessHandler(function(r){ if(!r || !r.success){ alert((r && r.error) || 'No se pudo.'); return; } segCmpCargar_(null); })
+    .withFailureHandler(function(){ alert('No se pudo.'); }).eliminarCotizacionSeguro(ACCESS_CODE, PANEL_USUARIO, c.cotizacion.id);
+});
+document.getElementById('seg-cmp-excel').addEventListener('click', function(){
+  const c = SEG_CMP && SEG_CMP.comparativo; if(!c) return;
+  const filas = segCmpFilas_(), r = segCmpResumen_(filas);
+  const EST = { sigue: 'Sigue', nuevo: 'Nuevo', sale: 'Ya no viene' };
+  const det = filas.map(function(f){ const d = segCmpDifFila_(f); return { estado: EST[f.estado], unidad: f.codigoUnidad, desc: [f.descripcion, f.modelo].filter(Boolean).join(' '), serie: f.serie, empresa: f.empresa || f.polizaEmpresa, segmento: f.segmento, tipo: f.tipoUnidad,
+    poliza: f.numeroPoliza, inciso: f.inciso, pagado: f.primaActual, anual: f.primaActualAnual, nueva: f.primaNueva, dif: d, pct: f.estado === 'sigue' && f.primaActualAnual ? Math.round((f.primaNueva - f.primaActualAnual) / f.primaActualAnual * 1000) / 10 : null, equipo: f.equipoEspecial }; });
+  const colsG = [{ header: 'Grupo', key: 'k', width: 34 }, { header: 'Vehíc. actual', key: 'nAct', width: 12 }, { header: 'Vehíc. cotizados', key: 'nCot', width: 14 }, { header: 'Actual (anual)', key: 'act', width: 16 }, { header: 'Cotización', key: 'cot', width: 16 }, { header: 'Diferencia', key: 'dif', width: 16 }];
+  const g = function(l){ return l.map(function(x){ return { k: x.k, nAct: x.nAct, nCot: x.nCot, act: Math.round(x.act * 100) / 100, cot: Math.round(x.cot * 100) / 100, dif: Math.round((x.cot - x.act) * 100) / 100 }; }); };
+  descargarComoExcel_('Seguros - Comparativo ' + (c.cotizacion.aseguradora || '') + ' ' + c.cotizacion.folio,
+    'Actual (anual) ' + segMoney_(r.anual) + ' · Cotización ' + segMoney_(r.nueva) + ' · Diferencia ' + segMoney_(r.nueva - r.anual) + (r.anual ? ' (' + ((r.nueva - r.anual) / r.anual * 100).toFixed(1) + '%)' : ''),
+    [
+      { titulo: '¿En qué cambia?', columnas: [{ header: 'Concepto', key: 'c', width: 52 }, { header: 'Monto', key: 'm', width: 16 }], filas: [
+        { c: 'Costo actual (anual)', m: Math.round(r.anual * 100) / 100 }, { c: 'Mismos vehículos que suben (' + r.sube + ')', m: Math.round(r.subeMonto * 100) / 100 }, { c: 'Mismos vehículos que bajan (' + r.baja + ')', m: Math.round(r.bajaMonto * 100) / 100 },
+        { c: 'Vehículos nuevos (' + r.nue + ')', m: Math.round(r.nueMonto * 100) / 100 }, { c: 'Vehículos que ya no vienen (' + r.sal + ')', m: -Math.round(r.salMonto * 100) / 100 }, { c: 'Cotización', m: Math.round(r.nueva * 100) / 100 }] },
+      { titulo: 'Por tipo de unidad', columnas: colsG, filas: g(segCmpGrupos_(filas, function(f){ return f.tipoUnidad || (f.codigoUnidad ? 'Sin tipo' : 'No está en Maquinaria'); })) },
+      { titulo: 'Por empresa', columnas: colsG, filas: g(segCmpGrupos_(filas, function(f){ return f.empresa || f.polizaEmpresa || 'Sin empresa'; })) },
+      { titulo: 'Vehículo por vehículo', autoFiltro: true, columnas: [{ header: 'Estado', key: 'estado', width: 12 }, { header: 'Unidad', key: 'unidad', width: 14 }, { header: 'Descripción', key: 'desc', width: 40 }, { header: 'Serie', key: 'serie', width: 20 },
+        { header: 'Empresa', key: 'empresa', width: 26 }, { header: 'Segmento', key: 'segmento', width: 10 }, { header: 'Tipo', key: 'tipo', width: 16 }, { header: 'Póliza actual', key: 'poliza', width: 12 }, { header: 'Inciso', key: 'inciso', width: 8 },
+        { header: 'Pagado', key: 'pagado', width: 14 }, { header: 'Actual (anual)', key: 'anual', width: 14 }, { header: 'Cotización', key: 'nueva', width: 14 }, { header: 'Diferencia', key: 'dif', width: 14 }, { header: '%', key: 'pct', width: 8 }, { header: 'Eq. especial', key: 'equipo', width: 14 }], filas: det },
+    ], 'seguros_comparativo_' + (c.cotizacion.folio || c.cotizacion.id));
+});
 
 // ---------- Eventos ----------
 document.querySelectorAll('.seg-subtab').forEach(function(b){

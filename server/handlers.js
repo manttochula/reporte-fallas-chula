@@ -13656,6 +13656,127 @@ async function eliminarSiniestroSeguro(code, nombreUsuario, id) {
   return { success: true };
 }
 
+// ---- Comparativo: cotización de renovación vs pólizas actuales (nov-2026) ----
+const normSerie_ = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function diasEntre_(a, b) { const pa = String(a).split('-').map(Number), pb = String(b).split('-').map(Number); return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000); }
+// datos: { cotizacion (de PolizasParser.leerCotizacion), pdf (data URL, opcional), archivo }
+async function guardarCotizacionSeguro(code, nombreUsuario, datos) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const c = (datos && datos.cotizacion) || {};
+  const vehs = (Array.isArray(c.vehiculos) ? c.vehiculos : []).slice(0, 2000).map((v) => ({
+    numero: Number(v.numero) || null, clave: segTexto_(v.clave, 20), descripcion: segTexto_(v.descripcion, 255), modelo: segTexto_(v.modelo, 10), uso: segTexto_(v.uso, 60),
+    serie: normSerie_(v.serie).slice(0, 30), equipoEspecial: segNum_(v.equipoEspecial), primaNeta: segNum_(v.primaNeta), primaTotal: segNum_(v.primaTotal),
+    paquete: segTexto_(v.paquete, 20), tipoCarga: segTexto_(v.tipoCarga, 20), valor: segTexto_(v.valor, 60), nivel: Number(v.nivel) || null }));
+  if (!vehs.length) return { success: false, error: 'La cotización no trae vehículos.' };
+  if (vehs.some((v) => v.primaTotal === null)) return { success: false, error: 'Hay vehículos sin prima total en la cotización.' };
+  let pdfUrl = null;
+  if (datos.pdf) {
+    if (!/^data:application\/pdf;base64,/.test(datos.pdf)) return { success: false, error: 'El archivo debe ser PDF.' };
+    pdfUrl = await guardarArchivo_(datos.pdf);
+  }
+  const suma = (k) => Math.round(vehs.reduce((a, v) => a + (v[k] || 0), 0) * 100) / 100;
+  const [r] = await pool.query(
+    `INSERT INTO seguros_cotizaciones (aseguradora, folio, cliente, vigencia_inicio, vigencia_fin, vehiculos, prima_neta, derechos, prima_total, datos, pdf_url, archivo, creado_por)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [segTexto_(c.aseguradora, 150) || null, segTexto_(c.folio, 50) || null, segTexto_(c.cliente, 255) || null, segFecha_(c.vigenciaInicio), segFecha_(c.vigenciaFin), vehs.length,
+      segNum_(c.primaNeta) !== null ? segNum_(c.primaNeta) : suma('primaNeta'), segNum_(c.derechos), segNum_(c.primaTotal) !== null ? segNum_(c.primaTotal) : suma('primaTotal'),
+      JSON.stringify({ vehiculos: vehs, coberturas: Array.isArray(c.coberturas) ? c.coberturas.slice(0, 40) : [], agente: segTexto_(c.agente, 150), formaPago: segTexto_(c.formaPago, 40), iva: segNum_(c.iva) }),
+      pdfUrl, segTexto_(datos.archivo, 255) || null, segTexto_(nombreUsuario, 255)]);
+  await registrarAuditoria_('seguros_cotizaciones', r.insertId, 'crear', nombreUsuario, 'Cotización ' + (c.folio || '') + ' (' + vehs.length + ' vehículos)');
+  return { success: true, id: r.insertId };
+}
+async function eliminarCotizacionSeguro(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const [r] = await pool.query('UPDATE seguros_cotizaciones SET eliminado = 1 WHERE id = ? AND eliminado = 0', [Number(id) || 0]);
+  if (!r.affectedRows) return { success: false, error: 'La cotización ya no existe.' };
+  await registrarAuditoria_('seguros_cotizaciones', id, 'eliminar', nombreUsuario, '');
+  return { success: true };
+}
+// Lista de cotizaciones y, si se pide una (o la más reciente), su comparativo.
+async function getComparativoSeguro(code, nombreUsuario, id) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'visualizar');
+  const [lista] = await pool.query(
+    `SELECT id, aseguradora, folio, cliente, DATE_FORMAT(vigencia_inicio, '%Y-%m-%d') AS ini, DATE_FORMAT(vigencia_fin, '%Y-%m-%d') AS fin, vehiculos, prima_total, archivo, creado_por, creado_en
+       FROM seguros_cotizaciones WHERE eliminado = 0 ORDER BY creado_en DESC, id DESC`);
+  const cotizaciones = lista.map((x) => ({ id: x.id, aseguradora: x.aseguradora || '', folio: x.folio || '', cliente: x.cliente || '', vigenciaInicio: x.ini, vigenciaFin: x.fin,
+    vehiculos: x.vehiculos, primaTotal: x.prima_total === null ? null : Number(x.prima_total), archivo: x.archivo || '', creadoPor: x.creado_por || '', creadoEn: isoOrNull(x.creado_en) }));
+  const elegida = id ? lista.find((x) => x.id === Number(id)) : lista[0];
+  if (!elegida) return { success: true, cotizaciones, comparativo: null };
+  const [[row]] = await pool.query('SELECT * FROM seguros_cotizaciones WHERE id = ?', [elegida.id]);
+  let datos = {}; try { datos = JSON.parse(row.datos || '{}'); } catch (e) { datos = {}; }
+  const cotIni = fechaSoloOrNull(row.vigencia_inicio) || fechaMexico_();
+  // Pólizas "actuales": las que están vigentes el día antes de que empiece la cotización.
+  const [pols] = await pool.query(
+    `SELECT p.id, p.aseguradora, p.numero_poliza, p.empresa_id, e.nombre AS empresa, DATE_FORMAT(p.vigencia_inicio, '%Y-%m-%d') AS ini, DATE_FORMAT(p.vigencia_fin, '%Y-%m-%d') AS fin, p.prima_total, p.deducible
+       FROM seguros_polizas p LEFT JOIN empresas e ON e.id = p.empresa_id
+      WHERE p.eliminado = 0 AND p.cancelada = 0 AND p.vigencia_inicio < ? AND p.vigencia_fin >= DATE_SUB(?, INTERVAL 15 DAY)
+      ORDER BY p.numero_poliza`, [cotIni, cotIni]);
+  const ids = pols.map((p) => p.id);
+  const [unis] = ids.length ? await pool.query(
+    `SELECT u.poliza_id, u.codigo_unidad, u.inciso, u.prima, DATE_FORMAT(u.alta, '%Y-%m-%d') AS alta, u.serie_poliza, u.descripcion_poliza
+       FROM seguros_poliza_unidades u WHERE u.poliza_id IN (?) AND u.baja_fecha IS NULL`, [ids]) : [[]];
+  const [maq] = await pool.query(
+    `SELECT m.codigo_unidad, m.unidad, m.tipo_unidad, m.serie, m.empresa_id, e.nombre AS empresa, m.segmento, m.huerta_contable
+       FROM maquinaria m LEFT JOIN empresas e ON e.id = m.empresa_id`);
+  const maqPorCod = new Map(maq.map((m) => [m.codigo_unidad, m]));
+  const maqPorSerie = new Map();
+  maq.forEach((m) => { const s = normSerie_(m.serie); if (s.length >= 8) maqPorSerie.set(s, m); });
+  const porUltimos8 = (s) => { const f = maq.filter((m) => { const x = normSerie_(m.serie); return x.length >= 8 && s.length >= 8 && x.slice(-8) === s.slice(-8); }); return f.length === 1 ? f[0] : null; };
+  const polPorId = new Map(pols.map((p) => [p.id, p]));
+  // Prima anual de cada unidad actual (los endosos se pagaron por menos días: se anualizan)
+  const actuales = unis.map((u) => {
+    const p = polPorId.get(u.poliza_id);
+    const m = maqPorCod.get(u.codigo_unidad) || null;
+    const delaPol = unis.filter((x) => x.poliza_id === u.poliza_id);
+    let prima = u.prima === null ? null : Number(u.prima), estimada = false;
+    if (prima === null && p.prima_total !== null && delaPol.every((x) => x.prima === null)) { prima = Number(p.prima_total) / delaPol.length; estimada = true; }
+    const diasPol = diasEntre_(p.ini, p.fin) || 365;
+    const desde = u.alta && u.alta > p.ini ? u.alta : p.ini;
+    const dias = diasEntre_(desde, p.fin);
+    const prorrateada = prima !== null && dias > 0 && dias < diasPol - 10;
+    const anual = prima === null ? null : (prorrateada ? Math.round(prima * diasPol / dias * 100) / 100 : prima);
+    return { u, p, m, serie: normSerie_(u.serie_poliza) || normSerie_(m && m.serie), prima, anual, prorrateada, estimada, desde };
+  });
+  const usados = new Set();
+  const filas = [];
+  const datosMaq = (m) => m ? { codigoUnidad: m.codigo_unidad, unidad: m.unidad || '', tipoUnidad: m.tipo_unidad || '', empresaId: m.empresa_id || null, empresa: (m.empresa || '').split(',')[0].trim(),
+    segmento: (m.segmento || '').trim(), huerta: (m.huerta_contable || '').trim() } : { codigoUnidad: '', unidad: '', tipoUnidad: '', empresaId: null, empresa: '', segmento: '', huerta: '' };
+  (datos.vehiculos || []).forEach((v) => {
+    const s = normSerie_(v.serie);
+    let a = actuales.find((x, i) => !usados.has(i) && x.serie && x.serie === s);
+    if (!a && s.length >= 8) { const c = actuales.filter((x, i) => !usados.has(i) && x.serie && x.serie.slice(-8) === s.slice(-8)); if (c.length === 1) a = c[0]; }
+    if (a) usados.add(actuales.indexOf(a));
+    const m = a && a.m ? a.m : (maqPorSerie.get(s) || porUltimos8(s));
+    filas.push(Object.assign(datosMaq(m), {
+      estado: a ? 'sigue' : 'nuevo', serie: v.serie, descripcion: v.descripcion, modelo: v.modelo, uso: v.uso,
+      polizaId: a ? a.p.id : null, numeroPoliza: a ? a.p.numero_poliza : '', polizaEmpresa: a ? (a.p.empresa || '').split(',')[0].trim() : '', inciso: a ? (a.u.inciso || '') : '',
+      primaActual: a ? a.prima : null, primaActualAnual: a ? a.anual : null, prorrateada: !!(a && a.prorrateada), estimada: !!(a && a.estimada), altaActual: a && a.prorrateada ? a.desde : null,
+      primaNueva: v.primaTotal, netaNueva: v.primaNeta, equipoEspecial: v.equipoEspecial, valor: v.valor, nivel: v.nivel, numeroCot: v.numero,
+    }));
+  });
+  actuales.forEach((a, i) => {
+    if (usados.has(i)) return;
+    filas.push(Object.assign(datosMaq(a.m), {
+      estado: 'sale', serie: a.serie, descripcion: a.u.descripcion_poliza || (a.m ? a.m.unidad : ''), modelo: '', uso: '',
+      polizaId: a.p.id, numeroPoliza: a.p.numero_poliza, polizaEmpresa: (a.p.empresa || '').split(',')[0].trim(), inciso: a.u.inciso || '',
+      primaActual: a.prima, primaActualAnual: a.anual, prorrateada: a.prorrateada, estimada: a.estimada, altaActual: a.prorrateada ? a.desde : null,
+      primaNueva: null, netaNueva: null, equipoEspecial: null, valor: '', nivel: null, numeroCot: null,
+    }));
+  });
+  return {
+    success: true, cotizaciones,
+    comparativo: {
+      cotizacion: { id: row.id, aseguradora: row.aseguradora || '', folio: row.folio || '', cliente: row.cliente || '', vigenciaInicio: fechaSoloOrNull(row.vigencia_inicio), vigenciaFin: fechaSoloOrNull(row.vigencia_fin),
+        vehiculos: row.vehiculos, primaNeta: row.prima_neta === null ? null : Number(row.prima_neta), derechos: row.derechos === null ? null : Number(row.derechos),
+        primaTotal: row.prima_total === null ? null : Number(row.prima_total), pdfUrl: row.pdf_url || '', archivo: row.archivo || '', agente: datos.agente || '', formaPago: datos.formaPago || '',
+        coberturas: datos.coberturas || [] },
+      polizasActuales: pols.map((p) => ({ id: p.id, aseguradora: p.aseguradora, numeroPoliza: p.numero_poliza, empresa: (p.empresa || '').split(',')[0].trim(), vigenciaInicio: p.ini, vigenciaFin: p.fin,
+        primaTotal: p.prima_total === null ? null : Number(p.prima_total), deducible: p.deducible || '', unidades: unis.filter((u) => u.poliza_id === p.id).length })),
+      filas,
+    },
+  };
+}
+
 // Avisos por Telegram (una vez cada uno, guardado en seguros_avisos):
 //  - póliza: 30 y 7 días antes de vencer y el día que vence
 //  - pago pendiente: 7 días antes y el día
@@ -13756,7 +13877,7 @@ module.exports = {
   eliminarPolizaSeguro,
   marcarPagoSeguro,
   guardarSiniestroSeguro,
-  eliminarSiniestroSeguro,
+  eliminarSiniestroSeguro, guardarCotizacionSeguro, eliminarCotizacionSeguro, getComparativoSeguro,
   getVerificaciones,
   guardarVerificacion,
   eliminarVerificacion,

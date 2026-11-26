@@ -4095,3 +4095,28 @@ CREATE TABLE IF NOT EXISTS gps_avisos_enviados (
   clave      VARCHAR(255) NOT NULL PRIMARY KEY,
   enviado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Seguros → Comparativo (nov-2026, Carlos): cotizaciones de renovación
+-- (PDF de la aseguradora, leído en el Panel) para compararlas contra las
+-- pólizas actuales: cuánto aumenta y en qué (mismos vehículos, altas, bajas).
+-- datos = JSON { vehiculos: [...], coberturas: [...], agente, formaPago, ... }.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS seguros_cotizaciones (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  aseguradora     VARCHAR(150) DEFAULT NULL,
+  folio           VARCHAR(50)  DEFAULT NULL,
+  cliente         VARCHAR(255) DEFAULT NULL,
+  vigencia_inicio DATE         DEFAULT NULL,
+  vigencia_fin    DATE         DEFAULT NULL,
+  vehiculos       INT          DEFAULT NULL,
+  prima_neta      DECIMAL(14,2) DEFAULT NULL,
+  derechos        DECIMAL(14,2) DEFAULT NULL,
+  prima_total     DECIMAL(14,2) DEFAULT NULL,
+  datos           LONGTEXT     DEFAULT NULL,
+  pdf_url         TEXT         DEFAULT NULL,
+  archivo         VARCHAR(255) DEFAULT NULL,
+  eliminado       TINYINT(1)   NOT NULL DEFAULT 0,
+  creado_por      VARCHAR(255) DEFAULT NULL,
+  creado_en       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

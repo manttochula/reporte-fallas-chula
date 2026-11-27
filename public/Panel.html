@@ -1035,6 +1035,11 @@
   tr.seg-imp-amarillo td, tr.seg-imp-amarillo:hover td{ background:#fff8e1; }
   .seg-sec{ font-family:'Oswald',sans-serif; font-size:15px; margin:16px 0 8px; border-bottom:1px solid #e3e3e3; padding-bottom:4px; }
   table.seg-mini{ width:100%; min-width:0; border-collapse:collapse; font-size:13px; table-layout:fixed; }
+  /* Órdenes eliminadas (modal claro) */
+  .oel-tabla td{ color:#1c1c1c; background:#fff; vertical-align:top; overflow-wrap:anywhere; font-size:12.5px; }
+  .oel-tabla thead th{ position:sticky; top:0; background:#f4f4f4; z-index:1; }
+  .oel-tabla .oel-sub{ display:block; font-size:11px; color:#777; }
+  .oel-tabla .row-view{ color:#1c1c1c; border-color:#999; background:#fff; }
   .seg-mini th{ text-align:left; font-size:11px; color:#666; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid #ddd; }
   .seg-mini td{ padding:4px 6px; border-bottom:1px solid #eee; vertical-align:middle; }
   .seg-mini td input, .seg-mini td input[type=date]{ width:100%; min-width:0; border:1px solid #ccc; border-radius:4px; padding:6px 7px; font-size:13px; box-sizing:border-box; background:#fff; color:#1c1c1c; color-scheme:light; }
@@ -4668,7 +4673,8 @@
         <div class="mnt-subtext" style="margin-bottom:8px;">Cada orden que se elimina queda aquí con quién, cuándo y el motivo. Las que tienen copia se pueden <b>Restaurar</b> (regresa con sus datos, fotos y su servicio preventivo). Las eliminadas antes del 27/nov/2026 solo tienen el registro (sin copia).</div>
         <div class="toolbar" style="margin-bottom:6px;"><input type="text" id="oel-buscar" placeholder="Buscar por orden, unidad, descripción o quién la eliminó..." style="flex:1;"></div>
         <div class="maq-modal-status" id="oel-status"></div>
-        <div class="table-wrap" style="max-height:60vh;overflow:auto;"><table><thead><tr><th>Orden</th><th>Unidad</th><th>Descripción</th><th>Eliminó</th><th>Cuándo</th><th>Motivo</th><th></th></tr></thead><tbody id="oel-tbody"></tbody></table></div>
+        <div style="max-height:60vh;overflow:auto;border:1px solid #ddd;border-radius:6px;"><table class="seg-mini oel-tabla"><colgroup><col style="width:95px;"><col style="width:170px;"><col><col style="width:110px;"><col style="width:165px;"><col style="width:180px;"><col style="width:120px;"></colgroup>
+          <thead><tr><th>Orden</th><th>Unidad</th><th>Descripción</th><th>Eliminó</th><th>Cuándo</th><th>Motivo</th><th></th></tr></thead><tbody id="oel-tbody"></tbody></table></div>
       </div>
     </div>
 
@@ -14836,13 +14842,13 @@ function oelPintar_(){
   const lista = OEL_DATOS.filter(function(o){ return !q || [o.orden, o.unidad, o.descripcion, o.eliminadoPor, o.motivo, o.huerta].join(' ').toLowerCase().indexOf(q) !== -1; });
   tb.innerHTML = lista.length ? lista.map(function(o){
     let acc = '';
-    if(o.restauradoEn) acc = '<span class="mnt-subtext" style="display:inline;">Restaurada por ' + escapeHtml(o.restauradoPor) + ' el ' + escapeHtml(new Date(o.restauradoEn).toLocaleString('es-MX')) + '</span>';
-    else if(!o.copia) acc = '<span class="mnt-subtext" style="display:inline;">sin copia</span>';
-    else if(o.existe) acc = '<span class="mnt-subtext" style="display:inline;">ya existe otra con ese folio</span>';
+    if(o.restauradoEn) acc = '<span class="oel-sub" style="color:#2e7d32;">Restaurada por ' + escapeHtml(o.restauradoPor) + ' el ' + escapeHtml(new Date(o.restauradoEn).toLocaleString('es-MX')) + '</span>';
+    else if(!o.copia) acc = '<span class="oel-sub">sin copia</span>';
+    else if(o.existe) acc = '<span class="oel-sub">ya existe otra con ese folio</span>';
     else if(puedeCapturarPestana(OEL_SECCION_[o.seccion] || 'ordenes')) acc = '<button type="button" class="row-view oel-restaurar" data-id="' + o.id + '">Restaurar</button>';
-    return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad || '—') + (o.huerta ? '<div class="mnt-subtext">' + escapeHtml(o.huerta) + '</div>' : '') + '</td><td>' + escapeHtml(o.descripcion || '—') + '</td>'
+    return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad || '—') + (o.huerta ? '<span class="oel-sub">' + escapeHtml(o.huerta) + '</span>' : '') + '</td><td>' + escapeHtml(o.descripcion || '—') + '</td>'
       + '<td>' + escapeHtml(o.eliminadoPor || '—') + '</td><td style="white-space:nowrap;">' + (o.eliminadoEn ? escapeHtml(new Date(o.eliminadoEn).toLocaleString('es-MX')) : '—') + '</td><td>' + escapeHtml(o.motivo || '—') + '</td><td>' + acc + '</td></tr>';
-  }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:18px;">' + (OEL_DATOS.length ? 'Nada coincide con la búsqueda.' : 'No hay órdenes eliminadas.') + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" style="text-align:center;color:#777;padding:18px;">' + (OEL_DATOS.length ? 'Nada coincide con la búsqueda.' : 'No hay órdenes eliminadas.') + '</td></tr>';
 }
 function oelCargar_(){
   const st = document.getElementById('oel-status');

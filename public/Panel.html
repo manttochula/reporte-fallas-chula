@@ -5157,7 +5157,7 @@
 
     <!-- Operadores de la app (nov-2026): alta simple para reportar fallas y avance de huerta -->
     <div id="pview-operadores" style="display:none;">
-      <div class="mnt-subtext" style="margin-bottom:8px;">Operadores que entran a la app del celular solo a <b>Reportar falla</b> y <b>Avance huerta</b>. Con su nombre y contraseña entran en <b>https://reporte-fallas-chula.onrender.com</b> o en la app. Si le asignas tractores, solo podrá elegir esos.</div>
+      <div class="mnt-subtext" style="margin-bottom:8px;">Operadores que entran a la app del celular a <b>Reportar falla</b>, <b>Avance huerta</b> y, si lo marcas, <b>Cargar diésel</b> (tú eliges qué ve cada uno). Si tiene varias huertas, al cargar diésel la app le pregunta en cuál. Con su nombre y contraseña entran en <b>https://reporte-fallas-chula.onrender.com</b> o en la app. Si le asignas tractores, solo podrá elegir esos.</div>
       <div class="toolbar">
         <input type="text" id="op-buscar" placeholder="Buscar operador, huerta o tractor...">
         <select id="op-f-huerta"><option value="">Todas las huertas</option></select>
@@ -5176,7 +5176,7 @@
           <button type="button" class="export-btn" id="op-apk-publicar">Publicar APK</button>
         </div>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>Operador</th><th>Huerta</th><th>Tractores</th><th>Estado</th><th></th></tr></thead><tbody id="op-tbody"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Operador</th><th>Huerta(s)</th><th>En la app</th><th>Tractores</th><th>Estado</th><th></th></tr></thead><tbody id="op-tbody"></tbody></table></div>
     </div>
 
     <div class="maq-modal-overlay" id="op-overlay">
@@ -5190,7 +5190,12 @@
         </div>
         <div class="maq-field-row">
           <div class="maq-field"><label id="op-pass-label">Contraseña *</label><input type="text" id="op-pass" placeholder="Mínimo 4 caracteres" autocomplete="new-password"></div>
-          <div class="maq-field"><label>Huerta</label><select id="op-huerta"><option value="">—</option></select></div>
+        </div>
+        <div class="maq-field"><label>Huertas <span style="font-weight:400;color:#888;">(la primera que marques es la principal)</span></label>
+          <div id="op-huertas" style="max-height:150px;overflow:auto;border:1px solid #ddd;border-radius:4px;padding:4px 8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));"></div>
+        </div>
+        <div class="maq-field"><label>Qué puede hacer en la app *</label>
+          <div id="op-pestanas" style="display:flex;flex-wrap:wrap;gap:4px 14px;"></div>
         </div>
         <div class="maq-field"><label>Tractores asignados <span style="font-weight:400;color:#888;">(vacío = puede elegir cualquiera)</span></label>
           <input type="text" id="op-tr-buscar" placeholder="Buscar tractor..." style="margin-bottom:4px;">
@@ -11177,11 +11182,22 @@ function opCargar_(){
       const sel = document.getElementById('op-f-huerta'), v = sel.value;
       sel.innerHTML = '<option value="">Todas las huertas</option>' + r.huertas.map(function(h){ return '<option>' + escapeHtml(h) + '</option>'; }).join('');
       sel.value = v;
-      document.getElementById('op-huerta').innerHTML = '<option value="">—</option>' + r.huertas.map(function(h){ return '<option>' + escapeHtml(h) + '</option>'; }).join('');
       opPintar_();
     })
     .withFailureHandler(function(e){ opStatus_((e && e.message) || 'No se pudieron leer los operadores.', true); })
     .getOperadoresApp(ACCESS_CODE, PANEL_USUARIO);
+}
+function opHuertasDe_(o){ return (o.huertas && o.huertas.length) ? o.huertas : (o.huerta ? [o.huerta] : []); }
+function opPestanasDe_(o){ return (o.pestanas && o.pestanas.length) ? o.pestanas : ['form', 'avance']; }
+function opNombrePestana_(id){ const p = ((OP_DATOS && OP_DATOS.pestanasApp) || []).find(function(x){ return x.id === id; }); return p ? p.label : id; }
+let OP_HU_SEL = [];
+function opPintarHuertas_(){
+  const lista = OP_DATOS.huertas.slice();
+  OP_HU_SEL.forEach(function(h){ if(lista.indexOf(h) === -1) lista.push(h); });
+  document.getElementById('op-huertas').innerHTML = lista.map(function(h){
+    const i = OP_HU_SEL.indexOf(h);
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:2px 0;"><input type="checkbox" class="op-hu" value="' + escapeHtml(h) + '"' + (i !== -1 ? ' checked' : '') + ' style="width:auto;"> ' + escapeHtml(h) + (i === 0 ? ' <b style="color:#2e7d32;font-size:11px;">principal</b>' : '') + '</label>';
+  }).join('') || '<div style="color:#888;font-size:12px;">No hay huertas.</div>';
 }
 function opNombreTractor_(c){ const t = OP_DATOS && OP_DATOS.tractores.find(function(x){ return x.codigo === c; }); return t ? t.unidad : c; }
 function opPintar_(){
@@ -11192,15 +11208,15 @@ function opPintar_(){
   document.getElementById('op-nuevo').style.display = puede ? '' : 'none';
   const lista = OP_DATOS.operadores.filter(function(o){
     if(!inact && !o.activo) return false;
-    if(fh && o.huerta !== fh) return false;
-    return !q || [o.nombre, o.nombreCompleto, o.huerta].concat(o.tractores.map(opNombreTractor_)).join(' ').toLowerCase().indexOf(q) !== -1;
+    if(fh && opHuertasDe_(o).indexOf(fh) === -1) return false;
+    return !q || [o.nombre, o.nombreCompleto].concat(opHuertasDe_(o)).concat(o.tractores.map(opNombreTractor_)).join(' ').toLowerCase().indexOf(q) !== -1;
   });
   document.getElementById('op-tbody').innerHTML = lista.length ? lista.map(function(o){
     return '<tr' + (o.activo ? '' : ' style="opacity:.55;"') + '><td><b>' + escapeHtml(o.nombre) + '</b>' + (o.nombreCompleto ? '<div class="mnt-subtext">' + escapeHtml(o.nombreCompleto) + '</div>' : '') + '</td>'
-      + '<td>' + escapeHtml(o.huerta || '—') + '</td><td>' + (o.tractores.length ? escapeHtml(o.tractores.map(opNombreTractor_).join(', ')) : '<span class="mnt-subtext" style="display:inline;">Cualquiera</span>') + '</td>'
+      + '<td>' + escapeHtml(opHuertasDe_(o).join(', ') || '—') + '</td><td style="font-size:12px;">' + escapeHtml(opPestanasDe_(o).map(opNombrePestana_).join(', ')) + '</td><td>' + (o.tractores.length ? escapeHtml(o.tractores.map(opNombreTractor_).join(', ')) : '<span class="mnt-subtext" style="display:inline;">Cualquiera</span>') + '</td>'
       + '<td>' + (o.activo ? '<span class="seg-badge vigente">Activo</span>' : '<span class="seg-badge vencida">Desactivado</span>') + (o.tieneClave ? '' : ' <span class="mnt-subtext" style="display:inline;">sin contraseña</span>') + '</td>'
       + '<td>' + (puede ? '<button type="button" class="row-view op-editar" data-id="' + o.id + '">Editar</button> <button type="button" class="row-view op-activar" data-id="' + o.id + '">' + (o.activo ? 'Desactivar' : 'Activar') + '</button>' : '') + '</td></tr>';
-  }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:20px;">' + (OP_DATOS.operadores.length ? 'Nada coincide con los filtros.' : 'Todavía no hay operadores. Da "+ Nuevo operador".') + '</td></tr>';
+  }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:20px;">' + (OP_DATOS.operadores.length ? 'Nada coincide con los filtros.' : 'Todavía no hay operadores. Da "+ Nuevo operador".') + '</td></tr>';
 }
 function opPintarTractores_(){
   const q = document.getElementById('op-tr-buscar').value.trim().toLowerCase();
@@ -11223,7 +11239,12 @@ function opAbrir_(o){
   document.getElementById('op-nombre-completo').value = o ? o.nombreCompleto : '';
   document.getElementById('op-pass').value = '';
   document.getElementById('op-pass-label').textContent = o ? 'Contraseña nueva (vacío = no cambia)' : 'Contraseña *';
-  document.getElementById('op-huerta').value = o ? o.huerta : (document.getElementById('op-f-huerta').value || '');
+  OP_HU_SEL = o ? opHuertasDe_(o).slice() : (document.getElementById('op-f-huerta').value ? [document.getElementById('op-f-huerta').value] : []);
+  opPintarHuertas_();
+  const pv = o ? opPestanasDe_(o) : ['form', 'avance'];
+  document.getElementById('op-pestanas').innerHTML = (OP_DATOS.pestanasApp || []).map(function(p){
+    return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;"><input type="checkbox" class="op-pe" value="' + p.id + '"' + (pv.indexOf(p.id) !== -1 ? ' checked' : '') + ' style="width:auto;"> ' + escapeHtml(p.label) + '</label>';
+  }).join('');
   document.getElementById('op-activo').checked = o ? o.activo : true;
   document.getElementById('op-tr-buscar').value = '';
   OP_TR_SEL = o ? o.tractores.slice() : []; OP_EDIT_NOMBRE = o ? o.nombre : '';
@@ -11245,12 +11266,22 @@ document.getElementById('op-tractores').addEventListener('change', function(e){
   if(e.target.checked) OP_TR_SEL.push(c);
 });
 document.getElementById('op-tr-buscar').addEventListener('input', opPintarTractores_);
+document.getElementById('op-huertas').addEventListener('change', function(e){
+  if(!e.target.classList.contains('op-hu')) return;
+  const h = e.target.value;
+  OP_HU_SEL = OP_HU_SEL.filter(function(x){ return x !== h; });
+  if(e.target.checked) OP_HU_SEL.push(h);
+  setTimeout(opPintarHuertas_, 0);
+});
 document.getElementById('op-cerrar').addEventListener('click', function(){ document.getElementById('op-overlay').classList.remove('open'); });
 document.getElementById('op-guardar').addEventListener('click', function(){
   const btn = this, st = document.getElementById('op-modal-status');
   const datos = { id: Number(document.getElementById('op-id').value) || null, nombre: document.getElementById('op-nombre').value.trim().toUpperCase(),
     nombreCompleto: document.getElementById('op-nombre-completo').value.trim(), password: document.getElementById('op-pass').value,
-    huerta: document.getElementById('op-huerta').value, tractores: OP_TR_SEL.slice(), activo: document.getElementById('op-activo').checked };
+    huertas: OP_HU_SEL.slice(), tractores: OP_TR_SEL.slice(), activo: document.getElementById('op-activo').checked,
+    pestanas: Array.prototype.map.call(document.querySelectorAll('#op-pestanas .op-pe:checked'), function(x){ return x.value; }) };
+  if(!datos.pestanas.length){ st.textContent = 'Marca al menos una cosa que pueda hacer en la app.'; st.className = 'maq-modal-status show err'; return; }
+  if(datos.pestanas.indexOf('diesel') !== -1 && !datos.huertas.length){ st.textContent = 'Para cargar diésel necesita al menos una huerta.'; st.className = 'maq-modal-status show err'; return; }
   btn.disabled = true;
   opGuardar_(datos, function(r){
     btn.disabled = false;
@@ -11268,7 +11299,7 @@ document.getElementById('op-tbody').addEventListener('click', function(e){
   if(b.classList.contains('op-activar')){
     if(o.activo && !confirm('¿Desactivar a ' + o.nombre + '? Ya no podrá entrar a la app (no se borra; lo puedes volver a activar).')) return;
     b.disabled = true;
-    opGuardar_({ id: o.id, nombre: o.nombre, nombreCompleto: o.nombreCompleto, huerta: o.huerta, tractores: o.tractores, activo: !o.activo }, function(r){
+    opGuardar_({ id: o.id, nombre: o.nombre, nombreCompleto: o.nombreCompleto, huertas: opHuertasDe_(o), pestanas: opPestanasDe_(o), tractores: o.tractores, activo: !o.activo }, function(r){
       if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo.'); return; }
       opCargar_();
     });

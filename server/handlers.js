@@ -2037,22 +2037,28 @@ async function eliminarOrden(code, nombreUsuario, orden, motivo) {
 // reporta fallas y registra avance de huerta en el celular. Módulo Reportar,
 // pestañas del celular solo Reportar falla + Avance huerta, su huerta y sus
 // tractores (maquinaria.usuario_asignado_app). No toca usuarios del Panel/Taller.
-const OPERADOR_PESTANAS_VISIBLES_ = ['form', 'avance'];
+const OPERADOR_PESTANAS_VISIBLES_ = ['form', 'avance'];   // las de siempre si no se dice otra cosa
+// Nov-2026: qué puede hacer en la app (se elige por operador).
+const PESTANAS_OPERADOR_APP_ = [
+  { id: 'form', label: 'Reportar falla' }, { id: 'avance', label: 'Avance huerta' }, { id: 'diesel', label: 'Cargar diésel' },
+  { id: 'solicitud', label: 'Solicitar diésel' }, { id: 'misreportes', label: 'Mis reportes' }, { id: 'movimientos', label: 'Movimientos' },
+];
 const PESTANAS_CELULAR_TODAS_ = ['form', 'diesel', 'movimientos', 'misreportes', 'avance', 'solicitud'];
 const esSoloOperador_ = (modulos) => { const m = String(modulos || '').split(',').map((x) => x.trim()).filter(Boolean); return !m.length || m.every((x) => x === 'Reportar'); };
 async function getOperadoresApp(code, nombreUsuario) {
   await requierePermisoPanel_(code, nombreUsuario, 'operadores', 'visualizar');
-  const [us] = await pool.query('SELECT id, nombre, nombre_completo, huerta, modulos, app_inactivo, password_hash, creado_en FROM usuarios ORDER BY nombre');
+  const [us] = await pool.query('SELECT id, nombre, nombre_completo, huerta, huertas_adicionales, pestanas_celular_ocultas, modulos, app_inactivo, password_hash, creado_en FROM usuarios ORDER BY nombre');
   const [asig] = await pool.query('SELECT codigo_unidad, unidad, usuario_asignado_app FROM maquinaria WHERE usuario_asignado_app IS NOT NULL AND usuario_asignado_app <> \'\'');
   const [huertas] = await pool.query('SELECT nombre FROM huertas ORDER BY nombre');
   const eq = await equiposAvanceHuerta_();
   const operadores = us.filter((u) => u.nombre && esSoloOperador_(u.modulos)).map((u) => ({
-    id: u.id, nombre: u.nombre, nombreCompleto: u.nombre_completo || '', huerta: u.huerta || '', activo: !Number(u.app_inactivo), tieneClave: !!u.password_hash,
+    id: u.id, nombre: u.nombre, nombreCompleto: u.nombre_completo || '', huerta: u.huerta || '', huertas: huertasEfectivasDeFila_(u), activo: !Number(u.app_inactivo), tieneClave: !!u.password_hash,
+    pestanas: PESTANAS_CELULAR_TODAS_.filter((p) => !parseHuertasJson_(u.pestanas_celular_ocultas).includes(p)),
     tractores: asig.filter((a) => String(a.usuario_asignado_app).trim().toLowerCase() === String(u.nombre).trim().toLowerCase()).map((a) => a.codigo_unidad),
   }));
   const asignadoA = {};
   asig.forEach((a) => { asignadoA[a.codigo_unidad] = a.usuario_asignado_app; });
-  return { success: true, operadores, huertas: huertas.map((h) => h.nombre),
+  return { success: true, operadores, huertas: huertas.map((h) => h.nombre), pestanasApp: PESTANAS_OPERADOR_APP_,
     tractores: eq.equipos.map((e) => ({ codigo: e.codigo, unidad: e.unidad, asignadoA: asignadoA[e.codigo] || '' })),
     otrosUsuarios: us.filter((u) => u.nombre && !esSoloOperador_(u.modulos)).map((u) => u.nombre) };
 }
@@ -2065,7 +2071,12 @@ async function guardarOperadorApp(code, nombreUsuario, data) {
   const id = Number(data.id) || 0;
   const pass = (data.password || '').toString();
   if (pass && pass.length < 4) return { success: false, error: 'La contraseña debe tener al menos 4 caracteres.' };
-  const huerta = (data.huerta || '').toString().trim().slice(0, 255);
+  // Varias huertas (nov-2026): la primera es la principal, las demás van en huertas_adicionales.
+  const listaHuertas = Array.from(new Set((Array.isArray(data.huertas) ? data.huertas : [data.huerta]).map((h) => (h || '').toString().trim().slice(0, 255)).filter(Boolean)));
+  const huerta = listaHuertas[0] || '';
+  const adicionalesStr = listaHuertas.length > 1 ? JSON.stringify(listaHuertas.slice(1)) : null;
+  const visibles = Array.isArray(data.pestanas) ? data.pestanas.filter((p) => PESTANAS_CELULAR_TODAS_.includes(p)) : OPERADOR_PESTANAS_VISIBLES_;
+  if (!visibles.length) return { success: false, error: 'Elige al menos una cosa que pueda hacer en la app (Reportar falla, Avance huerta, Cargar diésel…).' };
   const [mismo] = await pool.query('SELECT id, modulos FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
   if (mismo.length && mismo[0].id !== id) {
     return { success: false, error: esSoloOperador_(mismo[0].modulos) ? 'Ya hay un operador con ese nombre.' : 'Ese nombre ya es un usuario del Panel o del Taller; usa otro nombre (o edítalo en Usuarios).' };
@@ -2083,7 +2094,7 @@ async function guardarOperadorApp(code, nombreUsuario, data) {
     const faltan = tractores.filter((c) => !ex.some((x) => x.codigo_unidad === c));
     if (faltan.length) return { success: false, error: 'Estos equipos no están en Maquinaria: ' + faltan.join(', ') };
   }
-  const ocultas = JSON.stringify(PESTANAS_CELULAR_TODAS_.filter((p) => !OPERADOR_PESTANAS_VISIBLES_.includes(p)));
+  const ocultas = JSON.stringify(PESTANAS_CELULAR_TODAS_.filter((p) => !visibles.includes(p)));
   const inactivo = data.activo === false ? 1 : 0;
   const nombreCompleto = (data.nombreCompleto || '').toString().trim().slice(0, 255) || null;
   const conn = await pool.getConnection();
@@ -2091,13 +2102,13 @@ async function guardarOperadorApp(code, nombreUsuario, data) {
   try {
     await conn.beginTransaction();
     if (id) {
-      await conn.query('UPDATE usuarios SET nombre = ?, nombre_completo = ?, huerta = ?, modulos = ?, pestanas_celular_ocultas = ?, app_inactivo = ?' + (pass ? ', password_hash = ?' : '') + ' WHERE id = ?',
-        [nombre, nombreCompleto, huerta, 'Reportar', ocultas, inactivo].concat(pass ? [await bcrypt.hash(pass, 10)] : [], [id]));
+      await conn.query('UPDATE usuarios SET nombre = ?, nombre_completo = ?, huerta = ?, huertas_adicionales = ?, modulos = ?, pestanas_celular_ocultas = ?, app_inactivo = ?' + (pass ? ', password_hash = ?' : '') + ' WHERE id = ?',
+        [nombre, nombreCompleto, huerta, adicionalesStr, 'Reportar', ocultas, inactivo].concat(pass ? [await bcrypt.hash(pass, 10)] : [], [id]));
       // Si le cambiaron el nombre, sus tractores lo siguen
       if (anterior && anterior.nombre !== nombre) await conn.query('UPDATE maquinaria SET usuario_asignado_app = ? WHERE LOWER(TRIM(usuario_asignado_app)) = LOWER(TRIM(?))', [nombre, anterior.nombre]);
     } else {
-      const [r] = await conn.query('INSERT INTO usuarios (nombre, nombre_completo, huerta, password_hash, modulos, pestanas_celular_ocultas, app_inactivo) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [nombre, nombreCompleto, huerta, await bcrypt.hash(pass, 10), 'Reportar', ocultas, inactivo]);
+      const [r] = await conn.query('INSERT INTO usuarios (nombre, nombre_completo, huerta, huertas_adicionales, password_hash, modulos, pestanas_celular_ocultas, app_inactivo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [nombre, nombreCompleto, huerta, adicionalesStr, await bcrypt.hash(pass, 10), 'Reportar', ocultas, inactivo]);
       nuevoId = r.insertId;
     }
     await conn.query('UPDATE maquinaria SET usuario_asignado_app = NULL WHERE LOWER(TRIM(usuario_asignado_app)) = LOWER(TRIM(?))' + (tractores.length ? ' AND codigo_unidad NOT IN (?)' : ''), [nombre].concat(tractores.length ? [tractores] : []));
@@ -2108,7 +2119,7 @@ async function guardarOperadorApp(code, nombreUsuario, data) {
     throw err;
   } finally { conn.release(); }
   await registrarAuditoria_('usuarios', nombre, id ? 'editar_operador' : 'crear_operador', nombreUsuario,
-    (huerta || 'sin huerta') + ' · tractores: ' + (tractores.join(', ') || 'todos') + (inactivo ? ' · DESACTIVADO' : '') + (pass ? ' · contraseña nueva' : ''));
+    (listaHuertas.join(', ') || 'sin huerta') + ' · app: ' + visibles.join(', ') + ' · tractores: ' + (tractores.join(', ') || 'todos') + (inactivo ? ' · DESACTIVADO' : '') + (pass ? ' · contraseña nueva' : ''));
   return { success: true, id: nuevoId };
 }
 

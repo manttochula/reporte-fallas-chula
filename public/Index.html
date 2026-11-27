@@ -823,6 +823,10 @@
     </div>
 
     <div id="view-diesel" style="display:none;">
+      <div class="field" id="campo-huerta-diesel" style="display:none;">
+        <label>Huerta donde se cargó <span class="req">*</span></label>
+        <select id="f-huerta-diesel"><option value="" disabled selected>Selecciona la huerta</option></select>
+      </div>
       <div class="field">
         <label>Número de unidad <span class="req">*</span></label>
         <div class="unit-select" id="unit-select-diesel">
@@ -1626,6 +1630,7 @@ function aplicarHuerta(datos){
   equiposAsignadosUsuario = Array.isArray(datos.equiposAsignados) ? datos.equiposAsignados : [];
   recomputarUnidadesFiltradas();
   poblarHuertaOrigenMov();
+  poblarHuertaDiesel_();
   poblarHuertaDestinoMov();
   var badgeMov = document.getElementById('mov-huerta-badge');
   if(badgeMov){
@@ -2456,6 +2461,27 @@ document.addEventListener('click', (e) => {
 // Deja el formulario de "Cargar Diesel" listo para la siguiente captura --
 // se usa tanto cuando la carga se envía de verdad (éxito) como cuando se
 // guarda sin señal en la cola offline, igual que limpiarFormularioReporte_.
+// Nov-2026 (Carlos: "está capturando en ALMA LUCIA el diésel aunque él le pone
+// MATA DE GALLO"): con 2+ huertas asignadas se elige en cuál se cargó; con una
+// sola, es esa (el campo no sale). Se recuerda la última que eligió.
+function poblarHuertaDiesel_(){
+  var wrap = document.getElementById('campo-huerta-diesel'), sel = document.getElementById('f-huerta-diesel');
+  if(!wrap || !sel) return;
+  var lista = huertasUsuarioActual || [];
+  if(lista.length <= 1){ wrap.style.display = 'none'; sel.innerHTML = ''; return; }
+  wrap.style.display = '';
+  var actual = sel.value;
+  try { if(!actual) actual = localStorage.getItem('diesel_huerta_ultima') || ''; } catch(e){}
+  sel.innerHTML = '<option value="" disabled selected>Selecciona la huerta</option>' + lista.map(function(h){ return '<option value="' + escapeHtmlAttr(h) + '">' + escapeHtmlAttr(h) + '</option>'; }).join('');
+  if(actual && lista.indexOf(actual) !== -1) sel.value = actual;
+}
+function huertaDiesel_(){
+  if(huertasUsuarioActual && huertasUsuarioActual.length > 1){
+    var sel = document.getElementById('f-huerta-diesel');
+    return sel ? (sel.value || '') : '';
+  }
+  return huertaUsuarioActual || '';
+}
 function limpiarFormularioDiesel_(){
   unitSearchInputDiesel.value = '';
   unidadSeleccionadaDiesel = null;
@@ -2485,6 +2511,12 @@ document.getElementById('btn-submit-diesel').onclick = () => {
     showDieselStatus('Faltan campos obligatorios (*): selecciona la unidad y cuántos litros se cargaron.', false);
     return;
   }
+  const huertaCarga = huertaDiesel_();
+  if(huertasUsuarioActual && huertasUsuarioActual.length > 1 && !huertaCarga){
+    showDieselStatus('Selecciona la huerta donde se cargó.', false);
+    return;
+  }
+  try { if(huertaCarga) localStorage.setItem('diesel_huerta_ultima', huertaCarga); } catch(e){}
   if(isNaN(parseFloat(litros)) || parseFloat(litros) <= 0){
     showDieselStatus('Escribe una cantidad de litros válida.', false);
     return;
@@ -2497,7 +2529,7 @@ document.getElementById('btn-submit-diesel').onclick = () => {
   const record = {
     unidad: unidadSeleccionadaDiesel.v,
     unidadLabel: unidadSeleccionadaDiesel.l,
-    huerta: huertaUsuarioActual,
+    huerta: huertaCarga,
     litros: litros,
     lectura: lectura,
     nombre: nombre,
@@ -2878,6 +2910,7 @@ function cargarMovimientosTab(){
         huertasUsuarioActual = huertasNuevas;
         recomputarUnidadesFiltradas();
         poblarHuertaOrigenMov();
+        poblarHuertaDiesel_();
         poblarHuertaDestinoMov();
         var badgeMov = document.getElementById('mov-huerta-badge');
         if(badgeMov){

@@ -96,6 +96,19 @@ async function guardarArchivo_(dataUrl) {
   return url;
 }
 
+// Guarda un archivo binario con la extensión y el tipo que se le digan
+// (nov-2026: el APK de la app, que como data URL traería una extensión rara).
+async function guardarBuffer_(buffer, ext, contentType) {
+  const e = String(ext || 'bin').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin';
+  const filename = 'archivo_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex') + '.' + e;
+  if (NUBE_ARCHIVOS_ACTIVA) {
+    await s3Client.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: filename, Body: buffer, ContentType: contentType || 'application/octet-stream' }));
+  } else {
+    fs.writeFileSync(path.join(UPLOADS_DIR, filename), buffer);
+  }
+  return '/uploads/' + filename;
+}
+
 // Nombre de archivo seguro a partir de una FotoURL ("/uploads/x.jpg" o
 // "VID:/uploads/x.mp4") — null si no aplica o si trae algo raro (../..).
 function nombreArchivoDesdeUrl_(fotoUrl) {
@@ -137,5 +150,6 @@ module.exports = {
   NUBE_ARCHIVOS_ACTIVA,
   S3_PUBLIC_BASE_URL,
   guardarArchivo_,
+  guardarBuffer_,
   leerArchivoComoBuffer_,
 };

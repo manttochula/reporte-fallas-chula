@@ -15,11 +15,13 @@ const config: CapacitorConfig = {
   appName: 'Reporte de Fallas',
   webDir: 'www',
   server: {
-    // Para poder abrir fotos/enlaces de esos dominios (Render, fuentes de
-    // Google, S3 si la nube de archivos está activa) sin salir de la app.
+    // Para poder abrir fotos/enlaces de esos dominios (fuentes de Google, S3
+    // si la nube de archivos está activa) sin salir de la app.
+    // Nov-2026: Render YA NO va aquí: así la liga de descarga del APK
+    // (https://reporte-fallas-chula.onrender.com/app/apk) se abre en Chrome,
+    // que lo descarga y lo instala (dentro de la app no se puede descargar).
+    // Los datos se piden a Render igual que siempre (eso no es "navegar").
     allowNavigation: [
-      'reporte-fallas-chula.onrender.com',
-      '*.onrender.com',
       'fonts.googleapis.com',
       'fonts.gstatic.com',
       '*.amazonaws.com',

@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const pool = require('./db');
 const { siguienteFolio_, tieneAccesoModulo_, requiereClave_, tienePermisoPanel_ } = require('./helpers');
-const { guardarArchivo_, leerArchivoComoBuffer_ } = require('./storage');
+const { guardarArchivo_, guardarBuffer_, leerArchivoComoBuffer_ } = require('./storage');
 const avisos = require('./avisos');
 const exportarOc = require('./exportarOcContpaqi');
 const ocProv = require('./ordenCompraProveedor');
@@ -49,7 +49,7 @@ const TALLER_ACCESS_CODE = process.env.TALLER_ACCESS_CODE || 'Operacion';
 // Carlos le dé este permiso.
 // 'costo_refacciones' (nov-2026) no es pestaña: es el permiso para ver la columna
 // "Costo refacciones" en Órdenes (lo ya registrado como gasto en Comercial).
-const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'verificaciones', 'costo_refacciones', 'gps'];
+const PESTANAS_PANEL = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'usuarios', 'avance_huerta', 'indicadores', 'seguros', 'verificaciones', 'costo_refacciones', 'gps', 'operadores'];
 
 // Verifica primero la clave compartida del Panel (igual que antes, como
 // primera barrera), y luego el permiso específico de ESE usuario para la(s)
@@ -2032,6 +2032,86 @@ async function eliminarOrden(code, nombreUsuario, orden, motivo) {
   }
 }
 
+// ---- Operadores de la app (nov-2026, Carlos) ----
+// Pestaña "Operadores" del Panel (permiso propio): alta simple de quien solo
+// reporta fallas y registra avance de huerta en el celular. Módulo Reportar,
+// pestañas del celular solo Reportar falla + Avance huerta, su huerta y sus
+// tractores (maquinaria.usuario_asignado_app). No toca usuarios del Panel/Taller.
+const OPERADOR_PESTANAS_VISIBLES_ = ['form', 'avance'];
+const PESTANAS_CELULAR_TODAS_ = ['form', 'diesel', 'movimientos', 'misreportes', 'avance', 'solicitud'];
+const esSoloOperador_ = (modulos) => { const m = String(modulos || '').split(',').map((x) => x.trim()).filter(Boolean); return !m.length || m.every((x) => x === 'Reportar'); };
+async function getOperadoresApp(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, 'operadores', 'visualizar');
+  const [us] = await pool.query('SELECT id, nombre, nombre_completo, huerta, modulos, app_inactivo, password_hash, creado_en FROM usuarios ORDER BY nombre');
+  const [asig] = await pool.query('SELECT codigo_unidad, unidad, usuario_asignado_app FROM maquinaria WHERE usuario_asignado_app IS NOT NULL AND usuario_asignado_app <> \'\'');
+  const [huertas] = await pool.query('SELECT nombre FROM huertas ORDER BY nombre');
+  const eq = await equiposAvanceHuerta_();
+  const operadores = us.filter((u) => u.nombre && esSoloOperador_(u.modulos)).map((u) => ({
+    id: u.id, nombre: u.nombre, nombreCompleto: u.nombre_completo || '', huerta: u.huerta || '', activo: !Number(u.app_inactivo), tieneClave: !!u.password_hash,
+    tractores: asig.filter((a) => String(a.usuario_asignado_app).trim().toLowerCase() === String(u.nombre).trim().toLowerCase()).map((a) => a.codigo_unidad),
+  }));
+  const asignadoA = {};
+  asig.forEach((a) => { asignadoA[a.codigo_unidad] = a.usuario_asignado_app; });
+  return { success: true, operadores, huertas: huertas.map((h) => h.nombre),
+    tractores: eq.equipos.map((e) => ({ codigo: e.codigo, unidad: e.unidad, asignadoA: asignadoA[e.codigo] || '' })),
+    otrosUsuarios: us.filter((u) => u.nombre && !esSoloOperador_(u.modulos)).map((u) => u.nombre) };
+}
+// data: { id (para editar), nombre, nombreCompleto, password, huerta, tractores: [codigo], activo }
+async function guardarOperadorApp(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, 'operadores', 'capturar');
+  data = data || {};
+  const nombre = (data.nombre || '').toString().trim().replace(/\s+/g, ' ').slice(0, 100);
+  if (nombre.length < 2) return { success: false, error: 'Escribe el nombre con el que va a entrar (ej. JUAN PEREZ).' };
+  const id = Number(data.id) || 0;
+  const pass = (data.password || '').toString();
+  if (pass && pass.length < 4) return { success: false, error: 'La contraseña debe tener al menos 4 caracteres.' };
+  const huerta = (data.huerta || '').toString().trim().slice(0, 255);
+  const [mismo] = await pool.query('SELECT id, modulos FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))', [nombre]);
+  if (mismo.length && mismo[0].id !== id) {
+    return { success: false, error: esSoloOperador_(mismo[0].modulos) ? 'Ya hay un operador con ese nombre.' : 'Ese nombre ya es un usuario del Panel o del Taller; usa otro nombre (o edítalo en Usuarios).' };
+  }
+  let anterior = null;
+  if (id) {
+    const [a] = await pool.query('SELECT id, nombre, modulos FROM usuarios WHERE id = ?', [id]);
+    if (!a.length) return { success: false, error: 'Ese operador ya no existe.' };
+    if (!esSoloOperador_(a[0].modulos)) return { success: false, error: 'Ese usuario también entra al Panel o al Taller: edítalo en Usuarios.' };
+    anterior = a[0];
+  } else if (!pass) return { success: false, error: 'Asigna una contraseña al operador nuevo.' };
+  const tractores = Array.from(new Set((Array.isArray(data.tractores) ? data.tractores : []).map((c) => (c || '').toString().trim()).filter(Boolean)));
+  if (tractores.length) {
+    const [ex] = await pool.query('SELECT codigo_unidad FROM maquinaria WHERE codigo_unidad IN (?)', [tractores]);
+    const faltan = tractores.filter((c) => !ex.some((x) => x.codigo_unidad === c));
+    if (faltan.length) return { success: false, error: 'Estos equipos no están en Maquinaria: ' + faltan.join(', ') };
+  }
+  const ocultas = JSON.stringify(PESTANAS_CELULAR_TODAS_.filter((p) => !OPERADOR_PESTANAS_VISIBLES_.includes(p)));
+  const inactivo = data.activo === false ? 1 : 0;
+  const nombreCompleto = (data.nombreCompleto || '').toString().trim().slice(0, 255) || null;
+  const conn = await pool.getConnection();
+  let nuevoId = id;
+  try {
+    await conn.beginTransaction();
+    if (id) {
+      await conn.query('UPDATE usuarios SET nombre = ?, nombre_completo = ?, huerta = ?, modulos = ?, pestanas_celular_ocultas = ?, app_inactivo = ?' + (pass ? ', password_hash = ?' : '') + ' WHERE id = ?',
+        [nombre, nombreCompleto, huerta, 'Reportar', ocultas, inactivo].concat(pass ? [await bcrypt.hash(pass, 10)] : [], [id]));
+      // Si le cambiaron el nombre, sus tractores lo siguen
+      if (anterior && anterior.nombre !== nombre) await conn.query('UPDATE maquinaria SET usuario_asignado_app = ? WHERE LOWER(TRIM(usuario_asignado_app)) = LOWER(TRIM(?))', [nombre, anterior.nombre]);
+    } else {
+      const [r] = await conn.query('INSERT INTO usuarios (nombre, nombre_completo, huerta, password_hash, modulos, pestanas_celular_ocultas, app_inactivo) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [nombre, nombreCompleto, huerta, await bcrypt.hash(pass, 10), 'Reportar', ocultas, inactivo]);
+      nuevoId = r.insertId;
+    }
+    await conn.query('UPDATE maquinaria SET usuario_asignado_app = NULL WHERE LOWER(TRIM(usuario_asignado_app)) = LOWER(TRIM(?))' + (tractores.length ? ' AND codigo_unidad NOT IN (?)' : ''), [nombre].concat(tractores.length ? [tractores] : []));
+    if (tractores.length) await conn.query('UPDATE maquinaria SET usuario_asignado_app = ? WHERE codigo_unidad IN (?)', [nombre, tractores]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally { conn.release(); }
+  await registrarAuditoria_('usuarios', nombre, id ? 'editar_operador' : 'crear_operador', nombreUsuario,
+    (huerta || 'sin huerta') + ' · tractores: ' + (tractores.join(', ') || 'todos') + (inactivo ? ' · DESACTIVADO' : '') + (pass ? ' · contraseña nueva' : ''));
+  return { success: true, id: nuevoId };
+}
+
 // ---- Órdenes eliminadas (nov-2026) ----
 const PERMISOS_ORDENES_ = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'];
 async function getOrdenesEliminadas(code, nombreUsuario) {
@@ -3064,15 +3144,17 @@ async function datosReportarUsuario_(usuario) {
 async function getHuertaPorUsuario(nombre) {
   if (!nombre) return datosReportarUsuario_({});
   const [rows] = await pool.query(
-    'SELECT nombre, modulos, huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
+    'SELECT nombre, modulos, huerta, huertas_adicionales, huertas_reportar, ve_casilla_soldadura, ve_casilla_automotriz, pestanas_celular_ocultas, app_inactivo FROM usuarios WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))',
     [nombre]
   );
-  return datosReportarUsuario_(rows.length ? rows[0] : {});
+  const datos = await datosReportarUsuario_(rows.length ? rows[0] : {});
+  if (rows.length && Number(rows[0].app_inactivo)) datos.inactivo = true;   // la app cierra la sesión
+  return datos;
 }
 
 async function getNombresUsuarios(modulo) {
-  const [rows] = await pool.query('SELECT nombre, modulos FROM usuarios');
-  return rows.filter((r) => r.nombre && tieneAccesoModulo_(r.modulos, modulo)).map((r) => r.nombre);
+  const [rows] = await pool.query('SELECT nombre, modulos, app_inactivo FROM usuarios');
+  return rows.filter((r) => r.nombre && !Number(r.app_inactivo) && tieneAccesoModulo_(r.modulos, modulo)).map((r) => r.nombre);
 }
 
 async function validarUsuario(nombre, password, modulo) {
@@ -3090,6 +3172,7 @@ async function validarUsuario(nombre, password, modulo) {
   if (modulo && !tieneAccesoModulo_(usuario.modulos, modulo)) {
     return { success: false, error: 'Tu usuario no tiene acceso a este módulo.' };
   }
+  if (Number(usuario.app_inactivo)) return { success: false, error: 'Tu usuario está desactivado. Pide al encargado que lo active.' };
   const resultado = { success: true, ...(await datosReportarUsuario_(usuario)) };
   // Para el Panel, además del ok/error del login, ya regresamos de una vez
   // los permisos por pestaña de esta persona — así el frontend sabe qué
@@ -13030,8 +13113,49 @@ async function cancelarOrdenesPreventivasYaNoVencidas_(codigoUnidad, nombreUsuar
 
 // Abierta (sin clave): solo regresa la versión de la pantalla del celular
 // -- ver server/versionApp.js y appRevisarVersion_ en public/Index.html.
-function getVersionApp() {
-  return { version: require('./versionApp').versionActual() };
+// Nov-2026: también dice si hay un APK publicado (Panel → Operadores) y si es
+// obligatorio (cambios en la parte nativa); la app lo ofrece para descargar.
+async function getVersionApp() {
+  const out = { version: require('./versionApp').versionActual() };
+  try {
+    const [r] = await pool.query("SELECT valor FROM configuracion WHERE clave = 'app_apk'");
+    const a = r.length ? JSON.parse(r[0].valor) : null;
+    if (a && a.url) out.apk = { subidoEn: a.subidoEn, obligatoria: !!a.obligatoria, notas: a.notas || '', ruta: '/app/apk' };
+  } catch (e) { /* sin APK publicado */ }
+  return out;
+}
+// Lo baja la app para actualizar su pantalla sin instalar otro APK (ver
+// paqueteApp en server/scripts/prepararAppAndroid.js). Abierta, como getVersionApp.
+let paqueteAppCache_ = null;
+function getPaqueteApp() {
+  if (!paqueteAppCache_) paqueteAppCache_ = require('./scripts/prepararAppAndroid').paqueteApp(process.env.APP_SERVIDOR);
+  return Object.assign({ success: true }, paqueteAppCache_);
+}
+async function getApkApp(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, ['operadores', 'usuarios'], 'visualizar');
+  const [r] = await pool.query("SELECT valor FROM configuracion WHERE clave = 'app_apk'");
+  let a = null; try { a = r.length ? JSON.parse(r[0].valor) : null; } catch (e) { a = null; }
+  return { success: true, versionSitio: require('./versionApp').versionActual(), apk: a };
+}
+// data: { apk: data URL del .apk, obligatoria, notas }
+async function subirApkApp(code, nombreUsuario, data) {
+  await requierePermisoPanel_(code, nombreUsuario, ['operadores', 'usuarios'], 'capturar');
+  data = data || {};
+  const m = /^data:[^;]*;base64,(.+)$/.exec(String(data.apk || ''));
+  if (!m) return { success: false, error: 'Elige el archivo .apk.' };
+  const buf = Buffer.from(m[1], 'base64');
+  if (buf.length < 100000 || buf.slice(0, 2).toString('latin1') !== 'PK') return { success: false, error: 'Ese archivo no parece un APK de Android (.apk).' };
+  if (buf.length > 60 * 1024 * 1024) return { success: false, error: 'El APK es demasiado grande.' };
+  const url = await guardarBuffer_(buf, 'apk', 'application/vnd.android.package-archive');
+  const valor = { url, subidoEn: new Date().toISOString(), por: (nombreUsuario || '').toString().slice(0, 100), obligatoria: !!data.obligatoria,
+    notas: (data.notas || '').toString().slice(0, 300), bytes: buf.length };
+  await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('app_apk', ?) ON DUPLICATE KEY UPDATE valor = VALUES(valor)", [JSON.stringify(valor)]);
+  await registrarAuditoria_('configuracion', 'app_apk', 'subir', nombreUsuario, Math.round(buf.length / 1024) + ' KB' + (valor.obligatoria ? ' · obligatoria' : ''));
+  return { success: true, apk: valor };
+}
+async function urlApkApp_() {
+  const [r] = await pool.query("SELECT valor FROM configuracion WHERE clave = 'app_apk'");
+  try { return r.length ? JSON.parse(r[0].valor).url : null; } catch (e) { return null; }
 }
 
 
@@ -14093,7 +14217,7 @@ module.exports = {
   eliminarPolizaSeguro,
   marcarPagoSeguro,
   guardarSiniestroSeguro,
-  getOrdenesEliminadas, restaurarOrdenEliminada,
+  getOrdenesEliminadas, restaurarOrdenEliminada, getOperadoresApp, guardarOperadorApp,
   eliminarSiniestroSeguro, prepararInventarioSeguros, aplicarInventarioSeguros, leerInventarioUnidades_, guardarCotizacionSeguro, eliminarCotizacionSeguro, getComparativoSeguro,
   getVerificaciones,
   guardarVerificacion,
@@ -14123,7 +14247,7 @@ module.exports = {
   guardarTelegramChat,
   probarAvisoTelegram,
   quitarTelegram,
-  getVersionApp,
+  getVersionApp, getPaqueteApp, getApkApp, subirApkApp, urlApkApp_,
   getSemanas,
   guardarSemana,
   eliminarSemana,

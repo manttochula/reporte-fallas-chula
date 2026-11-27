@@ -1607,6 +1607,14 @@ function aplicarHuertasReportar(huertasReportar, huertaUnica){
 
 function aplicarHuerta(datos){
   datos = datos || {};
+  // Nov-2026: operador desactivado desde el Panel (pestaña Operadores): se cierra su sesión.
+  if(datos.inactivo){
+    localStorage.removeItem('reporte_usuario');
+    localStorage.removeItem('taller_nombre');
+    mostrarLogin();
+    alert('Tu usuario está desactivado. Pide al encargado que lo active.');
+    return;
+  }
   var huerta = datos.huerta || '';
   huertaUsuarioActual = huerta;
   huertasUsuarioActual = Array.isArray(datos.huertas) ? datos.huertas : (huerta ? [huerta] : []);
@@ -4778,25 +4786,73 @@ document.getElementById('avance-btn-terminar').addEventListener('click', functio
 
 // App empaquetada: si el sitio ya tiene una versión más nueva de esta
 // pantalla que la que trae el APK, se avisa (arriba, se puede cerrar).
-// La app sigue funcionando igual; solo le faltan los cambios más nuevos.
+// Nov-2026: con el APK nuevo (el que trae el "arranque", APP_VERSION_BASE)
+// la app baja sola la pantalla nueva de Render y la usa desde la siguiente
+// vez que se abra (o al tocar "Aplicar"); ya no hace falta otro APK. Si en
+// Panel → Operadores se publicó un APK marcado como necesario, ofrece
+// descargarlo (se abre en Chrome para instalarlo encima).
+function appAviso_(id, texto, boton, alTocar){
+  if(document.getElementById(id)) return;
+  var aviso = document.createElement('div');
+  aviso.id = id;
+  aviso.style.cssText = 'position:sticky;top:0;z-index:9999;background:#7A4A17;color:#EDECE7;padding:8px 36px 8px 12px;font-size:13px;line-height:1.3;';
+  var t = document.createElement('span'); t.textContent = texto; aviso.appendChild(t);
+  if(boton){
+    var b = document.createElement('button'); b.type = 'button'; b.textContent = boton;
+    b.style.cssText = 'margin-left:8px;background:#EDECE7;color:#141414;border:0;border-radius:4px;padding:5px 10px;font-size:13px;font-weight:600;';
+    b.addEventListener('click', alTocar); aviso.appendChild(b);
+  }
+  var cerrar = document.createElement('button');
+  cerrar.type = 'button'; cerrar.textContent = '✕'; cerrar.setAttribute('aria-label', 'Cerrar aviso');
+  cerrar.style.cssText = 'position:absolute;right:6px;top:4px;background:none;border:0;color:inherit;font-size:16px;padding:4px 8px;';
+  cerrar.addEventListener('click', function(){ aviso.remove(); });
+  aviso.appendChild(cerrar);
+  document.body.insertBefore(aviso, document.body.firstChild);
+}
+function appGuardarPaquete_(p){
+  var c;
+  return caches.open('app-paquete').then(function(x){ c = x;
+    return Promise.all([
+      c.put('/__paquete/index', new Response(p.index, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })),
+      c.put('/__paquete/taller', new Response(p.taller, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }))
+    ]);
+  }).then(function(){
+    // La "meta" al final: si se corta a medias, el arranque no usa nada a medias.
+    return c.put('/__paquete/meta', new Response(JSON.stringify({ base: window.APP_VERSION_BASE, version: p.version, en: new Date().toISOString(), intentos: 0 }), { headers: { 'Content-Type': 'application/json' } }));
+  });
+}
 function appRevisarVersion_(){
   if(!window.APP_SERVIDOR || !window.APP_VERSION) return;
+  var conArranque = !!window.APP_VERSION_BASE && !!window.caches;
+  // La pantalla bajada debe tener el puente nativo (GPS en segundo plano); si no, se regresa a la del APK.
+  if(window.__appPaqueteActivo && !(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())){
+    if(window.__appPaqueteMalo) window.__appPaqueteMalo().then(function(){ location.reload(); });
+    return;
+  }
+  setTimeout(function(){ if(window.__appPaqueteOk) window.__appPaqueteOk(); }, 4000);
   google.script.run
     .withSuccessHandler(function(r){
-      if(!r || !r.version || r.version === window.APP_VERSION) return;
-      if(document.getElementById('app-aviso-version')) return;
-      var aviso = document.createElement('div');
-      aviso.id = 'app-aviso-version';
-      aviso.style.cssText = 'position:sticky;top:0;z-index:9999;background:#7A4A17;color:#EDECE7;padding:8px 36px 8px 12px;font-size:13px;line-height:1.3;';
-      aviso.textContent = 'Hay una versión nueva de la app. Pide el APK actualizado a sistemas e instálalo encima de esta (no se pierde nada).';
-      var cerrar = document.createElement('button');
-      cerrar.type = 'button';
-      cerrar.textContent = '✕';
-      cerrar.setAttribute('aria-label', 'Cerrar aviso');
-      cerrar.style.cssText = 'position:absolute;right:6px;top:4px;background:none;border:0;color:inherit;font-size:16px;padding:4px 8px;';
-      cerrar.addEventListener('click', function(){ aviso.remove(); });
-      aviso.appendChild(cerrar);
-      document.body.insertBefore(aviso, document.body.firstChild);
+      if(!r) return;
+      // APK nuevo marcado como necesario (cambios en la parte nativa), publicado después de este APK
+      if(r.apk && r.apk.obligatoria && window.APP_BUILD && r.apk.subidoEn > window.APP_BUILD){
+        appAviso_('app-aviso-apk', 'Hay que instalar la versión nueva de la app' + (r.apk.notas ? ' (' + r.apk.notas + ')' : '') + '. No se pierde nada.', 'Descargar e instalar', function(){
+          window.location.href = window.APP_SERVIDOR + r.apk.ruta;
+        });
+      }
+      if(!r.version || r.version === window.APP_VERSION) return;
+      if(!conArranque){
+        appAviso_('app-aviso-version', 'Hay una versión nueva de la app. Pide el APK actualizado a sistemas e instálalo encima de esta (no se pierde nada).');
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function(p){
+          if(!p || !p.success || !p.index || !p.taller || p.version !== r.version) return;
+          appGuardarPaquete_(p).then(function(){
+            appAviso_('app-aviso-version', 'La app se actualizó. Se aplica la próxima vez que la abras.', 'Aplicar ahora', function(){ location.reload(); });
+          }).catch(function(){});
+        })
+        .withFailureHandler(function(){})
+        .getPaqueteApp();
     })
     .withFailureHandler(function(){})
     .getVersionApp();

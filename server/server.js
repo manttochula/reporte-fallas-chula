@@ -63,6 +63,15 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // Alias amigables, equivalentes a las rutas ?vista=... del doGet original.
 // Para el despertador de GitHub Actions (plan gratis de Render): responde rápido.
 app.get('/salud', (req, res) => res.json({ ok: true }));
+// Nov-2026: liga fija para descargar el APK de la app (el último que se subió
+// en Panel → Operadores). La app la abre en Chrome para instalarlo.
+app.get('/app/apk', async (req, res) => {
+  try {
+    const url = await require('./handlers').urlApkApp_();
+    if (!url) return res.status(404).send('Todavía no hay un APK publicado. Pídelo a sistemas.');
+    res.redirect(302, url);
+  } catch (e) { res.status(500).send('No se pudo.'); }
+});
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Index.html')));
 app.get('/historial', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Historial.html')));
 app.get('/taller', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'Taller.html')));

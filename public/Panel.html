@@ -1594,6 +1594,7 @@
       <div class="panel-tab" id="ptab-gps">GPS</div>
       <div class="panel-tab" id="ptab-avancehuerta">Avance Huerta</div>
       <div class="panel-tab" id="ptab-indicadores">Indicadores</div>
+      <div class="panel-tab" id="ptab-operadores">Operadores</div>
       <div class="panel-tab" id="ptab-usuarios">Usuarios</div>
     </div>
 
@@ -5154,6 +5155,53 @@
       </div>
     </div>
 
+    <!-- Operadores de la app (nov-2026): alta simple para reportar fallas y avance de huerta -->
+    <div id="pview-operadores" style="display:none;">
+      <div class="mnt-subtext" style="margin-bottom:8px;">Operadores que entran a la app del celular solo a <b>Reportar falla</b> y <b>Avance huerta</b>. Con su nombre y contraseña entran en <b>https://reporte-fallas-chula.onrender.com</b> o en la app. Si le asignas tractores, solo podrá elegir esos.</div>
+      <div class="toolbar">
+        <input type="text" id="op-buscar" placeholder="Buscar operador, huerta o tractor...">
+        <select id="op-f-huerta"><option value="">Todas las huertas</option></select>
+        <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;"><input type="checkbox" id="op-ver-inactivos"> Ver desactivados</label>
+        <button class="export-btn" id="op-nuevo">+ Nuevo operador</button>
+        <button class="export-btn" id="op-actualizar">Actualizar</button>
+      </div>
+      <div class="seg-status" id="op-status"></div>
+      <div class="ocx-auto-caja" id="op-apk-caja" style="margin:8px 0;">
+        <div><b>App del celular (Android)</b> · <span id="op-apk-info" class="mnt-subtext" style="display:inline;">Cargando...</span></div>
+        <div class="mnt-subtext" style="margin:4px 0;">Los cambios de pantalla (Reportar, Avance, Taller…) le llegan solos a la app desde el APK de nov-2026: no hay que instalar nada. Solo cuando cambie la parte nativa (GPS en segundo plano) hay que publicar un APK nuevo aquí y marcarlo como necesario: a cada operador le sale un botón "Descargar e instalar". Liga fija para compartir por WhatsApp: <b id="op-apk-liga"></b> <button type="button" class="row-view" id="op-apk-copiar">Copiar liga</button></div>
+        <div id="op-apk-subir" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+          <input type="file" id="op-apk-archivo" accept=".apk,application/vnd.android.package-archive">
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;"><input type="checkbox" id="op-apk-obligatoria" style="width:auto;"> Avisar a todos que la instalen</label>
+          <input type="text" id="op-apk-notas" placeholder="Qué trae (opcional)" style="max-width:240px;">
+          <button type="button" class="export-btn" id="op-apk-publicar">Publicar APK</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Operador</th><th>Huerta</th><th>Tractores</th><th>Estado</th><th></th></tr></thead><tbody id="op-tbody"></tbody></table></div>
+    </div>
+
+    <div class="maq-modal-overlay" id="op-overlay">
+      <div class="maq-modal" style="max-width:640px;">
+        <button class="maq-modal-close" id="op-cerrar">&times;</button>
+        <h3 id="op-titulo">Nuevo operador</h3>
+        <input type="hidden" id="op-id">
+        <div class="maq-field-row">
+          <div class="maq-field"><label>Nombre para entrar *</label><input type="text" id="op-nombre" placeholder="Ej. JUAN PEREZ" autocomplete="off"></div>
+          <div class="maq-field"><label>Nombre completo</label><input type="text" id="op-nombre-completo" placeholder="Ej. Juan Pérez López" autocomplete="off"></div>
+        </div>
+        <div class="maq-field-row">
+          <div class="maq-field"><label id="op-pass-label">Contraseña *</label><input type="text" id="op-pass" placeholder="Mínimo 4 caracteres" autocomplete="new-password"></div>
+          <div class="maq-field"><label>Huerta</label><select id="op-huerta"><option value="">—</option></select></div>
+        </div>
+        <div class="maq-field"><label>Tractores asignados <span style="font-weight:400;color:#888;">(vacío = puede elegir cualquiera)</span></label>
+          <input type="text" id="op-tr-buscar" placeholder="Buscar tractor..." style="margin-bottom:4px;">
+          <div id="op-tractores" style="max-height:200px;overflow:auto;border:1px solid #ddd;border-radius:4px;padding:4px 8px;"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;"><input type="checkbox" id="op-activo" checked style="width:auto;"> Activo (puede entrar a la app)</label>
+        <div class="maq-modal-status" id="op-modal-status"></div>
+        <div class="maq-modal-actions"><button class="maq-save-btn" id="op-guardar">Guardar</button></div>
+      </div>
+    </div>
+
     <div id="pview-usuarios" style="display:none;">
       <div class="usr-form">
         <input type="text" id="usr-nombre" placeholder="Nombre exacto de la persona">
@@ -5186,6 +5234,7 @@
             <div class="usr-permiso-row"><label>GPS (PosiTrace)</label><select id="usr-perm-gps" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Avance Huerta</label><select id="usr-perm-avance_huerta" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (subir mapa / calibrar)</option></select></div>
             <div class="usr-permiso-row"><label>Indicadores</label><select id="usr-perm-indicadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar (catálogo de semanas)</option></select></div>
+            <div class="usr-permiso-row"><label title="Alta de operadores de la app (reportar fallas y avance de huerta)">Operadores (app)</label><select id="usr-perm-operadores" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label>Usuarios</label><select id="usr-perm-usuarios" class="usr-perm-select"><option value="">Sin acceso</option><option value="visualizar">Visualizar</option><option value="capturar">Capturar</option></select></div>
             <div class="usr-permiso-row"><label title="Columna en Órdenes con el costo de las refacciones ya registradas como gasto en Comercial">Costo de refacciones (columna en Órdenes)</label><select id="usr-perm-costo_refacciones" class="usr-perm-select"><option value="">No lo ve</option><option value="visualizar">Lo ve</option></select></div>
           </div>
@@ -5592,7 +5641,7 @@ let PANEL_HUERTAS_ORDENES = [];
 // — default true para no ocultarle nada a nadie que no se haya configurado
 // explícitamente desde Usuarios. ---
 let PANEL_VE_LETRERO_ORD_PEND = true;
-const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'verificaciones', 'gps', 'avance_huerta', 'indicadores', 'usuarios', 'costo_refacciones'];
+const PESTANAS_PANEL_UI = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros', 'diesel', 'combustible_automotriz', 'movimientos', 'maquinaria', 'catalogo', 'mantenimiento', 'servicios_automotrices', 'refacciones', 'insumos', 'seguros', 'verificaciones', 'gps', 'avance_huerta', 'indicadores', 'operadores', 'usuarios', 'costo_refacciones'];
 
 // --- Cuadros de la pestaña Diesel (Combustible Agrícola) que cada persona
 // ve: Diesel por huerta/departamento, restante, entregado, la tabla
@@ -5707,6 +5756,7 @@ function aplicarPermisosPanelUI(){
     ['gps', ptabGps, pviewGps],
     ['avance_huerta', ptabAvanceHuerta, pviewAvanceHuerta],
     ['indicadores', ptabIndicadores, pviewIndicadores],
+    ['operadores', ptabOperadores, pviewOperadores],
     ['usuarios', ptabUsuarios, pviewUsuarios],
   ];
   let primeraVisible = null;
@@ -8049,6 +8099,7 @@ const ptabSeguros = document.getElementById('ptab-seguros');
 const ptabVerificaciones = document.getElementById('ptab-verificaciones');
 const ptabGps = document.getElementById('ptab-gps');
 const ptabAvanceHuerta = document.getElementById('ptab-avancehuerta');
+const ptabOperadores = document.getElementById('ptab-operadores');
 const ptabUsuarios = document.getElementById('ptab-usuarios');
 const ptabIndicadores = document.getElementById('ptab-indicadores');
 const pviewOrdenes = document.getElementById('pview-ordenes');
@@ -8066,6 +8117,7 @@ const pviewSeguros = document.getElementById('pview-seguros');
 const pviewVerificaciones = document.getElementById('pview-verificaciones');
 const pviewGps = document.getElementById('pview-gps');
 const pviewAvanceHuerta = document.getElementById('pview-avancehuerta');
+const pviewOperadores = document.getElementById('pview-operadores');
 const pviewUsuarios = document.getElementById('pview-usuarios');
 const pviewIndicadores = document.getElementById('pview-indicadores');
 let USUARIOS_CARGADOS = false;
@@ -8081,8 +8133,8 @@ let SOLICITUDES_CARGADAS = false;
 let INSUMOS_CARGADOS = false;
 let AVANCE_HUERTA_HUERTAS_CARGADAS = false;
 
-const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabVerificaciones, ptabGps, ptabAvanceHuerta, ptabIndicadores, ptabUsuarios];
-const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewVerificaciones, pviewGps, pviewAvanceHuerta, pviewIndicadores, pviewUsuarios];
+const TODOS_LOS_PTABS = [ptabOrdenes, ptabDiesel, ptabCombustibleAutomotriz, ptabCombustibleGeneral, ptabMovimientos, ptabMaquinaria, ptabCatalogo, ptabMantenimiento, ptabServiciosAutomotrices, ptabRefacciones, ptabInsumos, ptabSeguros, ptabVerificaciones, ptabGps, ptabAvanceHuerta, ptabIndicadores, ptabOperadores, ptabUsuarios];
+const TODOS_LOS_PVIEWS = [pviewOrdenes, pviewDiesel, pviewCombustibleAutomotriz, pviewCombustibleGeneral, pviewMovimientos, pviewMaquinaria, pviewCatalogo, pviewMantenimiento, pviewServiciosAutomotrices, pviewRefacciones, pviewInsumos, pviewSeguros, pviewVerificaciones, pviewGps, pviewAvanceHuerta, pviewIndicadores, pviewOperadores, pviewUsuarios];
 
 function activarPanelTab(tabActivo, viewActivo){
   TODOS_LOS_PTABS.forEach(function(t){ t.classList.remove('active'); });
@@ -11111,6 +11163,156 @@ document.getElementById('ah-f-huerta').addEventListener('change', function(){
 });
 document.getElementById('ah-btn-actualizar').addEventListener('click', function(){
   if(AH_HUERTA_ACTUAL) cargarAvanceHuertaPanel_(AH_HUERTA_ACTUAL);
+});
+
+// ---- Operadores de la app (nov-2026) ----
+let OP_DATOS = null;
+function opStatus_(t, err){ const el = document.getElementById('op-status'); el.textContent = t || ''; el.style.color = err ? 'var(--danger)' : ''; }
+function opCargar_(){
+  opStatus_('Cargando operadores...');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ opStatus_((r && r.error) || 'No se pudieron leer los operadores.', true); return; }
+      OP_DATOS = r; opStatus_('');
+      const sel = document.getElementById('op-f-huerta'), v = sel.value;
+      sel.innerHTML = '<option value="">Todas las huertas</option>' + r.huertas.map(function(h){ return '<option>' + escapeHtml(h) + '</option>'; }).join('');
+      sel.value = v;
+      document.getElementById('op-huerta').innerHTML = '<option value="">—</option>' + r.huertas.map(function(h){ return '<option>' + escapeHtml(h) + '</option>'; }).join('');
+      opPintar_();
+    })
+    .withFailureHandler(function(e){ opStatus_((e && e.message) || 'No se pudieron leer los operadores.', true); })
+    .getOperadoresApp(ACCESS_CODE, PANEL_USUARIO);
+}
+function opNombreTractor_(c){ const t = OP_DATOS && OP_DATOS.tractores.find(function(x){ return x.codigo === c; }); return t ? t.unidad : c; }
+function opPintar_(){
+  if(!OP_DATOS) return;
+  const q = document.getElementById('op-buscar').value.trim().toLowerCase();
+  const fh = document.getElementById('op-f-huerta').value, inact = document.getElementById('op-ver-inactivos').checked;
+  const puede = puedeCapturarPestana('operadores');
+  document.getElementById('op-nuevo').style.display = puede ? '' : 'none';
+  const lista = OP_DATOS.operadores.filter(function(o){
+    if(!inact && !o.activo) return false;
+    if(fh && o.huerta !== fh) return false;
+    return !q || [o.nombre, o.nombreCompleto, o.huerta].concat(o.tractores.map(opNombreTractor_)).join(' ').toLowerCase().indexOf(q) !== -1;
+  });
+  document.getElementById('op-tbody').innerHTML = lista.length ? lista.map(function(o){
+    return '<tr' + (o.activo ? '' : ' style="opacity:.55;"') + '><td><b>' + escapeHtml(o.nombre) + '</b>' + (o.nombreCompleto ? '<div class="mnt-subtext">' + escapeHtml(o.nombreCompleto) + '</div>' : '') + '</td>'
+      + '<td>' + escapeHtml(o.huerta || '—') + '</td><td>' + (o.tractores.length ? escapeHtml(o.tractores.map(opNombreTractor_).join(', ')) : '<span class="mnt-subtext" style="display:inline;">Cualquiera</span>') + '</td>'
+      + '<td>' + (o.activo ? '<span class="seg-badge vigente">Activo</span>' : '<span class="seg-badge vencida">Desactivado</span>') + (o.tieneClave ? '' : ' <span class="mnt-subtext" style="display:inline;">sin contraseña</span>') + '</td>'
+      + '<td>' + (puede ? '<button type="button" class="row-view op-editar" data-id="' + o.id + '">Editar</button> <button type="button" class="row-view op-activar" data-id="' + o.id + '">' + (o.activo ? 'Desactivar' : 'Activar') + '</button>' : '') + '</td></tr>';
+  }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:20px;">' + (OP_DATOS.operadores.length ? 'Nada coincide con los filtros.' : 'Todavía no hay operadores. Da "+ Nuevo operador".') + '</td></tr>';
+}
+function opPintarTractores_(){
+  const q = document.getElementById('op-tr-buscar').value.trim().toLowerCase();
+  const sel = new Set(OP_TR_SEL);
+  const yo = document.getElementById('op-nombre').value.trim().toLowerCase();
+  const lista = OP_DATOS.tractores.filter(function(t){ return sel.has(t.codigo) || !q || (t.codigo + ' ' + t.unidad).toLowerCase().indexOf(q) !== -1; })
+    .sort(function(a, b){ return (sel.has(b.codigo) ? 1 : 0) - (sel.has(a.codigo) ? 1 : 0) || a.unidad.localeCompare(b.unidad); });
+  document.getElementById('op-tractores').innerHTML = lista.map(function(t){
+    const otro = t.asignadoA && t.asignadoA.toLowerCase() !== yo && t.asignadoA.toLowerCase() !== (OP_EDIT_NOMBRE || '').toLowerCase() ? t.asignadoA : '';
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding:2px 0;"><input type="checkbox" class="op-tr" value="' + escapeHtml(t.codigo) + '"' + (sel.has(t.codigo) ? ' checked' : '') + ' style="width:auto;"> ' + escapeHtml(t.unidad) + ' <span style="color:#888;">' + escapeHtml(t.codigo) + '</span>' + (otro ? ' <span style="color:#a55d0e;">(lo tiene ' + escapeHtml(otro) + ')</span>' : '') + '</label>';
+  }).join('') || '<div style="color:#888;font-size:12px;">No hay tractores.</div>';
+}
+let OP_TR_SEL = [], OP_EDIT_NOMBRE = '';
+function opAbrir_(o){
+  const ov = document.getElementById('op-overlay');
+  if(ov.parentNode !== document.body) document.body.appendChild(ov);
+  document.getElementById('op-titulo').textContent = o ? 'Operador: ' + o.nombre : 'Nuevo operador';
+  document.getElementById('op-id').value = o ? o.id : '';
+  document.getElementById('op-nombre').value = o ? o.nombre : '';
+  document.getElementById('op-nombre-completo').value = o ? o.nombreCompleto : '';
+  document.getElementById('op-pass').value = '';
+  document.getElementById('op-pass-label').textContent = o ? 'Contraseña nueva (vacío = no cambia)' : 'Contraseña *';
+  document.getElementById('op-huerta').value = o ? o.huerta : (document.getElementById('op-f-huerta').value || '');
+  document.getElementById('op-activo').checked = o ? o.activo : true;
+  document.getElementById('op-tr-buscar').value = '';
+  OP_TR_SEL = o ? o.tractores.slice() : []; OP_EDIT_NOMBRE = o ? o.nombre : '';
+  const st = document.getElementById('op-modal-status'); st.textContent = ''; st.className = 'maq-modal-status';
+  opPintarTractores_();
+  ov.classList.add('open');
+  setTimeout(function(){ document.getElementById('op-nombre').focus(); }, 50);
+}
+function opGuardar_(datos, alTerminar){
+  google.script.run
+    .withSuccessHandler(function(r){ alTerminar(r); })
+    .withFailureHandler(function(e){ alTerminar({ success: false, error: (e && e.message) || 'No se pudo guardar.' }); })
+    .guardarOperadorApp(ACCESS_CODE, PANEL_USUARIO, datos);
+}
+document.getElementById('op-tractores').addEventListener('change', function(e){
+  if(!e.target.classList.contains('op-tr')) return;
+  const c = e.target.value;
+  OP_TR_SEL = OP_TR_SEL.filter(function(x){ return x !== c; });
+  if(e.target.checked) OP_TR_SEL.push(c);
+});
+document.getElementById('op-tr-buscar').addEventListener('input', opPintarTractores_);
+document.getElementById('op-cerrar').addEventListener('click', function(){ document.getElementById('op-overlay').classList.remove('open'); });
+document.getElementById('op-guardar').addEventListener('click', function(){
+  const btn = this, st = document.getElementById('op-modal-status');
+  const datos = { id: Number(document.getElementById('op-id').value) || null, nombre: document.getElementById('op-nombre').value.trim().toUpperCase(),
+    nombreCompleto: document.getElementById('op-nombre-completo').value.trim(), password: document.getElementById('op-pass').value,
+    huerta: document.getElementById('op-huerta').value, tractores: OP_TR_SEL.slice(), activo: document.getElementById('op-activo').checked };
+  btn.disabled = true;
+  opGuardar_(datos, function(r){
+    btn.disabled = false;
+    if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo guardar.'; st.className = 'maq-modal-status show err'; return; }
+    document.getElementById('op-overlay').classList.remove('open');
+    opStatus_('Guardado: ' + datos.nombre + (datos.password ? ' (contraseña: ' + datos.password + ')' : '') + '. Entra con ese nombre y contraseña en la app.');
+    opCargar_();
+  });
+});
+document.getElementById('op-tbody').addEventListener('click', function(e){
+  const b = e.target.closest('button'); if(!b || !OP_DATOS) return;
+  const o = OP_DATOS.operadores.find(function(x){ return x.id === Number(b.dataset.id); });
+  if(!o) return;
+  if(b.classList.contains('op-editar')) { opAbrir_(o); return; }
+  if(b.classList.contains('op-activar')){
+    if(o.activo && !confirm('¿Desactivar a ' + o.nombre + '? Ya no podrá entrar a la app (no se borra; lo puedes volver a activar).')) return;
+    b.disabled = true;
+    opGuardar_({ id: o.id, nombre: o.nombre, nombreCompleto: o.nombreCompleto, huerta: o.huerta, tractores: o.tractores, activo: !o.activo }, function(r){
+      if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo.'); return; }
+      opCargar_();
+    });
+  }
+});
+['op-buscar', 'op-f-huerta', 'op-ver-inactivos'].forEach(function(id){ document.getElementById(id).addEventListener(id === 'op-buscar' ? 'input' : 'change', opPintar_); });
+document.getElementById('op-nuevo').addEventListener('click', function(){ if(OP_DATOS) opAbrir_(null); });
+document.getElementById('op-actualizar').addEventListener('click', opCargar_);
+// APK de la app (nov-2026)
+function opApkCargar_(){
+  const liga = location.origin + '/app/apk';
+  document.getElementById('op-apk-liga').textContent = liga;
+  document.getElementById('op-apk-subir').style.display = puedeCapturarPestana('operadores') || puedeCapturarPestana('usuarios') ? 'flex' : 'none';
+  google.script.run
+    .withSuccessHandler(function(r){
+      const el = document.getElementById('op-apk-info');
+      if(!r || !r.success){ el.textContent = (r && r.error) || 'No se pudo leer.'; return; }
+      el.textContent = 'Versión de la pantalla en el sitio: ' + r.versionSitio + ' · ' + (r.apk ? 'APK publicado el ' + new Date(r.apk.subidoEn).toLocaleString('es-MX') + ' por ' + (r.apk.por || '—') + ' (' + Math.round((r.apk.bytes || 0) / 1048576 * 10) / 10 + ' MB' + (r.apk.obligatoria ? ', se avisa a todos' : '') + ')' + (r.apk.notas ? ': ' + r.apk.notas : '') : 'todavía no hay APK publicado');
+    })
+    .withFailureHandler(function(){ document.getElementById('op-apk-info').textContent = 'No se pudo leer.'; })
+    .getApkApp(ACCESS_CODE, PANEL_USUARIO);
+}
+document.getElementById('op-apk-copiar').addEventListener('click', function(){
+  const t = document.getElementById('op-apk-liga').textContent;
+  try { navigator.clipboard.writeText(t); this.textContent = 'Copiada'; } catch(e) { prompt('Copia la liga:', t); }
+});
+document.getElementById('op-apk-publicar').addEventListener('click', async function(){
+  const f = (document.getElementById('op-apk-archivo').files || [])[0];
+  if(!f){ alert('Elige el archivo .apk (el que baja de GitHub → Actions → reporte-de-fallas-android, ya descomprimido).'); return; }
+  if(!/\.apk$/i.test(f.name)){ alert('Debe ser el archivo .apk (si bajaste un .zip, descomprímelo primero).'); return; }
+  const btn = this; btn.disabled = true; btn.textContent = 'Subiendo...';
+  try {
+    const data = await segLeerDataUrl_(f);
+    const r = await new Promise(function(ok, mal){ google.script.run.withSuccessHandler(ok).withFailureHandler(mal).subirApkApp(ACCESS_CODE, PANEL_USUARIO, { apk: data, obligatoria: document.getElementById('op-apk-obligatoria').checked, notas: document.getElementById('op-apk-notas').value.trim() }); });
+    if(!r || !r.success){ alert((r && r.error) || 'No se pudo subir.'); return; }
+    document.getElementById('op-apk-archivo').value = '';
+    opApkCargar_();
+  } catch(e){ alert('No se pudo subir: ' + (e && e.message ? e.message : e)); }
+  finally { btn.disabled = false; btn.textContent = 'Publicar APK'; }
+});
+ptabOperadores.addEventListener('click', function(){
+  activarPanelTab(ptabOperadores, pviewOperadores);
+  if(!OP_DATOS) opCargar_(); else opPintar_();
+  opApkCargar_();
 });
 
 ptabUsuarios.addEventListener('click', function(){

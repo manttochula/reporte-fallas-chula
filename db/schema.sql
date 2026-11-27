@@ -4141,3 +4141,11 @@ CREATE TABLE IF NOT EXISTS ordenes_eliminadas (
   restaurado_en  DATETIME     DEFAULT NULL,
   INDEX idx_ord_elim_orden (orden)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Nov-2026 (Carlos): pestaña "Operadores" del Panel. Desactivar a un operador
+-- (ya no entra a la app) sin borrarlo.
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'usuarios' AND column_name = 'app_inactivo');
+SET @sql_alter = IF(@col_exists = 0, 'ALTER TABLE usuarios ADD COLUMN app_inactivo TINYINT(1) NOT NULL DEFAULT 0', 'SELECT 1');
+PREPARE stmt_alter FROM @sql_alter;
+EXECUTE stmt_alter;
+DEALLOCATE PREPARE stmt_alter;

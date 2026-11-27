@@ -7,8 +7,9 @@ android {
         applicationId "mx.chulabrand.reportefallas"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Nov-2026: cada APK compilado por GitHub sube de número (para instalarlo encima).
+        versionCode ((System.getenv("GITHUB_RUN_NUMBER") ?: "1") as Integer) + 1
+        versionName "1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +17,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Nov-2026: siempre la MISMA firma (antes cada compilación de GitHub usaba una
+    // llave de prueba nueva y Android no dejaba instalar el APK encima del anterior).
+    // Con la misma firma, el APK nuevo se instala encima sin borrar nada.
+    signingConfigs {
+        chula {
+            storeFile file('chula-app.keystore')
+            storePassword 'chulad88eb884e5b0'
+            keyAlias 'chula'
+            keyPassword 'chulad88eb884e5b0'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.chula
+        }
         release {
+            signingConfig signingConfigs.chula
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

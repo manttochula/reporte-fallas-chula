@@ -681,6 +681,13 @@ function loginOfflineVerificar_(nombre, pass){
 function tlModulosApp_(){ try { return JSON.parse(localStorage.getItem('app_modulos') || '[]') || []; } catch(e){ return []; } }
 function tlTieneModulo_(modulos, m){ return (modulos || []).some(function(x){ return String(x).toLowerCase() === m; }); }
 
+// Nov-2026: pantalla bajada de Render (actualización sin APK, ver el arranque en
+// server/scripts/prepararAppAndroid.js): si abrió bien se avisa; si no tiene el
+// puente nativo se borra y se vuelve a la del APK. La descarga la hace Reportar.
+if(window.__appPaqueteActivo && !(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())){
+  if(window.__appPaqueteMalo) window.__appPaqueteMalo().then(function(){ location.reload(); });
+} else if(window.__appPaqueteOk){ setTimeout(function(){ window.__appPaqueteOk(); }, 4000); }
+
 // Service Worker: en el sitio web, que /taller abra sin señal (la app ya trae la página adentro).
 if('serviceWorker' in navigator && !window.APP_SERVIDOR){
   window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){}); });

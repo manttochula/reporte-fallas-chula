@@ -1762,6 +1762,7 @@
         <button class="export-btn" id="btn-export-pdf">Reporte en PDF</button>
         <button class="export-btn" id="btn-export-encargados-excel" title="Órdenes 'En proceso' agrupadas por huerta, para mandar a un grupo con los encargados">Reporte para encargados (Excel)</button>
         <button class="export-btn" id="btn-export-encargados-pdf" title="Órdenes 'En proceso' agrupadas por huerta, para mandar a un grupo con los encargados">Reporte para encargados (PDF)</button>
+        <button class="export-btn" id="btn-ordenes-eliminadas" title="Quién eliminó cada orden, cuándo y por qué; se pueden restaurar">🗑 Órdenes eliminadas</button>
         <div class="ord-multisel" id="ord-columnas-multisel" style="min-width:150px;">
           <button type="button" class="ord-multisel-btn" id="ord-columnas-btn">Columnas</button>
           <div class="ord-multisel-panel ord-columnas-panel" id="ord-columnas-panel">
@@ -4603,6 +4604,7 @@
         <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;" id="seg-ver-pagados-wrap"><input type="checkbox" id="seg-ver-pagados"> Ver también pagados</label>
         <button class="export-btn" id="seg-add-poliza">+ Nueva póliza</button>
         <button class="export-btn" id="seg-importar" title="Lee los PDF de la aseguradora (Banorte) y liga cada vehículo con su equipo por número de serie">📥 Importar pólizas (PDF)</button>
+        <button class="export-btn" id="seg-inventario" title="Excel del inventario de unidades: pone el segmento a cada unidad y da de alta las pólizas que no son de Banorte">📥 Inventario (Excel)</button>
         <button class="export-btn" id="seg-add-siniestro">+ Registrar siniestro</button>
         <button class="export-btn" id="seg-actualizar">Actualizar</button>
       </div>
@@ -4655,6 +4657,36 @@
         <datalist id="seg-imp-dl"></datalist>
         <div class="maq-modal-actions" style="margin-top:10px;">
           <button type="button" class="maq-save-btn" id="seg-imp-guardar" style="display:none;">Importar pólizas</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="oel-overlay">
+      <div class="maq-modal" style="max-width:1100px;">
+        <button class="maq-modal-close" id="oel-cerrar">&times;</button>
+        <h3>Órdenes eliminadas</h3>
+        <div class="mnt-subtext" style="margin-bottom:8px;">Cada orden que se elimina queda aquí con quién, cuándo y el motivo. Las que tienen copia se pueden <b>Restaurar</b> (regresa con sus datos, fotos y su servicio preventivo). Las eliminadas antes del 27/nov/2026 solo tienen el registro (sin copia).</div>
+        <div class="toolbar" style="margin-bottom:6px;"><input type="text" id="oel-buscar" placeholder="Buscar por orden, unidad, descripción o quién la eliminó..." style="flex:1;"></div>
+        <div class="maq-modal-status" id="oel-status"></div>
+        <div class="table-wrap" style="max-height:60vh;overflow:auto;"><table><thead><tr><th>Orden</th><th>Unidad</th><th>Descripción</th><th>Eliminó</th><th>Cuándo</th><th>Motivo</th><th></th></tr></thead><tbody id="oel-tbody"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="maq-modal-overlay" id="seg-inv-overlay">
+      <div class="maq-modal" style="max-width:1150px;">
+        <button class="maq-modal-close" id="seg-inv-cerrar">&times;</button>
+        <h3>Inventario de unidades (Excel)</h3>
+        <div class="mnt-subtext" style="margin-bottom:8px;">Elige el Excel del inventario (columnas AF, CONDUCTOR, AÑO, MARCA, MODELO, PLACAS, SERIE, SEG, ASEGURADORA, PÓLIZA, INCISO, VIGENCIA). Cada renglón se busca en Maquinaria por serie, por la serie de la póliza, por placas o por número AF. Al aplicar: se pone el <b>segmento</b> (columna SEG), se llenan serie y placas si la unidad no las tiene, y las pólizas que <b>no son de Banorte</b> se dan de alta con su unidad (las de Banorte se importan de su PDF, con primas).</div>
+        <div class="toolbar" style="margin-bottom:6px;">
+          <input type="file" id="seg-inv-archivo" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+          <button type="button" class="seg-btn-claro" id="seg-inv-leer">Leer Excel</button>
+        </div>
+        <div class="maq-modal-status" id="seg-inv-status"></div>
+        <div id="seg-inv-resumen"></div>
+        <div id="seg-inv-lista" style="max-height:55vh;overflow:auto;"></div>
+        <datalist id="seg-inv-dl"></datalist>
+        <div class="maq-modal-actions" style="margin-top:10px;">
+          <button type="button" class="maq-save-btn" id="seg-inv-aplicar" style="display:none;">Aplicar</button>
         </div>
       </div>
     </div>
@@ -14771,7 +14803,11 @@ document.getElementById('refnec-btn-guardar').addEventListener('click', async fu
 function eliminarOrdenClick(orden){
   const r = ALL_RECORDS.find(x => x.Orden === orden);
   if(!r) return;
-  if(!confirm('¿Eliminar la orden ' + orden + ' (' + (r.Unidad || r.CodigoUnidad) + ')? Esto no se puede deshacer.')) return;
+  // Nov-2026: se pide el motivo; la orden queda en "Órdenes eliminadas" y se puede restaurar.
+  let motivo = prompt('¿Por qué se elimina la orden ' + orden + ' (' + (r.Unidad || r.CodigoUnidad) + ')?\n\nQueda en "🗑 Órdenes eliminadas" con tu nombre y el motivo (se puede restaurar).', '');
+  if(motivo === null) return;
+  motivo = motivo.trim();
+  if(motivo.length < 3){ alert('Escribe el motivo para eliminar la orden.'); return; }
   const statusEl = document.getElementById('ord-accion-status');
   if(statusEl){ statusEl.textContent = 'Eliminando...'; statusEl.className = 'ord-accion-status'; }
   google.script.run
@@ -14788,8 +14824,62 @@ function eliminarOrdenClick(orden){
       if(statusEl){ statusEl.textContent = 'No se pudo eliminar.'; statusEl.className = 'ord-accion-status err'; }
       alert('No se pudo eliminar. Intenta de nuevo.');
     })
-    .eliminarOrden(ACCESS_CODE, PANEL_USUARIO, orden);
+    .eliminarOrden(ACCESS_CODE, PANEL_USUARIO, orden, motivo);
 }
+
+// ---- Órdenes eliminadas (nov-2026) ----
+let OEL_DATOS = [];
+const OEL_SECCION_ = { principal: 'ordenes', soldadura: 'ordenes_soldadura', automotriz: 'ordenes_automotriz', llantas: 'ordenes_llantas', terceros: 'ordenes_terceros' };
+function oelPintar_(){
+  const q = (document.getElementById('oel-buscar').value || '').trim().toLowerCase();
+  const tb = document.getElementById('oel-tbody');
+  const lista = OEL_DATOS.filter(function(o){ return !q || [o.orden, o.unidad, o.descripcion, o.eliminadoPor, o.motivo, o.huerta].join(' ').toLowerCase().indexOf(q) !== -1; });
+  tb.innerHTML = lista.length ? lista.map(function(o){
+    let acc = '';
+    if(o.restauradoEn) acc = '<span class="mnt-subtext" style="display:inline;">Restaurada por ' + escapeHtml(o.restauradoPor) + ' el ' + escapeHtml(new Date(o.restauradoEn).toLocaleString('es-MX')) + '</span>';
+    else if(!o.copia) acc = '<span class="mnt-subtext" style="display:inline;">sin copia</span>';
+    else if(o.existe) acc = '<span class="mnt-subtext" style="display:inline;">ya existe otra con ese folio</span>';
+    else if(puedeCapturarPestana(OEL_SECCION_[o.seccion] || 'ordenes')) acc = '<button type="button" class="row-view oel-restaurar" data-id="' + o.id + '">Restaurar</button>';
+    return '<tr><td><b>' + escapeHtml(o.orden) + '</b></td><td>' + escapeHtml(o.unidad || '—') + (o.huerta ? '<div class="mnt-subtext">' + escapeHtml(o.huerta) + '</div>' : '') + '</td><td>' + escapeHtml(o.descripcion || '—') + '</td>'
+      + '<td>' + escapeHtml(o.eliminadoPor || '—') + '</td><td style="white-space:nowrap;">' + (o.eliminadoEn ? escapeHtml(new Date(o.eliminadoEn).toLocaleString('es-MX')) : '—') + '</td><td>' + escapeHtml(o.motivo || '—') + '</td><td>' + acc + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:18px;">' + (OEL_DATOS.length ? 'Nada coincide con la búsqueda.' : 'No hay órdenes eliminadas.') + '</td></tr>';
+}
+function oelCargar_(){
+  const st = document.getElementById('oel-status');
+  st.textContent = 'Cargando...'; st.className = 'maq-modal-status show';
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ st.textContent = (r && r.error) || 'No se pudo leer.'; st.className = 'maq-modal-status show err'; return; }
+      OEL_DATOS = r.ordenes; st.textContent = ''; st.className = 'maq-modal-status';
+      oelPintar_();
+    })
+    .withFailureHandler(function(){ st.textContent = 'No se pudo leer.'; st.className = 'maq-modal-status show err'; })
+    .getOrdenesEliminadas(ACCESS_CODE, PANEL_USUARIO);
+}
+document.getElementById('btn-ordenes-eliminadas').addEventListener('click', function(){
+  const ov = document.getElementById('oel-overlay');
+  if(ov.parentNode !== document.body) document.body.appendChild(ov);
+  document.getElementById('oel-buscar').value = (document.getElementById('f-search').value || '').trim();
+  document.getElementById('oel-tbody').innerHTML = '';
+  ov.classList.add('open');
+  oelCargar_();
+});
+document.getElementById('oel-cerrar').addEventListener('click', function(){ document.getElementById('oel-overlay').classList.remove('open'); });
+document.getElementById('oel-buscar').addEventListener('input', oelPintar_);
+document.getElementById('oel-tbody').addEventListener('click', function(e){
+  const b = e.target.closest('.oel-restaurar'); if(!b) return;
+  const o = OEL_DATOS.find(function(x){ return x.id === Number(b.dataset.id); });
+  if(!o || !confirm('¿Restaurar la orden ' + o.orden + ' (' + o.unidad + ')? Regresa como estaba al eliminarla.')) return;
+  b.disabled = true;
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r || !r.success){ b.disabled = false; alert((r && r.error) || 'No se pudo restaurar.'); return; }
+      oelCargar_();
+      const rf = document.getElementById('btn-refresh'); if(rf) rf.click();
+    })
+    .withFailureHandler(function(){ b.disabled = false; alert('No se pudo restaurar.'); })
+    .restaurarOrdenEliminada(ACCESS_CODE, PANEL_USUARIO, o.id);
+});
 
 function cargarUsuarios(){
   const listEl = document.getElementById('usr-list');
@@ -21498,6 +21588,7 @@ function renderSeguros(){
   tb.innerHTML = filas.length ? filas.join('') : '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text-dim);padding:24px;">' + (SEG_VISTA === 'polizas' && !SEG_DATOS.polizas.length ? 'Todavía no hay pólizas. Da "+ Nueva póliza".' : SEG_VISTA === 'unidades' && document.getElementById('seg-solo-auto').checked && !SEG_DATOS.unidades.some(function(u){ return u.asegurable; }) ? 'Ningún tipo de unidad está marcado como "Lleva seguro". Márcalos en Catálogo → Tipos de unidad (Camioneta, Camión, Auto, Moto, Remolque…).' : 'Nada que mostrar con estos filtros.') + '</td></tr>';
   document.getElementById('seg-add-poliza').style.display = puede ? '' : 'none';
   document.getElementById('seg-importar').style.display = puede ? '' : 'none';
+  document.getElementById('seg-inventario').style.display = puede ? '' : 'none';
   document.getElementById('seg-add-siniestro').style.display = puede ? '' : 'none';
 }
 
@@ -21880,6 +21971,87 @@ document.getElementById('seg-cmp-excel').addEventListener('click', function(){
         { header: 'Empresa', key: 'empresa', width: 26 }, { header: 'Segmento', key: 'segmento', width: 10 }, { header: 'Tipo', key: 'tipo', width: 16 }, { header: 'Póliza actual', key: 'poliza', width: 12 }, { header: 'Inciso', key: 'inciso', width: 8 },
         { header: 'Pagado', key: 'pagado', width: 14 }, { header: 'Actual (anual)', key: 'anual', width: 14 }, { header: 'Cotización', key: 'nueva', width: 14 }, { header: 'Diferencia', key: 'dif', width: 14 }, { header: '%', key: 'pct', width: 8 }, { header: 'Eq. especial', key: 'equipo', width: 14 }], filas: det },
     ], 'seguros_comparativo_' + (c.cotizacion.folio || c.cotizacion.id));
+});
+
+// ---------- Inventario de unidades (Excel, nov-2026) ----------
+let SEG_INV = null;
+function segInvStatus_(t, tipo){ const el = document.getElementById('seg-inv-status'); el.textContent = t || ''; el.className = 'maq-modal-status' + (t ? ' show' : '') + (tipo ? ' ' + tipo : ''); }
+function segAbrirInventario_(){
+  SEG_INV = null;
+  document.getElementById('seg-inv-archivo').value = '';
+  document.getElementById('seg-inv-lista').innerHTML = ''; document.getElementById('seg-inv-resumen').innerHTML = '';
+  document.getElementById('seg-inv-aplicar').style.display = 'none';
+  segInvStatus_('');
+  document.getElementById('seg-inv-dl').innerHTML = (SEG_DATOS ? SEG_DATOS.unidades : []).map(function(u){ return '<option value="' + escapeHtml(u.codigoUnidad) + '">' + escapeHtml([u.unidad, u.placa, u.serie].filter(Boolean).join(' · ')) + '</option>'; }).join('');
+  const ov = document.getElementById('seg-inv-overlay');
+  if(ov.parentNode !== document.body) document.body.appendChild(ov);
+  ov.classList.add('open');
+}
+function segInvPintar_(){
+  const f = SEG_INV || [];
+  const ligadas = f.filter(function(x){ return x.codigoUnidad; });
+  const faltan = f.filter(function(x){ return !x.codigoUnidad; });
+  const cambiaSeg = ligadas.filter(function(x){ return x.segmento && x.segmento !== x.segmentoActual; }).length;
+  const otras = f.filter(function(x){ return !x.esBanorte && x.poliza; });
+  const otrasNuevas = otras.filter(function(x){ return x.codigoUnidad && !x.polizaYaEsta; });
+  const banSinPol = ligadas.filter(function(x){ return x.esBanorte && x.poliza && !x.polizaYaEsta; });
+  const quien = function(x){ return 'AF ' + x.af + ' · ' + x.descripcion + (x.conductor ? ' (' + x.conductor + ')' : '') + ' · serie ' + (x.serie || '—') + (x.placas ? ' · ' + x.placas : '') + ' · ' + (x.empresaSeccion || ''); };
+  let h = '<div class="mnt-subtext" style="margin:6px 0;"><b>' + f.length + '</b> unidades en el archivo · <b>' + ligadas.length + '</b> encontradas en el sistema · <b style="color:var(--danger);">' + faltan.length + '</b> no encontradas · '
+    + cambiaSeg + ' cambian de segmento · ' + otrasNuevas.length + ' de ' + otras.length + ' pólizas que no son de Banorte por dar de alta.</div>';
+  if(faltan.length) h += '<div style="border:1px solid rgba(194,75,63,0.4);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:12.5px;"><b>No las veo en el sistema (' + faltan.length + '):</b> elige su equipo abajo si sí existe con otro dato, o dalas de alta en Maquinaria.<ul style="margin:4px 0 0 18px;">' + faltan.map(function(x){ return '<li>' + escapeHtml(quien(x)) + (x.opciones.length ? ' — <i>varias posibles: ' + escapeHtml(x.opciones.join(', ')) + '</i>' : '') + '</li>'; }).join('') + '</ul></div>';
+  if(banSinPol.length) h += '<div class="mnt-subtext" style="margin:6px 0;color:var(--amber);">' + banSinPol.length + ' unidad(es) dicen Banorte con una póliza que el sistema no tiene para ellas (' + escapeHtml(Array.from(new Set(banSinPol.map(function(x){ return x.poliza; }))).join(', ')) + '). Esas se importan con el PDF de la póliza (📥 Importar pólizas).</div>';
+  document.getElementById('seg-inv-resumen').innerHTML = h;
+  document.getElementById('seg-inv-lista').innerHTML = '<table class="seg-mini"><thead><tr><th>AF</th><th>Unidad del archivo</th><th>Serie / placas</th><th>Equipo en el sistema</th><th>Segmento</th><th>Póliza</th></tr></thead><tbody>'
+    + f.map(function(x, i){
+      const segTxt = x.segmento ? (x.codigoUnidad && x.segmentoActual && x.segmentoActual !== x.segmento ? '<b>' + escapeHtml(x.segmento) + '</b> <span style="color:#888;">(antes ' + escapeHtml(x.segmentoActual) + ')</span>' : x.codigoUnidad && x.segmentoActual === x.segmento ? escapeHtml(x.segmento) + ' <span style="color:#888;">(igual)</span>' : '<b>' + escapeHtml(x.segmento) + '</b>') : '—';
+      const polTxt = !x.poliza ? '<span style="color:#888;">' + (x.aseguradora ? escapeHtml(x.aseguradora) : 'sin póliza') + '</span>'
+        : escapeHtml(x.aseguradoraNombre + ' ' + x.poliza) + (x.inciso ? ' inc. ' + escapeHtml(x.inciso) : '') + '<div style="font-size:11px;color:#888;">'
+          + (x.polizaYaEsta ? 'ya está en el sistema' : x.esBanorte ? 'Banorte: se importa de su PDF' : !x.vigencia ? '<span style="color:var(--danger);">sin vigencia: no se da de alta</span>' : 'se da de alta · vence ' + segFechaTxt_(x.vigencia)) + '</div>';
+      return '<tr style="' + (x.codigoUnidad ? '' : 'background:rgba(240,180,40,0.12);') + '"><td>' + escapeHtml(x.af) + '</td><td>' + escapeHtml(x.descripcion) + '<div style="font-size:11px;color:#888;">' + escapeHtml([x.conductor, x.empresaSeccion].filter(Boolean).join(' · ')) + '</div></td>'
+        + '<td style="font-size:11.5px;">' + escapeHtml(x.serie || '—') + '<div style="color:#888;">' + escapeHtml(x.placas || '') + '</div>' + (x.serieRepetida ? '<div style="color:var(--danger);font-size:11px;">serie repetida en el archivo</div>' : '') + '</td>'
+        + '<td><input type="text" list="seg-inv-dl" data-inv="' + i + '" value="' + escapeHtml(x.codigoUnidad) + '" placeholder="No encontrada" style="width:150px;">' + (x.como ? '<div style="font-size:11px;color:#888;">por ' + escapeHtml(x.como) + (x.unidadSistema ? ' · ' + escapeHtml(x.unidadSistema) : '') + '</div>' : '') + '</td>'
+        + '<td>' + segTxt + '</td><td style="font-size:12px;">' + polTxt + '</td></tr>';
+    }).join('') + '</tbody></table>';
+  document.getElementById('seg-inv-aplicar').style.display = ligadas.length && segPuede_() ? '' : 'none';
+}
+document.getElementById('seg-inventario').addEventListener('click', segAbrirInventario_);
+document.getElementById('seg-inv-cerrar').addEventListener('click', function(){ document.getElementById('seg-inv-overlay').classList.remove('open'); });
+document.getElementById('seg-inv-leer').addEventListener('click', async function(){
+  const file = (document.getElementById('seg-inv-archivo').files || [])[0];
+  if(!file){ segInvStatus_('Elige el Excel del inventario.', 'err'); return; }
+  const btn = this; btn.disabled = true;
+  try {
+    segInvStatus_('Leyendo y buscando cada unidad en el sistema...');
+    const data = await segLeerDataUrl_(file);
+    const r = await new Promise(function(ok, mal){ google.script.run.withSuccessHandler(ok).withFailureHandler(mal).prepararInventarioSeguros(ACCESS_CODE, PANEL_USUARIO, data); });
+    if(!r || !r.success){ segInvStatus_((r && r.error) || 'No se pudo leer el Excel.', 'err'); return; }
+    SEG_INV = r.filas; segInvStatus_('');
+    segInvPintar_();
+  } catch(e){ segInvStatus_('No se pudo leer el Excel: ' + (e && e.message ? e.message : e), 'err'); }
+  finally { btn.disabled = false; }
+});
+document.getElementById('seg-inv-lista').addEventListener('change', function(e){
+  const i = e.target.getAttribute('data-inv'); if(i === null || !SEG_INV) return;
+  const x = SEG_INV[Number(i)], v = e.target.value.trim();
+  const u = v ? segUnidad_(v) : null;
+  if(v && !u){ e.target.style.borderColor = 'var(--danger)'; return; }
+  e.target.style.borderColor = '';
+  x.codigoUnidad = u ? u.codigoUnidad : ''; x.como = u ? 'elegida a mano' : ''; x.unidadSistema = u ? u.unidad : ''; x.segmentoActual = u ? (u.segmento || '') : ''; x.polizaYaEsta = false;
+  setTimeout(segInvPintar_, 0);   // fuera del evento: repintar dentro de 'change' choca con el blur del input
+});
+document.getElementById('seg-inv-aplicar').addEventListener('click', async function(){
+  if(!SEG_INV) return;
+  const filas = SEG_INV.filter(function(x){ return x.codigoUnidad; });
+  if(!confirm('Se va a poner el segmento a ' + filas.length + ' unidades y a dar de alta las pólizas que no son de Banorte. ¿Aplicar?')) return;
+  const btn = this; btn.disabled = true;
+  try {
+    const r = await new Promise(function(ok, mal){ google.script.run.withSuccessHandler(ok).withFailureHandler(mal).aplicarInventarioSeguros(ACCESS_CODE, PANEL_USUARIO, filas.map(function(x){ return { codigoUnidad: x.codigoUnidad, segmento: x.segmento, serie: x.serie, placas: x.placas, aseguradora: x.aseguradora, poliza: x.poliza, inciso: x.inciso, vigencia: x.vigencia, esBanorte: x.esBanorte }; })); });
+    if(!r || !r.success){ segInvStatus_((r && r.error) || 'No se pudo aplicar.', 'err'); return; }
+    segInvStatus_('Listo: ' + r.segmentos + ' segmentos puestos, ' + r.series + ' series y ' + r.placas + ' placas que faltaban, ' + r.polizasNuevas + ' pólizas nuevas (' + r.unidadesEnPoliza + ' unidades ligadas).' + (r.avisos.length ? ' ' + r.avisos.join(' ') : ''), 'ok');
+    btn.style.display = 'none';
+    cargarSeguros();
+  } catch(e){ segInvStatus_('No se pudo aplicar: ' + (e && e.message ? e.message : e), 'err'); }
+  finally { btn.disabled = false; }
 });
 
 // ---------- Eventos ----------

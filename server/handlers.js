@@ -2003,7 +2003,7 @@ async function editarOrden(code, nombreUsuario, orden, data) {
 // liga con mantenimiento_ordenes si venía de una regla de Mantenimiento
 // preventivo, para no dejar una referencia suelta a una orden que ya no
 // existe.
-async function eliminarOrden(code, nombreUsuario, orden) {
+async function eliminarOrden(code, nombreUsuario, orden, motivo) {
   const [filaSeccion] = await pool.query('SELECT es_soldadura, es_automotriz, es_llantas, es_terceros FROM reportes WHERE orden = ?', [orden]);
   if (filaSeccion.length === 0) return { success: false, error: 'No se encontró la orden ' + orden + '.' };
   await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(seccionDeFila_(filaSeccion[0])), 'capturar');
@@ -2014,14 +2014,86 @@ async function eliminarOrden(code, nombreUsuario, orden) {
     if (!huertaPermitida_(huertasRestringidas, rows[0].huerta)) {
       return { success: false, error: 'Tu usuario no tiene acceso a esta orden (huerta ' + (rows[0].huerta || 'sin huerta') + ').' };
     }
+    // Nov-2026: copia completa antes de borrar (Panel → Órdenes eliminadas → Restaurar).
+    const mot = (motivo || '').toString().trim().slice(0, 1000);
+    const [repTodo] = await pool.query('SELECT * FROM reportes WHERE orden = ?', [orden]);
+    const [mantTodo] = await pool.query('SELECT * FROM mantenimiento_ordenes WHERE orden = ?', [orden]);
+    const [fotosTodo] = await pool.query('SELECT * FROM reportes_fotos WHERE orden = ?', [orden]);
+    await pool.query('INSERT INTO ordenes_eliminadas (orden, unidad, huerta, descripcion, seccion, motivo, datos, eliminado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [orden, rows[0].unidad || null, rows[0].huerta || null, rows[0].descripcion || null, seccionDeFila_(filaSeccion[0]), mot || null,
+        JSON.stringify({ reportes: repTodo, mantenimiento_ordenes: mantTodo, reportes_fotos: fotosTodo }), (nombreUsuario || '').toString().trim() || 'Desconocido']);
     await pool.query('DELETE FROM mantenimiento_ordenes WHERE orden = ?', [orden]);
     await pool.query('DELETE FROM reportes_fotos WHERE orden = ?', [orden]);
     await pool.query('DELETE FROM reportes WHERE orden = ?', [orden]);
-    await registrarAuditoria_('reportes', orden, 'eliminar', nombreUsuario, (rows[0].unidad || '') + ' — ' + (rows[0].descripcion || ''));
+    await registrarAuditoria_('reportes', orden, 'eliminar', nombreUsuario, (rows[0].unidad || '') + ' — ' + (rows[0].descripcion || '') + (mot ? ' · Motivo: ' + mot : ''));
     return { success: true };
   } catch (err) {
     return { success: false, error: err.toString() };
   }
+}
+
+// ---- Órdenes eliminadas (nov-2026) ----
+const PERMISOS_ORDENES_ = ['ordenes', 'ordenes_soldadura', 'ordenes_automotriz', 'ordenes_llantas', 'ordenes_terceros'];
+async function getOrdenesEliminadas(code, nombreUsuario) {
+  await requierePermisoPanel_(code, nombreUsuario, PERMISOS_ORDENES_, 'visualizar');
+  const [rows] = await pool.query(
+    `SELECT id, orden, unidad, huerta, descripcion, seccion, motivo, eliminado_por, eliminado_en, restaurado_por, restaurado_en
+       FROM ordenes_eliminadas ORDER BY eliminado_en DESC, id DESC LIMIT 1000`);
+  // Las que se borraron antes de guardar copia: solo quedó la auditoría (sin restaurar).
+  const [aud] = await pool.query(
+    `SELECT a.registro, a.usuario, a.detalle, a.creado_en FROM auditoria a
+      WHERE a.tabla = 'reportes' AND a.accion = 'eliminar'
+        AND NOT EXISTS (SELECT 1 FROM ordenes_eliminadas e WHERE e.orden = a.registro AND ABS(TIMESTAMPDIFF(SECOND, e.eliminado_en, a.creado_en)) < 120)
+      ORDER BY a.creado_en DESC LIMIT 1000`);
+  const [existen] = await pool.query('SELECT orden FROM reportes WHERE orden IN (?)', [rows.map((r) => r.orden).concat(aud.map((a) => a.registro)).concat([''])]);
+  const vivas = new Set(existen.map((x) => x.orden));
+  const huertasRestringidas = await obtenerHuertasRestringidasUsuario_(nombreUsuario);
+  const lista = rows.map((r) => ({ id: r.id, orden: r.orden, unidad: r.unidad || '', huerta: r.huerta || '', descripcion: r.descripcion || '', seccion: r.seccion || 'principal',
+    motivo: r.motivo || '', eliminadoPor: r.eliminado_por || '', eliminadoEn: isoOrNull(r.eliminado_en), restauradoPor: r.restaurado_por || '', restauradoEn: isoOrNull(r.restaurado_en),
+    existe: vivas.has(r.orden), copia: true }))
+    .concat(aud.map((a) => {
+      const det = String(a.detalle || '');
+      const i = det.indexOf(' — ');
+      return { id: null, orden: a.registro, unidad: i >= 0 ? det.slice(0, i) : det, huerta: '', descripcion: i >= 0 ? det.slice(i + 3).replace(/ · Motivo: .*$/, '') : '', seccion: '',
+        motivo: (/ · Motivo: (.*)$/.exec(det) || [])[1] || '', eliminadoPor: a.usuario || '', eliminadoEn: isoOrNull(a.creado_en), restauradoPor: '', restauradoEn: null, existe: vivas.has(a.registro), copia: false };
+    }))
+    .filter((x) => !x.huerta || huertaPermitida_(huertasRestringidas, x.huerta))
+    .sort((a, b) => String(b.eliminadoEn || '').localeCompare(String(a.eliminadoEn || '')));
+  return { success: true, ordenes: lista };
+}
+// Las fechas del JSON vienen como texto ISO: se regresan a Date para que mysql2 las guarde igual.
+function valorRestaurar_(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(v) ? new Date(v) : (v && typeof v === 'object' && !(v instanceof Date) ? JSON.stringify(v) : v); }
+async function restaurarOrdenEliminada(code, nombreUsuario, id) {
+  const [[e]] = await pool.query('SELECT * FROM ordenes_eliminadas WHERE id = ?', [Number(id) || 0]);
+  if (!e) return { success: false, error: 'No se encontró esa orden eliminada.' };
+  await requierePermisoPanel_(code, nombreUsuario, permisoDeSeccionOrden_(e.seccion), 'capturar');
+  if (e.restaurado_en) return { success: false, error: 'Esa orden ya se restauró.' };
+  const [ya] = await pool.query('SELECT id FROM reportes WHERE orden = ?', [e.orden]);
+  if (ya.length) return { success: false, error: 'Ya existe otra orden con el folio ' + e.orden + '; no se puede restaurar encima.' };
+  let datos; try { datos = JSON.parse(e.datos || '{}'); } catch (err) { return { success: false, error: 'La copia de la orden está dañada.' }; }
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    for (const tabla of ['reportes', 'mantenimiento_ordenes', 'reportes_fotos']) {
+      const filas = Array.isArray(datos[tabla]) ? datos[tabla] : [];
+      if (!filas.length) continue;
+      const [colsBd] = await conn.query('SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = ?', [tabla]);
+      const validas = new Set(colsBd.map((x) => x.c));
+      for (const f of filas) {
+        const cols = Object.keys(f).filter((k) => validas.has(k));
+        let [dup] = cols.includes('id') ? await conn.query('SELECT id FROM ' + tabla + ' WHERE id = ?', [f.id]) : [[]];
+        const usar = dup.length ? cols.filter((k) => k !== 'id') : cols;   // si el id ya se ocupó, toma uno nuevo
+        await conn.query('INSERT INTO ' + tabla + ' (' + usar.map((k) => '`' + k + '`').join(', ') + ') VALUES (' + usar.map(() => '?').join(', ') + ')', usar.map((k) => valorRestaurar_(f[k])));
+      }
+    }
+    await conn.query('UPDATE ordenes_eliminadas SET restaurado_por = ?, restaurado_en = NOW() WHERE id = ?', [(nombreUsuario || '').toString().trim() || 'Desconocido', e.id]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    return { success: false, error: 'No se pudo restaurar: ' + err.message };
+  } finally { conn.release(); }
+  await registrarAuditoria_('reportes', e.orden, 'restaurar', nombreUsuario, (e.unidad || '') + ' — ' + (e.descripcion || ''));
+  return { success: true, orden: e.orden };
 }
 
 // ---------------------------------------------------------------
@@ -13660,6 +13732,146 @@ async function eliminarSiniestroSeguro(code, nombreUsuario, id) {
   return { success: true };
 }
 
+// ---- Inventario de unidades (Excel de Carlos, nov-2026) ----
+// "INVENTARIO DE UNIDADES 2025": por secciones ("INVENTARIO DE UNIDADES SEGMENTO 111
+// CHULA BRAND PACIFICO"), columnas AF, CONDUCTOR, AÑO, MARCA, MODELO, COLOR, PLACAS,
+// EDO, SERIE, SEG, ASEGURADORA, POLIZA, INCISO, ENDOSO, VIGENCIA. Pone el segmento a
+// cada unidad y da de alta las pólizas que no son de Banorte (Mapfre, GNP, Inbursa).
+const vinInv_ = (s) => normSerieSeg_(s).replace(/I/g, '1').replace(/[OQ]/g, '0');   // los VIN no llevan I, O ni Q
+const NOMBRE_ASEGURADORA_ = { BANORTE: 'Seguros Banorte', MAPFRE: 'Mapfre', GNP: 'GNP Seguros', INBURSA: 'Seguros Inbursa', QUALITAS: 'Qualitas', CHUBB: 'Chubb', HDI: 'HDI Seguros', ZURICH: 'Zurich', AXA: 'AXA' };
+function nombreAseguradora_(t) { const k = String(t || '').toUpperCase().replace(/[^A-Z]/g, ''); return NOMBRE_ASEGURADORA_[k] || String(t || '').trim(); }
+async function leerInventarioUnidades_(buffer) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+  const ws = wb.worksheets.find((w) => /INVENTARIO/i.test(w.name)) || wb.worksheets[0];
+  const val = (c) => { let v = c && c.value; if (v && typeof v === 'object') { if (v instanceof Date) return v; if ('result' in v) v = v.result; else if (v.richText) v = v.richText.map((x) => x.text).join(''); else if ('text' in v) v = v.text; } return v; };
+  const txt = (v) => (v === null || v === undefined ? '' : (v instanceof Date ? v.toISOString().slice(0, 10) : String(v))).replace(/\s+/g, ' ').trim();
+  const filas = [];
+  let seccion = '', cols = null;
+  const COLS_DEF = { AF: 1, CONDUCTOR: 2, ANIO: 3, MARCA: 4, MODELO: 5, COLOR: 6, PLACAS: 7, EDO: 8, SERIE: 9, SEG: 10, ASEGURADORA: 11, POLIZA: 12, INCISO: 13, ENDOSO: 14, VIGENCIA: 15 };
+  ws.eachRow({ includeEmpty: false }, (row, n) => {
+    const vals = []; for (let i = 1; i <= 17; i++) vals[i] = val(row.getCell(i));
+    const t1 = txt(vals[1]).toUpperCase();
+    if (/^INVENTARIO DE UNIDADES/.test(t1)) { seccion = txt(vals[1]); return; }
+    if (t1 === 'AF' && /SERIE/i.test(vals.map(txt).join(' '))) {
+      cols = {};
+      vals.forEach((v, i) => { const k = txt(v).toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z]/g, ''); if (k === 'ANO') cols.ANIO = i; else if (k) cols[k] = i; });
+      return;
+    }
+    const c = Object.assign({}, COLS_DEF, cols || {});
+    const serie = txt(vals[c.SERIE]);
+    if (!txt(vals[c.AF]) && !serie) return;
+    if (!serie && !txt(vals[c.PLACAS])) return;
+    const vig = vals[c.VIGENCIA];
+    const mSeg = /SEGMENTO\s+(\d+)/i.exec(seccion);
+    filas.push({
+      fila: n, seccion, segmentoSeccion: mSeg ? mSeg[1] : '', empresaSeccion: seccion.replace(/^INVENTARIO DE UNIDADES\s*/i, '').replace(/^SEGMENTO\s+[\d-]+\s*/i, '').replace(/^-/, '').trim(),
+      af: txt(vals[c.AF]), conductor: txt(vals[c.CONDUCTOR]), anio: txt(vals[c.ANIO]), marca: txt(vals[c.MARCA]), modelo: txt(vals[c.MODELO]), color: txt(vals[c.COLOR]),
+      placas: txt(vals[c.PLACAS]), serie, segmento: txt(vals[c.SEG]).replace(/\.0+$/, ''), aseguradora: txt(vals[c.ASEGURADORA]), poliza: txt(vals[c.POLIZA]).replace(/\.0+$/, ''),
+      inciso: txt(vals[c.INCISO]).replace(/\.0+$/, ''), vigencia: vig instanceof Date ? vig.toISOString().slice(0, 10) : (/^\d{4}-\d{2}-\d{2}/.test(txt(vig)) ? txt(vig).slice(0, 10) : null),
+    });
+  });
+  return filas;
+}
+async function prepararInventarioSeguros(code, nombreUsuario, dataUrl) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const m64 = /^data:[^;]*;base64,(.+)$/.exec(String(dataUrl || ''));
+  if (!m64) return { success: false, error: 'Elige el archivo de Excel (.xlsx).' };
+  let filas;
+  try { filas = await leerInventarioUnidades_(Buffer.from(m64[1], 'base64')); } catch (e) { return { success: false, error: 'No pude leer el Excel: ' + e.message }; }
+  if (!filas.length) return { success: false, error: 'No encontré unidades en el archivo (columnas AF, SERIE, SEG…).' };
+  const [maq] = await pool.query('SELECT m.codigo_unidad, m.unidad, m.serie, m.placa, m.segmento, m.empresa_id, e.nombre AS empresa FROM maquinaria m LEFT JOIN empresas e ON e.id = m.empresa_id');
+  const [pu] = await pool.query(`SELECT u.codigo_unidad, u.serie_poliza, p.aseguradora, p.numero_poliza, DATE_FORMAT(p.vigencia_fin, '%Y-%m-%d') AS fin
+      FROM seguros_poliza_unidades u JOIN seguros_polizas p ON p.id = u.poliza_id WHERE p.eliminado = 0 AND p.cancelada = 0 AND u.baja_fecha IS NULL`);
+  const [emps] = await pool.query('SELECT id, nombre FROM empresas');
+  const maqPorCod = new Map(maq.map((x) => [x.codigo_unidad, x]));
+  const empresaDe = (texto) => {
+    const t = new Set(normEmpresaSeg_(texto).trim().split(' ').filter((w) => w.length > 2));
+    let mejor = null, p = 0;
+    emps.forEach((e) => { const w = normEmpresaSeg_((e.nombre || '').split(',')[0]).trim().split(' ').filter((x) => x.length > 2); if (!w.length) return; const k = w.filter((x) => t.has(x)).length / w.length; if (k > p) { p = k; mejor = e; } });
+    return p >= 0.6 ? mejor : null;
+  };
+  const conteoSerie = {};
+  filas.forEach((f) => { const v = vinInv_(f.serie); if (v.length >= 8) conteoSerie[v] = (conteoSerie[v] || 0) + 1; });
+  const out = filas.map((f) => {
+    const v = vinInv_(f.serie);
+    let cand = [], como = '';
+    if (v.length >= 8) {
+      cand = maq.filter((x) => vinInv_(x.serie) === v); como = 'serie';
+      if (!cand.length) { const c2 = Array.from(new Set(pu.filter((x) => vinInv_(x.serie_poliza) === v).map((x) => x.codigo_unidad))).map((c) => maqPorCod.get(c)).filter(Boolean); if (c2.length) { cand = c2; como = 'serie de la póliza'; } }
+      if (!cand.length && v.length === 17) { cand = maq.filter((x) => { const s = vinInv_(x.serie); return s.length >= 8 && s.length < 17 && v.endsWith(s); }); como = 'serie (parcial)'; }
+    }
+    const pl = normSerieSeg_(f.placas);
+    if (!cand.length && pl.length >= 5) { cand = maq.filter((x) => normSerieSeg_(x.placa) === pl); como = 'placas'; }
+    const emp = empresaDe(f.empresaSeccion);
+    const afN = (/^0*(\d{1,4})/.exec(f.af) || [])[1];
+    if (!cand.length && afN) {
+      const re = new RegExp('(?:^|[^A-Z0-9])AF[\\s_-]*0*' + afN + '(?!\\d)', 'i');
+      let c3 = maq.filter((x) => re.test(x.codigo_unidad || '') || re.test(x.unidad || ''));
+      if (c3.length > 1 && emp) c3 = c3.filter((x) => x.empresa_id === emp.id);
+      if (c3.length) { cand = c3; como = 'número AF (revísalo)'; }
+    }
+    const uno = cand.length === 1 ? cand[0] : null;
+    const esBanorte = /BANORTE/i.test(f.aseguradora);
+    const enPoliza = uno ? pu.filter((x) => x.codigo_unidad === uno.codigo_unidad) : [];
+    return Object.assign(f, {
+      descripcion: [f.anio, f.marca, f.modelo, f.color].filter(Boolean).join(' '), esBanorte, aseguradoraNombre: f.aseguradora ? nombreAseguradora_(f.aseguradora) : '',
+      empresaId: emp ? emp.id : null, empresa: emp ? (emp.nombre || '').split(',')[0] : '',
+      codigoUnidad: uno ? uno.codigo_unidad : '', como: uno ? como : (cand.length > 1 ? 'varios' : ''), opciones: cand.length > 1 ? cand.slice(0, 10).map((x) => x.codigo_unidad) : [],
+      unidadSistema: uno ? (uno.unidad || '') : '', segmentoActual: uno ? (uno.segmento || '') : '', serieSistema: uno ? (uno.serie || '') : '', placaSistema: uno ? (uno.placa || '') : '',
+      polizasSistema: enPoliza.map((x) => x.aseguradora + ' ' + x.numero_poliza),
+      polizaYaEsta: !!(f.poliza && enPoliza.some((x) => normSerieSeg_(x.numero_poliza) === normSerieSeg_(f.poliza))),
+      serieRepetida: v.length >= 8 && conteoSerie[v] > 1,
+    });
+  });
+  return { success: true, filas: out };
+}
+// filas: [{ codigoUnidad, segmento, serie, placas, aseguradora, poliza, inciso, vigencia, esBanorte }]
+async function aplicarInventarioSeguros(code, nombreUsuario, filas) {
+  await requierePermisoPanel_(code, nombreUsuario, 'seguros', 'capturar');
+  const lista = (Array.isArray(filas) ? filas : []).slice(0, 3000).filter((f) => f && segTexto_(f.codigoUnidad, 50));
+  if (!lista.length) return { success: false, error: 'No hay unidades ligadas para aplicar.' };
+  const cods = Array.from(new Set(lista.map((f) => segTexto_(f.codigoUnidad, 50))));
+  const [maq] = await pool.query('SELECT codigo_unidad, serie, placa, segmento, empresa_id FROM maquinaria WHERE codigo_unidad IN (?)', [cods]);
+  const porCod = new Map(maq.map((x) => [x.codigo_unidad, x]));
+  const faltan = cods.filter((c) => !porCod.has(c));
+  if (faltan.length) return { success: false, error: 'Estas unidades no están en Maquinaria: ' + faltan.join(', ') };
+  let segmentos = 0, series = 0, placas = 0, polizasNuevas = 0, unidadesEnPoliza = 0;
+  const avisos = [];
+  for (const f of lista) {
+    const c = segTexto_(f.codigoUnidad, 50), m = porCod.get(c);
+    const seg = segTexto_(f.segmento, 20);
+    if (seg && seg !== String(m.segmento || '').trim()) { await pool.query('UPDATE maquinaria SET segmento = ? WHERE codigo_unidad = ?', [seg, c]); m.segmento = seg; segmentos++; }
+    const se = normSerieSeg_(f.serie);
+    if (se.length >= 8 && !normSerieSeg_(m.serie)) { await pool.query('UPDATE maquinaria SET serie = ? WHERE codigo_unidad = ?', [se.slice(0, 50), c]); m.serie = se; series++; }
+    const pl = segTexto_(f.placas, 20);
+    if (pl && !normSerieSeg_(m.placa)) { await pool.query('UPDATE maquinaria SET placa = ? WHERE codigo_unidad = ?', [pl, c]); m.placa = pl; placas++; }
+    // Pólizas que no son de Banorte (las de Banorte se importan de su PDF, con primas)
+    const num = segTexto_(f.poliza, 100);
+    if (!f.esBanorte && num && f.aseguradora) {
+      const fin = segFecha_(f.vigencia);
+      if (!fin) { avisos.push(c + ': la póliza ' + num + ' no trae vigencia; no se dio de alta.'); continue; }
+      const aseg = nombreAseguradora_(f.aseguradora);
+      const pf = fin.split('-').map(Number);
+      const ini = (pf[0] - 1) + '-' + String(pf[1]).padStart(2, '0') + '-' + String(pf[2]).padStart(2, '0');
+      let [[pol]] = await pool.query('SELECT id FROM seguros_polizas WHERE eliminado = 0 AND aseguradora = ? AND numero_poliza = ? ORDER BY vigencia_fin DESC LIMIT 1', [aseg, num]);
+      if (!pol) {
+        const [r] = await pool.query(
+          `INSERT INTO seguros_polizas (aseguradora, numero_poliza, vigencia_inicio, vigencia_fin, empresa_id, observaciones, creado_por, actualizado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [aseg, num, ini, fin, m.empresa_id || null, 'Dada de alta desde el inventario de unidades (vigencia de inicio estimada: un año antes del fin). Captura la prima y el PDF.', segTexto_(nombreUsuario, 255), segTexto_(nombreUsuario, 255)]);
+        pol = { id: r.insertId }; polizasNuevas++;
+        await registrarAuditoria_('seguros_polizas', r.insertId, 'crear', nombreUsuario, aseg + ' ' + num + ' (inventario de unidades)');
+      }
+      const [ins] = await pool.query('INSERT INTO seguros_poliza_unidades (poliza_id, codigo_unidad, inciso, serie_poliza) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE inciso = COALESCE(VALUES(inciso), inciso)',
+        [pol.id, c, segTexto_(f.inciso, 30) || null, se || null]);
+      if (ins.affectedRows === 1) unidadesEnPoliza++;
+    }
+  }
+  await registrarAuditoria_('maquinaria', 'inventario', 'importar_inventario', nombreUsuario, segmentos + ' segmentos, ' + polizasNuevas + ' pólizas nuevas');
+  return { success: true, segmentos, series, placas, polizasNuevas, unidadesEnPoliza, avisos };
+}
+
 // ---- Comparativo: cotización de renovación vs pólizas actuales (nov-2026) ----
 const normSerie_ = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 function diasEntre_(a, b) { const pa = String(a).split('-').map(Number), pb = String(b).split('-').map(Number); return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000); }
@@ -13881,7 +14093,8 @@ module.exports = {
   eliminarPolizaSeguro,
   marcarPagoSeguro,
   guardarSiniestroSeguro,
-  eliminarSiniestroSeguro, guardarCotizacionSeguro, eliminarCotizacionSeguro, getComparativoSeguro,
+  getOrdenesEliminadas, restaurarOrdenEliminada,
+  eliminarSiniestroSeguro, prepararInventarioSeguros, aplicarInventarioSeguros, leerInventarioUnidades_, guardarCotizacionSeguro, eliminarCotizacionSeguro, getComparativoSeguro,
   getVerificaciones,
   guardarVerificacion,
   eliminarVerificacion,

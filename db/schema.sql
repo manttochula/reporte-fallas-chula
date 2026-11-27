@@ -4120,3 +4120,24 @@ CREATE TABLE IF NOT EXISTS seguros_cotizaciones (
   creado_por      VARCHAR(255) DEFAULT NULL,
   creado_en       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- Órdenes eliminadas (nov-2026, Carlos): al eliminar una orden se guarda
+-- una copia completa (reportes + mantenimiento_ordenes + reportes_fotos) con
+-- el motivo, quién y cuándo, para consultarla y poder restaurarla.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ordenes_eliminadas (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  orden          VARCHAR(20)  NOT NULL,
+  unidad         VARCHAR(255) DEFAULT NULL,
+  huerta         VARCHAR(255) DEFAULT NULL,
+  descripcion    TEXT         DEFAULT NULL,
+  seccion        VARCHAR(20)  DEFAULT NULL,
+  motivo         TEXT         DEFAULT NULL,
+  datos          LONGTEXT     DEFAULT NULL,
+  eliminado_por  VARCHAR(255) DEFAULT NULL,
+  eliminado_en   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  restaurado_por VARCHAR(255) DEFAULT NULL,
+  restaurado_en  DATETIME     DEFAULT NULL,
+  INDEX idx_ord_elim_orden (orden)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

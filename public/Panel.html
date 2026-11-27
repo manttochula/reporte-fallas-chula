@@ -4692,7 +4692,8 @@
           <button type="button" class="seg-btn-claro" id="seg-pol-uni-agregar">Agregar</button>
         </div>
         <datalist id="seg-dl-unidades"></datalist>
-        <table class="seg-mini"><thead><tr><th>Unidad</th><th style="width:150px;">Placa / serie</th><th style="width:90px;">Inciso</th><th style="width:130px;">Suma asegurada</th><th style="width:70px;"></th></tr></thead><tbody id="seg-pol-uni-body"></tbody></table>
+        <table class="seg-mini"><thead><tr><th>Unidad</th><th style="width:150px;">Placa / serie</th><th style="width:90px;">Inciso</th><th style="width:120px;">Prima</th><th style="width:130px;">Suma asegurada</th><th style="width:70px;"></th></tr></thead><tbody id="seg-pol-uni-body"></tbody></table>
+        <div id="seg-pol-uni-suma" style="font-size:12px;color:#666;margin-top:4px;"></div>
 
         <div class="seg-sec">Costo y pagos</div>
         <div class="maq-field-row">
@@ -21506,9 +21507,22 @@ function segRenderPolUnidades_(){
   b.innerHTML = SEG_POL_UNIDADES.length ? SEG_POL_UNIDADES.map(function(u, i){
     const x = segUnidad_(u.codigoUnidad);
     return '<tr><td><b>' + escapeHtml(u.codigoUnidad) + '</b> <span style="color:#666;">' + escapeHtml(x ? x.unidad : '') + '</span></td><td>' + escapeHtml(x ? [x.placa, x.serie].filter(Boolean).join(' / ') : '') + '</td>'
-      + '<td><input type="text" data-i="' + i + '" data-k="inciso" value="' + escapeHtml(u.inciso || '') + '"></td><td><input type="number" step="0.01" min="0" data-i="' + i + '" data-k="sumaAsegurada" value="' + (u.sumaAsegurada === null || u.sumaAsegurada === undefined ? '' : u.sumaAsegurada) + '"></td>'
+      + '<td><input type="text" data-i="' + i + '" data-k="inciso" value="' + escapeHtml(u.inciso || '') + '"></td>'
+      + '<td><input type="number" step="0.01" min="0" data-i="' + i + '" data-k="prima" title="Prima total de este vehículo (inciso)" value="' + (u.prima === null || u.prima === undefined ? '' : u.prima) + '"></td>'
+      + '<td><input type="number" step="0.01" min="0" data-i="' + i + '" data-k="sumaAsegurada" value="' + (u.sumaAsegurada === null || u.sumaAsegurada === undefined ? '' : u.sumaAsegurada) + '"></td>'
       + '<td><button type="button" class="seg-quitar" data-quitar-uni="' + i + '">Quitar</button></td></tr>';
-  }).join('') : '<tr><td colspan="5" style="color:#888;">Agrega al menos una unidad.</td></tr>';
+  }).join('') : '<tr><td colspan="6" style="color:#888;">Agrega al menos una unidad.</td></tr>';
+  segPolSumaPrimas_();
+}
+// Nov-2026: prima por inciso editable; abajo la suma, con opción de pasarla a la prima total.
+function segPolSumaPrimas_(){
+  const el = document.getElementById('seg-pol-uni-suma'); if(!el) return;
+  const con = SEG_POL_UNIDADES.filter(function(u){ return u.prima !== null && u.prima !== undefined && String(u.prima).trim() !== ''; });
+  if(!con.length){ el.innerHTML = ''; return; }
+  const suma = con.reduce(function(a, u){ return a + Number(u.prima || 0); }, 0);
+  el.innerHTML = 'Suma de primas de los vehículos: <b>' + segMoney_(suma) + '</b>' + (con.length < SEG_POL_UNIDADES.length ? ' (' + con.length + ' de ' + SEG_POL_UNIDADES.length + ' con prima)' : '')
+    + ' · <a href="#" id="seg-pol-usar-suma">usarla como prima total</a>';
+  document.getElementById('seg-pol-usar-suma').addEventListener('click', function(e){ e.preventDefault(); const pr = document.getElementById('seg-pol-prima'); pr.value = suma.toFixed(2); pr.dispatchEvent(new Event('input', { bubbles: true })); pr.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 function segRenderPolPagos_(){
   const b = document.getElementById('seg-pol-pagos-body');
@@ -21550,7 +21564,7 @@ function segAbrirPoliza_(p, opciones){
   document.getElementById('seg-pol-cancelada').checked = !!(p && !renovar && p.cancelada);
   document.getElementById('seg-pol-pdf').value = '';
   document.getElementById('seg-pol-pdf-actual').innerHTML = p && !renovar && p.pdfUrl ? 'Actual: <a href="' + escapeHtml(p.pdfUrl) + '" target="_blank" rel="noopener">ver PDF</a> (sube otro solo si quieres reemplazarlo)' : '';
-  SEG_POL_UNIDADES = p ? p.unidades.map(function(u){ return { codigoUnidad: u.codigoUnidad, inciso: u.inciso, sumaAsegurada: renovar ? null : u.sumaAsegurada }; }) : (opciones.codigos || []).map(function(c){ return { codigoUnidad: c, inciso: '', sumaAsegurada: null }; });
+  SEG_POL_UNIDADES = p ? p.unidades.map(function(u){ return { codigoUnidad: u.codigoUnidad, inciso: u.inciso, sumaAsegurada: renovar ? null : u.sumaAsegurada, prima: renovar ? null : u.prima }; }) : (opciones.codigos || []).map(function(c){ return { codigoUnidad: c, inciso: '', sumaAsegurada: null }; });
   SEG_POL_PAGOS = p && !renovar ? p.pagos.map(function(x){ return Object.assign({}, x); }) : [];
   segRenderPolUnidades_(); segRenderPolPagos_();
   const st = document.getElementById('seg-pol-status'); st.textContent = ''; st.className = 'maq-modal-status';
@@ -22219,6 +22233,7 @@ document.getElementById('seg-pol-uni-buscar').addEventListener('keydown', functi
 document.getElementById('seg-pol-uni-body').addEventListener('input', function(e){
   const i = e.target.getAttribute('data-i'); if(i === null) return;
   SEG_POL_UNIDADES[Number(i)][e.target.getAttribute('data-k')] = e.target.value;
+  if(e.target.getAttribute('data-k') === 'prima') segPolSumaPrimas_();
 });
 document.getElementById('seg-pol-uni-body').addEventListener('click', function(e){
   const q = e.target.getAttribute('data-quitar-uni'); if(q === null) return;

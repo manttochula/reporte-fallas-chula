@@ -13164,8 +13164,12 @@ async function guardarPolizaSeguro(code, nombreUsuario, datos) {
   const unidades = codigos.map((c) => {
     const u = datos.unidades.find((x) => segTexto_(x && x.codigoUnidad, 50) === c) || {};
     const suma = segNum_(u.sumaAsegurada);
-    return { codigo: c, inciso: segTexto_(u.inciso, 30) || null, suma: Number.isNaN(suma) ? null : suma };
+    // Nov-2026: prima por inciso editable en el Panel (si no viene, se conserva la que tenía).
+    const tienePrima = Object.prototype.hasOwnProperty.call(u, 'prima');
+    const pr = tienePrima ? segNum_(u.prima) : null;
+    return { codigo: c, inciso: segTexto_(u.inciso, 30) || null, suma: Number.isNaN(suma) ? null : suma, tienePrima, prima: Number.isNaN(pr) || (pr !== null && pr < 0) ? NaN : pr };
   });
+  if (unidades.some((u) => u.tienePrima && Number.isNaN(u.prima))) return { success: false, error: 'La prima de cada vehículo debe ser un número (o vacía).' };
   // Pagos
   const pagos = [];
   for (const x of (Array.isArray(datos.pagos) ? datos.pagos : [])) {
@@ -13208,7 +13212,7 @@ async function guardarPolizaSeguro(code, nombreUsuario, datos) {
     await conn.query('DELETE FROM seguros_poliza_unidades WHERE poliza_id = ?', [polizaId]);
     await conn.query('INSERT INTO seguros_poliza_unidades (poliza_id, codigo_unidad, inciso, suma_asegurada, prima, alta, pdf_url, descripcion_poliza, serie_poliza) VALUES ?', [unidades.map((u) => {
       const pv = prevUni.find((x) => x.codigo_unidad === u.codigo) || {};
-      return [polizaId, u.codigo, u.inciso, u.suma, pv.prima === undefined ? null : pv.prima, pv.alta || null, pv.pdf_url || null, pv.descripcion_poliza || null, pv.serie_poliza || null];
+      return [polizaId, u.codigo, u.inciso, u.suma, u.tienePrima ? u.prima : (pv.prima === undefined ? null : pv.prima), pv.alta || null, pv.pdf_url || null, pv.descripcion_poliza || null, pv.serie_poliza || null];
     })]);
     // Pagos: se reemplaza el calendario; los ya pagados conservan quién los marcó.
     const [antes] = await conn.query('SELECT id, pagado, marcado_por FROM seguros_pagos WHERE poliza_id = ?', [polizaId]);
